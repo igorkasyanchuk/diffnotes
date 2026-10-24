@@ -1,16 +1,24 @@
-// Talks to the Reviews42 server for the content script (it holds the token; pages never see it).
-const settings = () => chrome.storage.local.get(['server', 'token'])
+// Talks to the Reviews42 servers for the content script (it holds the tokens; pages never see them).
+// storage.local.servers: [{server, token, user}], one per connected server.
+async function servers() {
+  const s = await chrome.storage.local.get(['servers', 'server', 'token', 'user'])
+  if (s.servers) return s.servers
+  // single-server settings of the first release
+  if (!s.server || !s.token) return []
+  const list = [{ server: s.server, token: s.token, user: s.user }]
+  await chrome.storage.local.set({ servers: list })
+  await chrome.storage.local.remove(['server', 'token', 'user'])
+  return list
+}
 
-async function call(path) {
-  const { server, token } = await settings()
-  if (!server || !token) return { error: 'not connected' }
+async function call({ server, token }, path) {
   // a network or permission failure throws; say so instead of showing nothing
-  const res = await fetch(server + path, { headers: { authorization: `Bearer ${token}` } })
-    .catch(() => null)
-  if (!res) return { error: `can't reach ${server}: open the Reviews42 popup and connect again` }
+  const res = await fetch(server + path, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+  const host = new URL(server).host
+  if (!res) return { error: `can't reach ${host}: open the Reviews42 popup and connect it again` }
   if (res.status === 404) return { none: true }
-  if (res.status === 401) return { error: 'the token was rejected: open the Reviews42 popup and connect with a new one' }
-  if (!res.ok) return { error: `server answered HTTP ${res.status}` }
+  if (res.status === 401) return { error: `${host} rejected the token: connect it again with a new one` }
+  if (!res.ok) return { error: `${host} answered HTTP ${res.status}` }
   return res
 }
 
@@ -25,23 +33,30 @@ async function dataUrl(blob) {
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   ;(async () => {
     if (msg.type === 'pull') {
-      const res = await call(`/api/v1/pulls/${msg.repo}/${msg.number}`)
-      if (!(res instanceof Response)) {
-        chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
-        return res
-      }
-      const pull = await res.json()
+      // every connected server is asked; a PR can have notes on more than one
+      const list = await servers()
+      const results = await Promise.all(list.map(async (s) => {
+        const res = await call(s, `/api/v1/pulls/${msg.repo}/${msg.number}`)
+        return res instanceof Response ? { pull: { ...(await res.json()), server: s.server } } : res
+      }))
+      const pulls = results.filter((r) => r.pull).map((r) => r.pull), errors = results.filter((r) => r.error).map((r) => r.error)
+      const count = pulls.reduce((n, p) => n + p.annotations.length, 0)
       chrome.action.setBadgeBackgroundColor({ color: '#e8622a' })
-      chrome.action.setBadgeText({ tabId: sender.tab.id, text: String(pull.annotations.length) })
-      return { pull, server: (await settings()).server }
+      chrome.action.setBadgeText({ tabId: sender.tab.id, text: count ? String(count) : '' })
+      return { pulls, errors, connected: list.length }
     }
     if (msg.type === 'clear') return chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
-    // exactly /files/<pull>/<name>: a `..` segment would send the token to any other API path
+    // exactly /files/<pull>/<name> on a connected server: a `..` segment would send the token to any other API path
     if (msg.type === 'file' && /^\/files\/[\w-]+\/[\w-][\w.-]*$/.test(msg.url)) {
-      const res = await call(msg.url)
+      const s = (await servers()).find((x) => x.server === msg.server)
+      if (!s) return { error: 'not connected' }
+      const res = await call(s, msg.url)
       return res instanceof Response ? { url: await dataUrl(await res.blob()) } : res
     }
     return { error: 'unknown message' }
   })().then(reply, (e) => reply({ error: String(e.message ?? e) }))
   return true
 })
+
+// move first-release settings over as soon as the extension updates
+chrome.runtime.onInstalled.addListener(() => { servers() })

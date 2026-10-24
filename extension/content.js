@@ -2,7 +2,7 @@
 // GitHub renders more of the diff (it renders lazily) and only adds what is missing.
 ;(() => {
   const PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/(changes|files)/
-  let current = '', pull = null, observer = null, timer = 0
+  let current = '', pull = null, error = null, observer = null, timer = 0
   const collapsed = new Map() // annotation index → collapsed; survives re-renders
   const images = new Map() // /files/… → data: URL (or a promise of it)
 
@@ -18,7 +18,7 @@
     head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/[`*_#>]/g, '').slice(0, 120)), el('span', 'r42-where', where(a)))
     const body = el('div', 'r42-body r42-md')
     body.innerHTML = r42Markdown(a.body) // escaped by r42Markdown; only http(s) and relative URLs survive
-    loadImages(body)
+    loadImages(body, a.server)
     const set = (c) => { collapsed.set(i, c); box.classList.toggle('r42-collapsed', c) }
     set(collapsed.get(i) ?? false)
     head.addEventListener('click', () => set(!box.classList.contains('r42-collapsed')))
@@ -26,13 +26,15 @@
     return box
   }
 
-  function loadImages(root) {
+  // server: the Reviews42 server the Markdown came from; its /files/… are fetched by the background with its token
+  function loadImages(root, server) {
     root.querySelectorAll('img[data-r42-src]').forEach((img) => {
       const src = img.dataset.r42Src
       img.removeAttribute('src')
       if (!src.startsWith('/files/')) { img.src = src; return }
-      if (!images.has(src)) images.set(src, chrome.runtime.sendMessage({ type: 'file', url: src }).then((r) => r.url))
-      Promise.resolve(images.get(src)).then((u) => { if (u) img.src = u })
+      const k = server + src
+      if (!images.has(k)) images.set(k, chrome.runtime.sendMessage({ type: 'file', server, url: src }).then((r) => r.url))
+      images.get(k).then((u) => { if (u) img.src = u })
     })
     root.querySelectorAll('a[href^="/files/"]').forEach((a) => a.removeAttribute('href'))
   }
@@ -65,6 +67,7 @@
   }
 
   function apply() {
+    if (error) return renderBox()
     if (!pull) return
     const placed = new Set()
     for (const f of files()) {
@@ -87,40 +90,59 @@
         placed.add(i)
       })
     }
-    renderPanel(placed)
+    renderBox(placed)
   }
 
-  function renderPanel(placed) {
-    let panel = document.getElementById('r42-panel')
-    if (!panel) {
-      panel = el('div')
-      panel.id = 'r42-panel'
-      document.body.append(panel)
+  // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when GitHub re-renders.
+  function place(box) {
+    const first = files()[0]?.box
+    if (first && box.nextElementSibling !== first) first.before(box)
+  }
+
+  function renderBox(placed) {
+    let box = document.getElementById('r42-box')
+    if (!box) { box = el('div'); box.id = 'r42-box' }
+    const missing = error ? [] : pull.annotations.map((a, i) => [a, i]).filter(([, i]) => !placed.has(i))
+    const key = error ?? `${pull.pulls.map((p) => p.id)}:${pull.annotations.length}:${missing.map(([, i]) => i).join(',')}`
+    if (box.dataset.key !== key) {
+      box.dataset.key = key
+      box.replaceChildren(...(error ? [errorBar()] : boxContent(box, missing)))
     }
-    const missing = pull.annotations.map((a, i) => [a, i]).filter(([, i]) => !placed.has(i))
-    const key = `${pull.id}:${pull.annotations.length}:${missing.map(([, i]) => i).join(',')}`
-    if (panel.dataset.key === key) return
-    panel.dataset.key = key
-    panel.replaceChildren()
+    place(box)
+  }
+
+  const errorBar = () => {
     const bar = el('div', 'r42-bar')
-    const toggle = el('button', 'r42-link', panel.classList.contains('r42-min') ? '▴' : '▾')
-    toggle.addEventListener('click', () => { panel.classList.toggle('r42-min'); toggle.textContent = panel.classList.contains('r42-min') ? '▴' : '▾' })
+    bar.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-hint', error))
+    return bar
+  }
+
+  function boxContent(box, missing) {
+    const bar = el('div', 'r42-bar')
+    const title = el('button', 'r42-head r42-box-title')
+    title.type = 'button'
+    title.append(el('span', 'r42-badge', 'R42'), el('b', '', `Reviews42 · ${pull.annotations.length} notes`))
+    title.addEventListener('click', () => box.classList.toggle('r42-collapsed'))
     const all = (c) => () => { pull.annotations.forEach((_, i) => collapsed.set(i, c)); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)) }
     const expand = el('button', 'r42-link', 'expand all'), collapse = el('button', 'r42-link', 'collapse all')
     expand.addEventListener('click', all(false))
     collapse.addEventListener('click', all(true))
-    const open = el('a', 'r42-link', 'open in Reviews42')
-    open.href = `${pull.server}/pulls/${pull.id}`
-    open.target = '_blank'
-    bar.append(el('b', '', `Reviews42 · ${pull.annotations.length} notes`), expand, collapse, open, toggle)
-    panel.append(bar)
-    const body = el('div', 'r42-panel-body')
-    if (pull.summary) {
+    const many = pull.pulls.length > 1
+    const opens = pull.pulls.map((p) => {
+      const open = el('a', 'r42-link', many ? `open on ${new URL(p.server).host}` : 'open in Reviews42')
+      open.href = `${p.server}/pulls/${p.id}`
+      open.target = '_blank'
+      return open
+    })
+    bar.append(title, expand, collapse, ...opens)
+    const body = el('div', 'r42-box-body')
+    for (const p of pull.pulls.filter((x) => x.summary)) {
       const s = el('div', 'r42-md r42-summary')
-      s.innerHTML = r42Markdown(pull.summary)
-      loadImages(s)
+      s.innerHTML = (many ? `<h6>${new URL(p.server).host}</h6>` : '') + r42Markdown(p.summary)
+      loadImages(s, p.server)
       body.append(s)
     }
+    for (const e of pull.errors) body.append(el('div', 'r42-hint', e))
     if (missing.length) {
       body.append(el('div', 'r42-hint', `${missing.length} not shown in the diff yet (file collapsed, not loaded, or the line changed since):`))
       for (const [a, i] of missing) {
@@ -129,7 +151,7 @@
         body.append(n)
       }
     }
-    if (body.childElementCount) panel.append(body)
+    return body.childElementCount ? [bar, body] : [bar]
   }
 
   // click an image to preview it full size
@@ -144,18 +166,11 @@
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('.r42-lightbox')?.remove() })
 
-  function showError(text) {
-    const panel = el('div', 'r42-bar')
-    panel.id = 'r42-panel'
-    panel.append(el('b', '', 'Reviews42'), el('span', 'r42-hint', text))
-    document.body.append(panel)
-  }
-
   function clear() {
     observer?.disconnect()
     observer = null
-    pull = null
-    document.querySelectorAll('.r42-row, .r42-file, #r42-panel').forEach((n) => n.remove())
+    pull = error = null
+    document.querySelectorAll('.r42-row, .r42-file, #r42-box').forEach((n) => n.remove())
   }
 
   async function check() {
@@ -166,9 +181,10 @@
     if (!m) return void chrome.runtime.sendMessage({ type: 'clear' }).catch(() => {})
     const res = await chrome.runtime.sendMessage({ type: 'pull', repo: `${m[1]}/${m[2]}`, number: m[3] }).catch(() => null)
     if (current !== key) return
-    if (res?.error && res.error !== 'not connected') return showError(res.error)
-    if (!res?.pull) return
-    pull = { ...res.pull, server: res.server }
+    if (res?.pulls?.length) {
+      pull = { pulls: res.pulls, errors: res.errors, annotations: res.pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server }))) }
+    } else if (res?.errors?.length) error = res.errors.join(' · ')
+    else return
     collapsed.clear()
     apply()
     observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(apply, 200) })

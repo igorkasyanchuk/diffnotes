@@ -8,7 +8,7 @@ Three parts, one repo:
 |---|---|---|
 | Web app + API | `server/`, `web/` | Accounts (teams), members by invitation, repositories, tokens, annotated PRs. Annotations expire after `RETENTION_DAYS`. |
 | Agent skill | `skill/reviews42/SKILL.md` | Teaches Claude Code, Codex, Cursor and other Agent Skills tools to upload per-file and per-line notes, screenshots and files for a PR. |
-| Chrome extension | `extension/` | Connect once with a token; on a PR's changes view it draws the notes next to the diff (expand, collapse, image preview). |
+| Chrome extension | `extension/` | Connect one or more servers with a token each; on a PR's changes view it draws their notes next to the diff (expand, collapse, image preview) with a summary box above the files. |
 
 Self-hosted. Licensed under [FSL-1.1-ALv2](LICENSE.md): free to use, modify and self-host, also commercially;
 you may not offer it as a competing product or service. Each release becomes Apache-2.0 two years after it ships.
