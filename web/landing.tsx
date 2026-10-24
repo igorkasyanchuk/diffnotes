@@ -17,13 +17,13 @@ export const Code = ({ text, prompt }: { text: string; prompt?: boolean }) =>
 const BENEFITS: [string, string][] = [
   ['review faster', 'Reviewers read why each block changed before reading how. Less back-and-forth, fewer “what does this do?” comments.'],
   ['context from the author', 'The agent that wrote the code explains it while it still remembers why: decisions, trade-offs, what was left out.'],
-  ['screenshots and live demos', 'Images next to the lines that caused them, a before / after slider for UI changes, and small HTML demos you can click, locked in a sandbox.'],
+  ['screenshots, recordings, demos', 'Images next to the lines that caused them, a before / after slider for UI changes, short screen recordings of a flow, and small HTML demos you can click, locked in a sandbox.'],
   ['where to look hardest', 'The agent flags the risky parts (money, auth, migrations) and the boring ones. Reviewers get a short list at the top and jump straight there.'],
   ['diagrams in the diff', 'A flow or a state change drawn right above the code that implements it, from a Mermaid flowchart the agent writes. No library, no network.'],
-  ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones. The author removes any note in place.'],
+  ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones, and reviewers see what changed since their last visit.'],
   ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
   ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
-  ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools. Connect several servers in one browser for different teams or clients.'],
+  ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 
 export function Landing({ signedIn }: { signedIn: boolean }) {
@@ -59,7 +59,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         <div className="lp-step"><span className="lp-time">~1 min</span><b>run the server</b></div>
         <p className="hint">One container with a volume. Free and open source (MIT), also for commercial use.</p>
         <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com diffnotes'} />
-        <p className="hint">Or any Docker host (Coolify, Dokku, a VPS) from the Dockerfile. The first admin password is printed in the logs.</p>
+        <p className="hint">Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs.</p>
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>give your agent the skill</b></div>
@@ -68,7 +68,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
-        <p className="hint">Load it in Chrome, paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
+        <p className="hint">Load it in Chrome or Firefox, paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
       </li>
     </ol>
     <p>{cta}</p>

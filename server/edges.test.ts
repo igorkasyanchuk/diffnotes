@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { client, png } from './testkit.ts'
+import { client, png, webm } from './testkit.ts'
 
 // the edges app.test.ts's story doesn't walk through: limits, quotas, refusals, server errors, the static pages
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-edges-'))
@@ -13,6 +13,10 @@ process.env.MAX_BODY_KB = '1'
 process.env.MAX_PULL_MB = '0.05'
 process.env.MAX_ACCOUNT_MB = '0.01'
 process.env.MAX_PULLS = '2'
+process.env.MAX_FILE_MB = '0.008' // 8388 bytes
+process.env.MAX_VIDEO_MB = '0.012' // 12582 bytes: over the account quota, so that one still shows
+process.env.MAX_FILES = '3'
+process.env.MAX_ANNOTATIONS = 'many' // not a number: the default (500), never "no limit"
 process.env.BUGSINK_DSN = 'https://key@bugs.example/9'
 process.env.UMAMI_SCRIPT = 'https://stats.example/script.js'
 process.env.UMAMI_WEBSITE_ID = 'site-1'
@@ -25,7 +29,7 @@ afterAll(() => { if (!built) fs.rmSync(index) })
 
 const { app, recordFailure, throttle } = await import('./app.ts')
 const { db, setSetting } = await import('./db.ts')
-const { call, login } = client(app)
+const { call, login, mcp } = client(app)
 
 let admin = '', token = '', accountId = '', devId = '', dev = ''
 const invite = async (account: string, email: string, password: string, role = 'member') => {
@@ -63,12 +67,20 @@ describe('pages', () => {
     expect(dash.res.headers.get('x-robots-tag')).toBe('noindex')
     expect(dash.data).not.toContain('stats.example')
     expect(dash.res.headers.get('content-security-policy')).not.toContain('stats.example')
+    expect(dash.res.headers.get('content-security-policy')).toContain("media-src 'self';") // notes' screen recordings
     expect((await call('/index.html')).status).toBe(200)
     expect((await call('/missing.js')).status).toBe(404)
     expect((await call('/files/nope')).status).toBe(404)
+    expect((await call('/.well-known/oauth-authorization-server')).status).toBe(404) // never the app's HTML
     expect((await call('/healthz')).data).toBe('ok')
     expect((await call('/robots.txt')).data).toContain('Sitemap: https://dn.example/sitemap.xml')
     expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/</loc>')
+    expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/privacy</loc>')
+    const privacy = await call('/privacy')
+    expect(privacy.data).toContain('<link rel="canonical" href="https://dn.example/privacy"')
+    expect(privacy.status).toBe(200)
+    expect(privacy.res.headers.get('x-robots-tag')).toBeNull()
+    expect(privacy.data).not.toContain('stats.example')
     expect((await call('/install.sh')).data).toContain('https://dn.example/skill/SKILL.md')
     expect((await call('/skill/SKILL.md')).data).not.toContain('{{HOST}}')
   })
@@ -148,7 +160,11 @@ describe('uploads', () => {
     form.set('payload', '{nope')
     expect((await call('/api/v1/pulls/o/n/1', { token, form, method: 'PUT' })).data.error).toBe('payload is not JSON')
     expect((await upload(1, { annotations: Array.from({ length: 501 }, () => note) })).status).toBe(413)
-    expect((await upload(1, { annotations: [] }, Array.from({ length: 31 }, (_, i) => [`${i}.png`, png()] as [string, Uint8Array]))).status).toBe(413)
+    expect((await upload(1, { annotations: [] }, Array.from({ length: 4 }, (_, i) => [`${i}.png`, png()] as [string, Uint8Array]))).data.error).toBe('At most 3 files per pull request')
+    // MAX_FILE_MB and MAX_VIDEO_MB: a video may be bigger than other files
+    expect((await upload(1, { annotations: [] }, [['a.png', png(9000)]])).data.error).toBe('Files up to 0.008MB each, videos (mp4, webm) up to 0.012MB')
+    expect((await upload(1, { annotations: [] }, [['a.webm', webm(13_000)]])).status).toBe(413)
+    expect((await upload(1, { annotations: [note] }, [['a.webm', webm(9000)]])).status).toBe(200)
     // over MAX_BODY_KB as JSON, over MAX_PULL_MB as any body
     const big = { annotations: [{ path: 'a', body: 'x'.repeat(2000) }] }
     expect((await call('/api/v1/pulls/o/n/1', { token, method: 'PUT', body: big, headers: { 'content-length': String(JSON.stringify(big).length) } })).status).toBe(413)
@@ -156,10 +172,22 @@ describe('uploads', () => {
   })
 
   it('keeps each account within its quotas', async () => {
-    expect((await upload(1, { annotations: [] }, [['big.png', png(11_000)]])).status).toBe(413)
+    expect((await upload(1, { annotations: [] }, [['big.webm', webm(11_000)]])).data.error).toMatch(/files are over 0.01MB/)
     expect((await upload(2, { annotations: [note] })).status).toBe(200)
     expect((await upload(3, { annotations: [note] })).data.error).toMatch(/2 pull requests with notes/)
     expect((await upload(2, { annotations: [note, note] })).status).toBe(200)
+  })
+
+  it('holds MCP uploads to the same limits', async () => {
+    const tool = async (args: unknown) => (await mcp('tools/call', { name: 'upload_notes', arguments: { repo: 'o/n', number: 1, ...args as object } }, token)).data.result.content[0].text
+    const b64 = (n: number) => Buffer.from(png(n)).toString('base64')
+    expect(await tool({ payload: { annotations: [{ path: 'a', body: 'x'.repeat(2000) }] } })).toBe('payload is over 1 KB')
+    expect(await tool({ payload: { annotations: [] }, files: Array.from({ length: 4 }, (_, i) => ({ name: `${i}.png`, base64: b64(16) })) })).toBe('At most 3 files per pull request')
+    expect(await tool({ payload: { annotations: [] }, files: [{ name: 'a.png', base64: b64(9000) }] })).toMatch(/^Files up to 0.008MB/)
+    // the request itself: MAX_PULL_MB of files as base64 plus MAX_BODY_KB
+    const huge = await mcp('tools/call', { name: 'upload_notes', arguments: { repo: 'o/n', number: 1, payload: { annotations: [] }, files: [{ name: 'a.png', base64: 'A'.repeat(80_000) }] } }, token)
+    expect([huge.status, huge.data.error.message]).toEqual([413, 'Too large'])
+    expect((await call('/skill/SKILL.md')).data).toContain('Up to **0.008 MB each** (videos 0.012 MB),\n  3 files and 0.05 MB per PR')
   })
 
   it('answers 404 for what is not there', async () => {

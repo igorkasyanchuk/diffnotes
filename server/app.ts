@@ -19,14 +19,17 @@ import type { User } from './db.ts'
 
 const SECRET = process.env.SESSION_SECRET || sessionSecret()
 const MB = 1024 * 1024
-const MAX_FILE = Number(process.env.MAX_FILE_MB ?? 1) * MB
-const MAX_PULL = Number(process.env.MAX_PULL_MB ?? 20) * MB
-const MAX_FILES = 30 // per pull request
-const MAX_BODY = Number(process.env.MAX_BODY_KB ?? 1024) * 1024
-const MAX_ANNOTATIONS = 500
+// a limit from the environment: unset, empty or not a number is the default (NaN would switch the limit off, '' make it 0)
+const limit = (name: string, fallback: number) => { const n = Number(process.env[name] || fallback); return n >= 0 ? n : fallback }
+const MAX_FILE = limit('MAX_FILE_MB', 1) * MB
+const MAX_VIDEO = limit('MAX_VIDEO_MB', 2) * MB // .mp4 / .webm screen recordings
+const MAX_PULL = limit('MAX_PULL_MB', 20) * MB
+const MAX_FILES = limit('MAX_FILES', 30) // per pull request
+const MAX_BODY = limit('MAX_BODY_KB', 1024) * 1024
+const MAX_ANNOTATIONS = limit('MAX_ANNOTATIONS', 500) // per pull request
 const RISKS = ['low', 'medium', 'high'] // an annotation's optional risk: where reviewers should look hardest
-const MAX_ACCOUNT = Number(process.env.MAX_ACCOUNT_MB ?? 1024) * MB // files of all of an account's pull requests
-const MAX_PULLS = Number(process.env.MAX_PULLS ?? 1000) // live pull requests per account
+const MAX_ACCOUNT = limit('MAX_ACCOUNT_MB', 1024) * MB // files of all of an account's pull requests
+const MAX_PULLS = limit('MAX_PULLS', 1000) // live pull requests per account
 const INVITE_DAYS = 7
 const ROOT = path.resolve(import.meta.dirname, '..')
 // without PUBLIC_URL the Host header decides, and it lands in install.sh (shell) and HTML: only a plain host[:port] passes
@@ -35,6 +38,7 @@ const host = (c: Context) => {
   const origin = new URL(c.req.url).origin
   return /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin) ? origin : 'http://localhost'
 }
+const VERSION: string = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 const DIST = path.relative(process.cwd(), path.join(ROOT, 'dist'))
 const DUMMY_HASH = hashPassword(randomUUID())
 
@@ -131,8 +135,8 @@ const USER_COLS = 'u.id, u.email, u.name, u.admin'
 async function currentUser(c: Context): Promise<User | undefined> {
   const bearer = c.req.header('authorization')?.match(/^Bearer (\S+)$/)?.[1]
   if (bearer) {
-    // tokens are for the skill and the extension: annotations and files only, never tokens, passwords or /admin
-    if (!/^\/(api\/v1|files)\//.test(c.req.path)) return
+    // tokens are for the skill, MCP clients and the extension: annotations and files only, never tokens, passwords or /admin
+    if (!/^\/(api\/v1\/|files\/|mcp$)/.test(c.req.path)) return
     const user = db.prepare(`select ${USER_COLS}, t.id as token_id from tokens t join users u on u.id = t.user_id where t.hash = ?`)
       .get(sha256(bearer)) as (User & { token_id: string }) | undefined
     if (!user) return
@@ -247,11 +251,31 @@ app.post('/api/invites/:token/accept', async (c) => {
 
 app.use('/api/*', auth)
 
-app.put('/api/password', async (c) => {
-  const body = await json(c), user = c.get('user')
+// the signed-in user's own password (changing it, deleting yourself): 10 wrong ones in 10 minutes
+function checkPassword(user: User, password: unknown, wrong: string) {
   const row = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
   if (throttle(`pw:${user.id}`, 10, 600_000)) fail(429, 'Too many attempts, wait a bit')
-  if (!verifyPassword(String(body.current ?? ''), row.password)) { recordFailure(`pw:${user.id}`); fail(401, 'Current password is wrong') }
+  if (!verifyPassword(String(password ?? ''), row.password)) { recordFailure(`pw:${user.id}`); fail(401, wrong) }
+}
+
+// delete yourself: sessions, tokens and memberships go with the user (cascade), the accounts you own with everything in
+// them; notes you uploaded to other accounts stay (their uploader becomes unknown). The password confirms it.
+app.delete('/api/me', async (c) => {
+  const body = await json(c), user = c.get('user')
+  checkPassword(user, body.password, 'Password is wrong')
+  if (user.admin && (db.prepare('select count(*) as n from users where admin = 1').get() as { n: number }).n === 1)
+    fail(400, 'You are the only super admin: make another user super admin first, or nobody can run this server')
+  const owned = db.prepare(`select account_id from memberships where user_id = ? and role = 'owner'`).all(user.id) as { account_id: string }[]
+  const dropped = owned.map((o) => dropAccount(o.account_id))
+  db.prepare('delete from users where id = ?').run(user.id)
+  deleteCookie(c, 'sid', { path: '/' })
+  await Promise.all(dropped)
+  return c.json({ ok: true })
+})
+
+app.put('/api/password', async (c) => {
+  const body = await json(c), user = c.get('user')
+  checkPassword(user, body.current, 'Current password is wrong')
   const next = String(body.password ?? '')
   if (next.length < 8) fail(400, 'Password needs at least 8 characters')
   db.prepare('update users set password = ? where id = ?').run(hashPassword(next), user.id)
@@ -379,15 +403,19 @@ app.put('/api/accounts/:id', async (c) => {
   db.prepare('update accounts set name = ? where id = ?').run(name, id)
   return c.json({ ok: true })
 })
-app.delete('/api/accounts/:id', async (c) => {
-  const id = c.req.param('id'), user = c.get('user')
-  if (role(id, user) !== 'owner' && !user.admin) fail(403, 'Only the owner can delete the account')
+// an account with its repositories, PRs, notes and files (cascade), memberships and invites
+function dropAccount(id: string) {
   const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(id) as { id: string }[]
   // dropPulls deletes the PR rows before its first await; the account goes in the same tick, so no upload can add a PR
   // whose files the cascade would then leave behind, and a slow bucket only delays the response, not the delete
   const dropped = dropPulls(pulls.map((p) => p.id))
   db.prepare('delete from accounts where id = ?').run(id)
-  await dropped
+  return dropped
+}
+app.delete('/api/accounts/:id', async (c) => {
+  const id = c.req.param('id'), user = c.get('user')
+  if (role(id, user) !== 'owner' && !user.admin) fail(403, 'Only the owner can delete the account')
+  await dropAccount(id)
   return c.json({ ok: true })
 })
 
@@ -429,9 +457,11 @@ app.delete('/api/accounts/:id/members/:user', (c) => {
 // gitlab.com/group/sub/project or bitbucket.org/team/app: a host has a dot and a GitHub owner can't, so they never clash.
 const REPO = /^(?:[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?(?:\/[A-Za-z0-9._-]{1,100}){2,20})$/
 const validRepo = (n: string) => REPO.test(n) && !/(^|\/)\.+(\/|$)/.test(n)
-// a pasted URL or clone address works too: https://gitlab.com/group/project.git → gitlab.com/group/project
+// a pasted URL or clone address works too: https://gitlab.com/group/project.git → gitlab.com/group/project, and a PR / MR
+// URL names its repository (…/pull/42/files, …/pull-requests/7; GitLab's /-/ ends the project path: …/-/merge_requests/5, …/-/tree/main)
 export function repoName(s: string) {
-  const [first, ...rest] = s.trim().replace(/^[a-z+]+:\/\/|^git@/i, '').replace(/^([^/:]+):(?!\d)/, '$1/').replace(/(\.git)?\/*$/, '').split('/')
+  const [first, ...rest] = s.trim().replace(/^[a-z+]+:\/\/|^git@/i, '').replace(/^([^/:]+):(?!\d)/, '$1/')
+    .replace(/\/-\/.*$|\/(?:pull|pull-requests)\/\d+(?:[/?#].*)?$/, '').replace(/(\.git)?\/*$/, '').split('/')
   const host = first.includes('.') ? first.toLowerCase() : first
   return (host === 'github.com' || host === 'www.github.com' ? rest : [host, ...rest]).join('/')
 }
@@ -479,21 +509,23 @@ function pullOut(p: Pull, user: User) {
 
 // /api/v1/pulls/<repository>/<number>, where the repository is owner/name or host/path (several segments)
 const PULL_PATH = '/api/v1/pulls/:repo{.+}/:number{[0-9]+}'
-const findPull = (c: Context<Env>) => {
-  const full = repoName(c.req.param('repo') ?? '')
-  const user = c.get('user')
+const findPull = (user: User, repo: string, number: number) => {
+  const full = repoName(repo)
   // a name can be connected in several accounts: yours only (a super admin's own first, then any), the latest upload
   // first, the same order repositoryFor() writes in
   const mine = 'r.account_id in (select account_id from memberships where user_id = ?)'
   const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ? and (? or ${mine})
-    order by ${mine} desc, p.updated_at desc limit 1`).get(full, Number(c.req.param('number')), user.admin, user.id, user.id) as Pull | undefined
+    order by ${mine} desc, p.updated_at desc limit 1`).get(full, number, user.admin, user.id, user.id) as Pull | undefined
   if (!p) fail(404, 'No annotations for this pull request')
   role(p!.account_id, user)
   return p!
 }
 
+// {repo, number}: PULL_PATH's params or an MCP tool's arguments
+const pullOf = (user: User, a: Record<string, unknown>) => findPull(user, String(a.repo ?? ''), Number(a.number))
+
 app.get('/api/v1/me', (c) => c.json({ user: c.get('user') }))
-app.get(PULL_PATH, (c) => c.json(pullOut(findPull(c), c.get('user'))))
+app.get(PULL_PATH, (c) => c.json(pullOut(pullOf(c.get('user'), c.req.param()), c.get('user'))))
 const pullById = (c: Context<Env>, id = c.req.param('id') ?? '') => {
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(id) as Pull | undefined
   if (!p) fail(404, 'Not found')
@@ -501,13 +533,13 @@ const pullById = (c: Context<Env>, id = c.req.param('id') ?? '') => {
   return p!
 }
 app.get('/api/pulls/:id', (c) => c.json(pullOut(pullById(c), c.get('user'))))
-const removeAll = async (c: Context<Env>, p: Pull) => {
-  requireRemove(p, c.get('user'))
+const removeAll = async (user: User, p: Pull) => {
+  requireRemove(p, user)
   await dropPulls([p.id])
-  return c.json({ ok: true })
+  return { ok: true }
 }
 // "delete notes" (web app): by id, so it's always the PR on the page even when its name is connected in several accounts
-app.delete('/api/pulls/:id', (c) => removeAll(c, pullById(c)))
+app.delete('/api/pulls/:id', async (c) => c.json(await removeAll(c.get('user'), pullById(c))))
 // one note, from the extension's "remove" on GitHub, GitLab or Bitbucket; the PR and its files stay
 app.delete('/api/v1/annotations/:id{[0-9]+}', (c) => {
   const id = Number(c.req.param('id'))
@@ -517,29 +549,31 @@ app.delete('/api/v1/annotations/:id{[0-9]+}', (c) => {
   return c.json({ ok: true })
 })
 // ?id=<pull id>: the extension's "remove all notes" names the exact PR it showed (the name can be in several accounts)
-app.delete(PULL_PATH, (c) => {
-  const p = findPull(c)
+app.delete(PULL_PATH, async (c) => {
+  const p = pullOf(c.get('user'), c.req.param())
   if (c.req.query('id') && c.req.query('id') !== p.id) fail(409, 'These notes changed since the page loaded: reload it')
-  return removeAll(c, p)
+  return c.json(await removeAll(c.get('user'), p))
 })
 
 // cut from the front, so a long name keeps the extension fileType() checked (else `….html.png` would be stored as `….html`)
 const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]/g, '_').slice(-100).replace(/^\.+/, '') || 'file'
 
-// Uploads are checked by content, not only by name: images must start with their format's signature, text files must be
+// Uploads are checked by content, not only by name: images and videos must start with their format's signature, text files must be
 // UTF-8 without NUL bytes (html too: it only ever runs as a sandboxed demo). SVG, PDF, archives and anything else are refused.
 const MAGIC: Record<string, (b: Buffer) => boolean> = {
   'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
   'image/gif': (b) => ['GIF87a', 'GIF89a'].includes(b.subarray(0, 6).toString('latin1')),
   'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  'video/mp4': (b) => b.subarray(4, 8).toString('latin1') === 'ftyp',
+  'video/webm': (b) => b.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])),
 }
 const utf8 = new TextDecoder('utf-8', { fatal: true })
 export function fileType(name: string, data: Buffer) {
   const type = EXT_TYPES[path.extname(name).slice(1).toLowerCase()]
-  if (!type) fail(415, `${name}: only png, jpg, gif, webp, csv, md, txt and html files are accepted`)
-  if (type.startsWith('image/')) {
-    if (!MAGIC[type](data)) fail(415, `${name}: not a valid ${type.slice(6)} image`)
+  if (!type) fail(415, `${name}: only png, jpg, gif, webp, mp4, webm, csv, md, txt and html files are accepted`)
+  if (MAGIC[type]) {
+    if (!MAGIC[type](data)) fail(415, `${name}: not a valid ${type.split('/')[1]} ${type.split('/')[0]}`)
   } else {
     try { utf8.decode(data) } catch { fail(415, `${name}: text files must be UTF-8`) }
     if (data.includes(0)) fail(415, `${name}: text files can't contain NUL bytes`)
@@ -564,26 +598,33 @@ function repositoryFor(fullName: string, number: number, user: User): { id: stri
 // Replaces the pull request's annotations and files: re-running the skill after a push is idempotent.
 // Body: JSON, or multipart with a `payload` JSON field plus `file` fields; `attachment:<name>` in Markdown becomes the file's URL.
 app.put(PULL_PATH, async (c) => {
-  const user = c.get('user'), number = Number(c.req.param('number'))
-  if (!Number.isInteger(number) || number < 1) fail(400, 'Bad pull request number')
-  let payload: Record<string, unknown>, files: File[] = []
+  let payload: unknown, files: Upload[] = []
   if ((c.req.header('content-type') ?? '').startsWith('multipart/')) {
     const form = await c.req.formData()
     const raw = form.get('payload') // curl -F payload=@file.json sends a file, -F payload='{…}' a string
-    try { payload = JSON.parse(raw instanceof File ? await raw.text() : String(raw ?? '{}')) ?? {} } catch { fail(400, 'payload is not JSON') }
-    files = form.getAll('file').filter((f): f is File => f instanceof File)
+    try { payload = JSON.parse(raw instanceof File ? await raw.text() : String(raw ?? '{}')) } catch { fail(400, 'payload is not JSON') }
+    // all files together can't pass MAX_PULL: bodyLimit on /api/* already refuses a bigger request
+    files = await Promise.all(form.getAll('file').filter((f): f is File => f instanceof File)
+      .map(async (f) => ({ name: f.name, data: Buffer.from(await f.arrayBuffer()) })))
   } else payload = await json(c)
-  const list = Array.isArray(payload!.annotations) ? payload!.annotations as Record<string, unknown>[] : fail(400, 'annotations must be an array')
+  return c.json(await savePull(c.get('user'), c.req.param('repo') ?? '', Number(c.req.param('number')), payload, files, host(c)))
+})
+
+type Upload = { name: string; data: Buffer }
+// the one upload path, for PUT /api/v1/pulls/… and the MCP tool upload_notes
+async function savePull(user: User, repo: string, number: number, raw: unknown, files: Upload[], origin: string) {
+  if (!Number.isInteger(number) || number < 1) fail(400, 'Bad pull request number')
+  const payload = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const list = Array.isArray(payload.annotations) ? payload.annotations as Record<string, unknown>[] : fail(400, 'annotations must be an array')
   if (list.length > MAX_ANNOTATIONS) fail(413, `At most ${MAX_ANNOTATIONS} annotations`)
   if (files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request`)
-  if (files.some((f) => f.size > MAX_FILE)) fail(413, `Files up to ${MAX_FILE / MB}MB each`)
-  // all files together can't pass MAX_PULL: bodyLimit on /api/* already refuses a bigger request
-  // read and check every file before anything changes (not even a new repository is connected for a refused upload);
-  // also the last await before the transaction, so two uploads can't both see the pull request as new
-  const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
-  const types = files.map((f, i) => fileType(f.name, datas[i]))
+  // every file is checked before anything changes (not even a new repository is connected for a refused upload);
+  // no await from here to the transaction, so two uploads can't both see the pull request as new
+  const datas = files.map((f) => f.data)
+  const types = files.map((f) => fileType(f.name, f.data))
+  if (datas.some((d, i) => d.length > (types[i].startsWith('video/') ? MAX_VIDEO : MAX_FILE))) fail(413, `Files up to ${MAX_FILE / MB}MB each, videos (mp4, webm) up to ${MAX_VIDEO / MB}MB`)
 
-  const fullName = repoName(c.req.param('repo')), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
+  const fullName = repoName(repo), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoFound, number) as { id: string } | undefined
   // account quotas, so one leaked token can't fill the disk: live pull requests, and file bytes (this PR's old files don't count)
   if (!existing && (db.prepare('select count(*) as n from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').get(accountId) as { n: number }).n >= MAX_PULLS)
@@ -620,12 +661,12 @@ app.put(PULL_PATH, async (c) => {
   try {
     if (existing) {
       db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
-        .run(str(payload!.title, 300), str(payload!.head_sha, 64), link(String(payload!.summary ?? '').slice(0, 20_000)), user.id, now(), daysFromNow(RETENTION_DAYS), id)
+        .run(str(payload.title, 300), str(payload.head_sha, 64), link(String(payload.summary ?? '').slice(0, 20_000)), user.id, now(), daysFromNow(RETENTION_DAYS), id)
       db.prepare('delete from annotations where pull_id = ?').run(id)
     } else {
       db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, user_id, created_at, updated_at, expires_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload!.title, 300), str(payload!.head_sha, 64),
-        link(String(payload!.summary ?? '').slice(0, 20_000)), user.id, now(), now(), daysFromNow(RETENTION_DAYS))
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload.title, 300), str(payload.head_sha, 64),
+        link(String(payload.summary ?? '').slice(0, 20_000)), user.id, now(), now(), daysFromNow(RETENTION_DAYS))
     }
     const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r)
@@ -638,7 +679,141 @@ app.put(PULL_PATH, async (c) => {
   // Two uploads of one PR at the same moment can interleave here and orphan the first one's bytes; a per-PR lock if that shows up.
   await store.remove(old)
   await Promise.all(stored.map((name, i) => store.put(backend, id, name, datas[i], types[i])))
-  return c.json({ id, url: `${host(c)}/pulls/${id}`, annotations: rows.length, files: files.length })
+  return { id, url: `${origin}/pulls/${id}`, annotations: rows.length, files: files.length }
+}
+
+// --- MCP: the skill's three calls as tools, so any MCP client (Claude Code, Cursor, Codex) annotates PRs without the skill.
+// Streamable HTTP, stateless: one JSON-RPC 2.0 request per POST /mcp, one JSON reply. Bearer token only, never the cookie.
+// ponytail: no SSE stream, sessions, batches, resources or prompts; tools are all a client needs here
+const MCP_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] // the newest first: the answer when a client asks for another
+const target = {
+  repo: { type: 'string', description: 'The repository: owner/name for GitHub, host/path for GitLab or Bitbucket (gitlab.com/group/project, bitbucket.org/team/repo); a PR URL or clone address works too' },
+  number: { type: 'integer', minimum: 1, description: 'The pull request (merge request) number' },
+}
+const limits = () => `Files: png, jpg, gif, webp (real images) up to ${MAX_FILE / MB} MB each; mp4, webm (short screen recordings) up to ` +
+  `${MAX_VIDEO / MB} MB each; md, csv, txt, html (UTF-8 text) up to ${MAX_FILE / MB} MB each. At most ${MAX_FILES} files and ` +
+  `${MAX_PULL / MB} MB per pull request, ${MAX_ANNOTATIONS} notes. Every file is checked by its content; anything else is refused.`
+const TOOLS = [
+  {
+    name: 'get_notes', title: 'Read DiffNotes notes',
+    description: 'The DiffNotes notes on a pull request: summary, head_sha, annotations (path, line, end_line, side, title, body, risk) and attached files. ' +
+      'Use it before re-annotating after new commits, to keep what still applies. Bodies and the summary link files as /files/…: ' +
+      'every upload replaces all files, so to keep one, attach it again and write it as attachment:<name>. ' +
+      'Errors with "No annotations" when the PR has none.',
+    inputSchema: { type: 'object', properties: target, required: ['repo', 'number'] },
+  },
+  {
+    name: 'upload_notes', title: 'Annotate a pull request',
+    description: 'Upload plain-language notes on a pull request (GitHub PR, GitLab MR, Bitbucket PR) for its reviewers; they see them inside the diff ' +
+      'through the DiffNotes browser extension. Nothing is posted to GitHub, GitLab or Bitbucket. Replaces all of the PR\'s notes and files: ' +
+      'send the full set every time (re-running after a push is safe).\n' +
+      'Rules: notes describe the PR\'s current head commit only (set head_sha to it; re-upload after new commits). One note per changed block ' +
+      '(a function, a hunk), not per line and not one per file; path and line / end_line in the new file (side RIGHT), side LEFT only for removed lines. ' +
+      'Write plain words a reviewer gets without reading the code first: what changed, why, what to check. No praise, no restating the diff. ' +
+      'Never put secrets or private data in notes, titles, summaries or files: API keys, passwords, tokens, private keys, connection strings, ' +
+      '.env values, session cookies, personal or customer data. Crop or blur them out of screenshots and recordings; say "an API key" instead. ' +
+      'risk high / medium / low only where it helps reviewers decide where to look hardest. The summary: two or three sentences, what the PR does and why.\n' +
+      'Markdown in body and summary. Attach files and reference them as attachment:<name>: screenshots ![Checkout on mobile](attachment:checkout.png), ' +
+      'a short screen recording of a flow or animation ![Dragging a card](attachment:drag.webm), two images named …-before.png / …-after.png become a ' +
+      'slider, [report](attachment:report.md) or [timings](attachment:bench.csv) open as previews, [try it](attachment:demo.html) runs a ' +
+      'self-contained demo in a sandbox (no network). ' + limits(),
+    inputSchema: {
+      type: 'object', required: ['repo', 'number', 'payload'],
+      properties: {
+        ...target,
+        payload: {
+          type: 'object', required: ['annotations'], description: 'The notes, like diffnotes.json in the skill',
+          properties: {
+            title: { type: 'string', description: 'The PR title' },
+            head_sha: { type: 'string', description: 'The PR head commit the notes describe' },
+            summary: { type: 'string', description: 'Markdown: what the PR does and why, two or three sentences' },
+            annotations: {
+              type: 'array', maxItems: MAX_ANNOTATIONS,
+              items: {
+                type: 'object', required: ['path', 'body'],
+                properties: {
+                  path: { type: 'string', description: 'File path in the repository' },
+                  line: { type: 'integer', minimum: 1, description: 'First line of the changed block; leave out for a note on the whole file' },
+                  end_line: { type: 'integer', minimum: 1, description: 'Last line of the block' },
+                  side: { type: 'string', enum: ['RIGHT', 'LEFT'], description: 'RIGHT: the new file (default); LEFT: removed lines' },
+                  title: { type: 'string', description: 'A few words' },
+                  body: { type: 'string', description: 'Markdown, plain words' },
+                  risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+                },
+              },
+            },
+          },
+        },
+        files: {
+          type: 'array', maxItems: MAX_FILES, description: 'Attachments, referenced in Markdown as attachment:<name>. ' + limits(),
+          items: {
+            type: 'object', required: ['name', 'base64'],
+            properties: { name: { type: 'string', description: 'File name with its extension, e.g. checkout.png' }, base64: { type: 'string', description: 'The file\'s bytes, base64' } },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: 'delete_notes', title: 'Remove DiffNotes notes',
+    description: 'Removes all notes and files of a pull request, e.g. when they no longer apply. Only their uploader or an account admin can.',
+    inputSchema: { type: 'object', properties: target, required: ['repo', 'number'] },
+  },
+]
+type Args = Record<string, unknown>
+const tools: Record<string, (user: User, a: Args, origin: string) => unknown> = {
+  get_notes: (user, a) => pullOut(pullOf(user, a), user),
+  upload_notes: (user, a, origin) => {
+    // the JSON body has MAX_BODY_KB, like PUT's; the files' share of the request is bounded by bodyLimit below
+    if (JSON.stringify(a.payload ?? null).length > MAX_BODY) fail(413, `payload is over ${MAX_BODY / 1024} KB`)
+    const files = a.files == null ? [] : Array.isArray(a.files) ? a.files as Args[] : fail(400, 'files must be an array')
+    return savePull(user, String(a.repo ?? ''), Number(a.number), a.payload, files.map((f, i) => ({
+      name: str(f?.name, 300) || fail(400, `files[${i}].name is required`),
+      // a data: URL works too (what a model often has at hand); its prefix would decode to garbage bytes
+      data: typeof f?.base64 === 'string' ? Buffer.from(f.base64.replace(/^data:[^,]*,/, ''), 'base64') : fail(400, `files[${i}].base64 is required`),
+    })), origin)
+  },
+  delete_notes: (user, a) => removeAll(user, pullOf(user, a)),
+}
+const rpcError = (c: Context, id: unknown, code: number, message: string, status = 200) =>
+  c.json({ jsonrpc: '2.0', id: id ?? null, error: { code, message } }, status as 200)
+// base64 is 4/3 of the bytes: a full PR's files (MAX_PULL_MB) plus its notes (MAX_BODY_KB)
+app.use('/mcp', bodyLimit({ maxSize: Math.ceil(MAX_PULL * 4 / 3) + MAX_BODY, onError: (c) => rpcError(c, null, -32600, 'Too large', 413) }))
+app.get('/mcp', (c) => c.body(null, 405, { allow: 'POST' })) // no server-to-client stream
+app.post('/mcp', async (c) => {
+  // a browser page on another site (DNS rebinding) can't make calls, even with a token
+  if (c.req.header('origin') && c.req.header('origin') !== host(c)) return rpcError(c, null, -32600, 'Origin not allowed', 403)
+  // only a well-formed Bearer header: anything else (Basic, lowercase bearer) would fall through to the cookie in currentUser()
+  const user = /^Bearer \S+$/.test(c.req.header('authorization') ?? '') ? await currentUser(c) : undefined
+  if (!user) return rpcError(c, null, -32001, 'Send Authorization: Bearer <a DiffNotes token>, made on your account page', 401)
+  const msg = await c.req.json().catch(() => undefined) as Args | undefined
+  if (msg === undefined) return rpcError(c, null, -32700, 'Parse error', 400)
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0') return rpcError(c, null, -32600, 'One JSON-RPC 2.0 message per request')
+  // notifications (initialized, cancelled) and replies to us need no answer
+  if (!('id' in msg) || 'result' in msg || 'error' in msg) return c.body(null, 202)
+  if (typeof msg.method !== 'string') return rpcError(c, msg.id, -32600, 'method must be a string')
+  const params = (msg.params ?? {}) as Args, result = (r: unknown) => c.json({ jsonrpc: '2.0', id: msg.id, result: r })
+  if (msg.method === 'initialize') return result({
+    protocolVersion: MCP_VERSIONS.includes(params.protocolVersion as string) ? params.protocolVersion : MCP_VERSIONS[0],
+    capabilities: { tools: {} }, serverInfo: { name: 'diffnotes', title: 'DiffNotes', version: VERSION },
+    instructions: 'DiffNotes keeps plain-language notes on pull requests for their reviewers. upload_notes annotates a PR (read its rules), ' +
+      'get_notes reads what is there, delete_notes removes it.',
+  })
+  if (msg.method === 'ping') return result({})
+  if (msg.method === 'tools/list') return result({ tools: TOOLS })
+  if (msg.method !== 'tools/call') return rpcError(c, msg.id, -32601, `Method not found: ${msg.method}`)
+  // own keys only: `constructor`, `toString`… are on every object
+  const tool = Object.hasOwn(tools, params.name as string) ? tools[params.name as string] : undefined
+  if (!tool) return rpcError(c, msg.id, -32602, `Unknown tool: ${params.name}`)
+  try {
+    const out = await tool(user, (params.arguments ?? {}) as Args, host(c))
+    return result({ content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out })
+  } catch (e) {
+    // the same refusals the HTTP API gives (404, 413, 415…), as a tool error the model can read and act on; a server
+    // error (a failed bucket write) too, reported like app.onError does, rather than a reply that isn't JSON-RPC
+    if (!(e instanceof HttpError)) { console.error(e); report(e as Error, c.req.routePath, c.req.method) }
+    return result({ content: [{ type: 'text', text: e instanceof HttpError ? e.message : 'Server error' }], isError: true })
+  }
 })
 
 // The one policy for uploaded HTML demos (the extension's demo.html uses the same): scripts and styles inline only,
@@ -658,9 +833,9 @@ app.get('/files/:pull/:name', async (c) => {
   // text (md, csv, txt) is always served as plain text: the web app and the extension render it themselves.
   // HTML demos run only inside a frame, in an opaque sandbox (no cookies, no access to this origin) with every network
   // request blocked; opened as a page of its own (a link, a new tab) it is shown as source, so it can't pose as this site.
-  // Rows from before the allow-list (svg, video) are neither: they download.
+  // Videos play inline (<video>, sandboxed like images). Rows from before the allow-list (svg) are neither: they download.
   const html = f.type === 'text/html' && c.req.header('sec-fetch-dest') === 'iframe'
-  const type = f.type.startsWith('image/') ? f.type : html ? 'text/html; charset=utf-8'
+  const type = /^(image|video)\//.test(f.type) ? f.type : html ? 'text/html; charset=utf-8'
     : f.type.startsWith('text/') ? 'text/plain; charset=utf-8' : 'application/octet-stream'
   // re-uploading a PR keeps its file names, so caches revalidate instead of showing the old file for an hour.
   // One etag per variant: on a Vary mismatch a browser revalidates with the stored etag and reuses that stored body on a
@@ -669,9 +844,20 @@ app.get('/files/:pull/:name', async (c) => {
   const headers = { etag, 'cache-control': 'private, no-cache', vary: 'sec-fetch-dest' }
   // weak comparison over the list (a proxy that compresses, like Cloudflare, hands out W/"…")
   if ((c.req.header('if-none-match') ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) return c.body(null, 304, headers)
-  return c.body(new Uint8Array(data), 200, {
+  // Safari plays a <video> only from a server that answers byte ranges (it asks for bytes=0-1 first).
+  // ponytail: one `bytes=a-` / `bytes=a-b` range; a suffix or multi-range request gets the whole file (allowed by RFC 9110)
+  // (and `bytes=5-2`, an invalid range, is ignored like RFC 9110 says; only a start past the end is a 416).
+  // If-Range naming another version (a re-upload keeps the name) gets the whole file, never bytes spliced from two.
+  // ponytail: every range reads the whole file (an S3 GET each); ranged reads from the backend if long videos show up
+  const ifRange = c.req.header('if-range')
+  const video = type.startsWith('video/'), m = video && (!ifRange || ifRange === etag) ? c.req.header('range')?.match(/^bytes=(\d+)-(\d*)$/) : null
+  const range = m && !(m[2] && Number(m[2]) < Number(m[1])) ? m : null
+  const start = range ? Number(range[1]) : 0, end = Math.min(range?.[2] ? Number(range[2]) : Infinity, data.length - 1)
+  if (range && start > end) return c.body(null, 416, { ...headers, 'content-range': `bytes */${data.length}` })
+  return c.body(new Uint8Array(data.subarray(start, end + 1)), range ? 206 : 200, {
     ...headers, 'content-type': type, 'content-security-policy': html ? DEMO_CSP : 'sandbox',
     'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name}"`,
+    ...(video && { 'accept-ranges': 'bytes' }), ...(range && { 'content-range': `bytes ${start}-${end}/${data.length}` }),
   })
 })
 
@@ -711,7 +897,7 @@ app.get('/api/admin/stats', (c) => {
       upload_bytes: accounts.reduce((n, a) => n + a.bytes, 0), db_bytes: fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : 0,
       disk_free_bytes: disk.bavail * disk.bsize, disk_total_bytes: disk.blocks * disk.bsize,
     },
-    retention_days: RETENTION_DAYS, accounts, users,
+    retention_days: RETENTION_DAYS, version: VERSION, accounts, users,
   })
 })
 
@@ -763,6 +949,9 @@ app.post('/api/admin/storage/lifecycle', async (c) => {
 
 const skill = (c: Context) => fs.readFileSync(path.join(ROOT, 'skill/diffnotes/SKILL.md'), 'utf8')
   .replaceAll('{{HOST}}', host(c))
+  // this server's limits, so the agent sizes files to what it will accept
+  .replaceAll('{{MAX_FILE_MB}}', String(MAX_FILE / MB)).replaceAll('{{MAX_VIDEO_MB}}', String(MAX_VIDEO / MB))
+  .replaceAll('{{MAX_PULL_MB}}', String(MAX_PULL / MB)).replaceAll('{{MAX_FILES}}', String(MAX_FILES)).replaceAll('{{MAX_ANNOTATIONS}}', String(MAX_ANNOTATIONS))
 app.get('/skill/SKILL.md', (c) => c.text(skill(c), 200, { 'content-type': 'text/markdown; charset=utf-8' }))
 app.get('/install.sh', (c) => c.text(`#!/bin/sh
 # Installs the DiffNotes skill for Claude Code (~/.claude/skills), Codex and other Agent Skills tools (~/.agents/skills) and Cursor.
@@ -791,13 +980,13 @@ Disallow: /login
 Sitemap: ${host(c)}/sitemap.xml
 `))
 app.get('/sitemap.xml', (c) => c.body(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${host(c)}/</loc></url></urlset>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${host(c)}/</loc></url><url><loc>${host(c)}/privacy</loc></url></urlset>
 `, 200, { 'content-type': 'application/xml; charset=utf-8' }))
 
 // the web app's one page, with this server's address in its canonical and Open Graph tags (index.html: __ORIGIN__)
 // and a CSP: everything from here only (no third party learns who opens the app), frames only /files demos
 const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-  "font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
+  "font-src 'self'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
   "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 // Optional Umami analytics, on the landing page only (the app's URLs name private PRs): UMAMI_SCRIPT + UMAMI_WEBSITE_ID.
 // It counts the one page view itself (web/landing.tsx), so moving on into the app is never tracked.
@@ -812,13 +1001,16 @@ const page = (c: Context) => {
   const landing = c.req.path === '/' && analytics
   c.header('content-security-policy', landing ? analytics.csp : PAGE_CSP)
   c.header('cache-control', 'no-cache')
-  if (c.req.path !== '/') c.header('x-robots-tag', 'noindex')
-  const html = indexHtml.replaceAll('__ORIGIN__', host(c))
+  if (c.req.path !== '/' && c.req.path !== '/privacy') c.header('x-robots-tag', 'noindex')
+  // /privacy is indexed (sitemap.xml): its canonical and og:url are itself, not the landing page
+  const html = (c.req.path === '/privacy' ? indexHtml.replace(/(rel="canonical" href|property="og:url" content)="__ORIGIN__\/"/g, '$1="__ORIGIN__/privacy"') : indexHtml)
+    .replaceAll('__ORIGIN__', host(c))
   return c.html(landing ? html.replace('</head>', `${analytics.tag}\n</head>`) : html)
 }
 app.get('/', page)
 app.get('/index.html', page)
 app.use('/assets/*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=31536000, immutable') }))
 app.use('*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=86400') }))
-// app routes get the page; a missing file or API route is a real 404
-app.get('*', (c) => (/\.[a-z0-9]+$|^\/(api|files)\//i.test(c.req.path) ? c.notFound() : page(c)))
+// app routes get the page; a missing file or API route is a real 404, and so is /.well-known/ (an MCP client turned away
+// by /mcp looks for OAuth metadata there: a 404 says there is none, the app's HTML would fail as JSON)
+app.get('*', (c) => (/\.[a-z0-9]+$|^\/(api|files|\.well-known)\//i.test(c.req.path) ? c.notFound() : page(c)))

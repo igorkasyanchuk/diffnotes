@@ -3,7 +3,7 @@
 ← [README](../README.md)
 
 Authenticate with a token from Settings: `authorization: Bearer dn_…`. The web app uses the same routes with its
-session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make tokens, change passwords or reach `/admin`.
+session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can't make tokens, change passwords or reach `/admin`.
 
 | Method | Path | |
 |---|---|---|
@@ -14,6 +14,7 @@ session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make 
 | `DELETE` | `/api/v1/annotations/:id` | remove one note (the extension's **remove note**); the PR and its files stay |
 | `GET` | `/api/v1/me` | who the token belongs to |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
+| `POST` | `/mcp` | the same notes for MCP clients (see [MCP](#mcp)); `GET` answers `405` |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
 | `GET` | `/healthz` | `ok` when the database answers (local callers only with `CLOUDFLARE_ONLY=1`) |
 
@@ -40,10 +41,13 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - `risk` (optional): `high`, `medium` or `low`; anything else is dropped. The extension and the web app list risky notes first.
 - `attachment:<file name>` anywhere in `summary` or `body` becomes the uploaded file's URL.
 - In `body` and `summary`: ` ```mermaid ` flowcharts are drawn as diagrams, and two adjacent images named
-  `…-before` / `…-after` (or captioned Before / After) become one image with a drag handle.
+  `…-before` / `…-after` (or captioned Before / After) become one image with a drag handle. An image whose file is an
+  `.mp4` or `.webm` (`![caption](attachment:flow.webm)`) plays inline as a muted video with controls.
 - Each PUT replaces the previous notes and files and restarts the expiry.
 - A repository is looked up in the uploader's accounts (the same name can be connected in several accounts). Not
   connected in any of them: it is connected to the account the uploader owns or administers; a member gets `403`.
+- Files: up to `MAX_FILE_MB` each (1 MB), `.mp4` / `.webm` recordings up to `MAX_VIDEO_MB` (2 MB), `MAX_FILES` files
+  (30) and `MAX_PULL_MB` (20 MB) per request; a JSON body up to `MAX_BODY_KB` (1024). Defaults in brackets, see [install](install.md).
 - Account limits: `MAX_PULLS` live PRs and `MAX_ACCOUNT_MB` of files (see [install](install.md)); over them, `413`.
 
 `GET` returns the stored notes with their `id` and `risk`, plus `can_delete`: whether you may remove them. Removing
@@ -55,4 +59,45 @@ connected and you're only a member, `413` too many / too big / account full, `41
 ```bash
 curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
   -F payload=@diffnotes.json -F file=@after.png
+```
+
+## MCP
+
+`POST /mcp` speaks the [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP, stateless: one
+JSON-RPC 2.0 message per request, a JSON reply; no sessions, no SSE stream), so an MCP client can annotate PRs without
+the skill. Authenticate with the same `Bearer` token; a session cookie is not accepted, and a request whose `Origin` is
+another site gets `403`. Methods: `initialize`, `notifications/initialized` (`202`, no body), `ping`, `tools/list`, `tools/call`.
+
+| Tool | Arguments | Does |
+|---|---|---|
+| `get_notes` | `repo`, `number` | the `GET` above |
+| `upload_notes` | `repo`, `number`, `payload` (the upload JSON above), `files`: `[{"name", "base64"}]` | the `PUT` above: same checks and limits, `attachment:<name>` links |
+| `delete_notes` | `repo`, `number` | the `DELETE` above |
+
+`repo` is the `<repository>` above (a PR URL or clone address works too). A refusal (`404`, `403`, `413`, `415`…) comes
+back as a tool result with `isError: true` and the same message. The whole request may be up to `MAX_PULL_MB` × 4/3
+(base64) plus `MAX_BODY_KB`; `payload` alone up to `MAX_BODY_KB`.
+
+```bash
+# Claude Code
+claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
+```
+
+Cursor, `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
+
+```json
+{ "mcpServers": { "diffnotes": { "url": "https://reviews.company.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
+```
+
+Codex, `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.diffnotes]
+url = "https://reviews.company.com/mcp"
+bearer_token_env_var = "DIFFNOTES_TOKEN"
+```
+
+```bash
+curl -s "$DIFFNOTES_URL/mcp" -H "authorization: Bearer $DIFFNOTES_TOKEN" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_notes","arguments":{"repo":"acme/shop","number":42}}}'
 ```

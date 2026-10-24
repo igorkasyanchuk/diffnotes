@@ -1,0 +1,42 @@
+# Fly.io: `fly launch --copy-config --no-deploy`, `fly volumes create diffnotes_data --size 1`, then
+# `fly deploy --ha=false` (exactly one machine: DiffNotes is a single instance). See docs/deploy.md.
+app = "diffnotes" # app names are global on Fly: pick your own
+primary_region = "fra"
+
+[env]
+  # every variable: docs/install.md (Environment); secrets go in `fly secrets set`, e.g. BUGSINK_DSN
+  PUBLIC_URL = "https://diffnotes.fly.dev" # your app's https:// origin
+  ADMIN_EMAIL = "you@company.com"
+  RETENTION_DAYS = "30"
+  # MAX_FILE_MB = "1"
+  # MAX_VIDEO_MB = "2"
+  # MAX_FILES = "30"
+  # MAX_ANNOTATIONS = "500"
+  # MAX_PULL_MB = "20"
+  # MAX_BODY_KB = "1024"
+  # MAX_ACCOUNT_MB = "1024"
+  # MAX_PULLS = "1000"
+  # UMAMI_SCRIPT = ""
+  # UMAMI_WEBSITE_ID = ""
+
+[mounts]
+  source = "diffnotes_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop" # idle machines stop; expired notes are purged when one starts and hourly while it runs
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

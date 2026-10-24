@@ -9,12 +9,15 @@
   super admins). Other users get `404`, so they can't even tell a PR is annotated.
 - **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind `https://` `PUBLIC_URL`), valid 30
   days. Changing your password signs out every other session.
-- **Tokens** (skill, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on Settings to
-  revoke it. A token only reads and writes notes and files (`/api/v1/*`, `/files/*`): it can't make more tokens, change
-  the password or use `/admin`.
+- **Tokens** (skill, MCP clients, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on
+  Settings to revoke it. A token only reads and writes notes and files (`/api/v1/*`, `/files/*`, `/mcp`): it can't make
+  more tokens, change the password or use `/admin`. `/mcp` takes the token only, never the session cookie, and refuses
+  requests whose `Origin` is another site.
 - **Login throttling**: per IP and email one failure a second and 10 in 10 minutes; per IP 100, per email 50 in 10
   minutes (high enough that a stranger can't lock you out). Accepting an invitation as an existing user uses the same
-  budgets; changing your password allows 10 wrong current passwords in 10 minutes.
+  budgets; changing your password allows 10 wrong current passwords in 10 minutes. The counters live in the server's
+  memory: they reset on restart, and they hold only because DiffNotes runs as
+  [exactly one instance](install.md#one-instance-only).
 - **CSRF**: cookie-signed-in writes are refused unless the browser says they come from the same origin
   (`Sec-Fetch-Site`), on top of `SameSite=Lax`, so a sibling subdomain can't post to the API either.
 - **Repositories** belong to an account; the same name can be connected in several accounts, and each only ever sees
@@ -32,6 +35,8 @@
   checks it on every request, the extension only offers it to them and asks for a confirmation, and ignores clicks that
   a page script fakes (`isTrusted`). Any member may still replace a PR's notes by uploading a new set (that's how a
   teammate's agent refreshes them after pushing to the same PR); the upload then counts as theirs.
+- **Least privilege**: the Docker image runs the app as the unprivileged `node` user; the container starts as root
+  only to give `/data` to it.
 - **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk.
 
 ## Uploads
@@ -41,10 +46,18 @@ Only these files are accepted, checked by **content**, not just by name:
 | Type | Check |
 |---|---|
 | `.png` `.jpg` `.jpeg` `.gif` `.webp` | the file starts with that image format's signature |
+| `.mp4` `.webm` | an MP4 `ftyp` box at byte 4 / the WebM (EBML) header `1A 45 DF A3` |
 | `.md` `.csv` `.txt` `.html` | valid UTF-8, no NUL bytes |
 
-Everything else (SVG, PDF, archives, video, executables) is refused with `415`. Limits: **1 MB per file**, 30 files
-and 20 MB per PR, 500 notes of 20,000 characters. A refused upload changes nothing.
+Everything else (SVG, PDF, archives, other video formats, executables) is refused with `415`. Limits (defaults, see
+[install](install.md)): **1 MB per file** (`MAX_FILE_MB`), **2 MB per video** (`MAX_VIDEO_MB`), 30 files (`MAX_FILES`)
+and 20 MB (`MAX_PULL_MB`) per PR, 500 notes of 20,000 characters. The same checks apply to uploads through `/mcp`. A
+refused upload changes nothing.
+
+Videos are served as `video/mp4` / `video/webm` under the same `sandbox` CSP and `nosniff`. The web app's page allows
+`media-src 'self'` only. On GitHub, GitLab and Bitbucket the extension can't play a video in the page (GitHub's CSP
+refuses `data:` and `blob:` media), so it plays it inside its sandboxed `demo.html` (opaque origin, no network; the
+video comes in as a `data:` URL fetched by the background with the token, like images).
 
 Files are served from `/files/<pull>/<name>` only after the same access check as the PR, with
 `Content-Security-Policy: sandbox`, `X-Content-Type-Options: nosniff`, and text always as `text/plain` — an uploaded
@@ -98,10 +111,10 @@ database alone doesn't reveal it. Keep `/data` (or `ENCRYPTION_KEY`) with your b
 ## Headers
 
 Every response carries `secureHeaders` (`X-Frame-Options`, HSTS, `Referrer-Policy: no-referrer`, …). The web app's
-page adds a CSP: scripts, styles, fonts and images only from the server itself (the font is self-hosted; on the landing
+page adds a CSP: scripts, styles, fonts, images and media only from the server itself (the font is self-hosted; on the landing
 page also the Umami host, when configured), frames only
 from the server (the sandboxed demos), `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`. Server errors can be
-reported to a Sentry-compatible DSN with the route pattern only, never the URL or body. An S3 error shows only the
+reported to a Sentry-compatible DSN (yours, from `BUGSINK_DSN`; none is built in) with the route pattern only, never the URL or body. An S3 error shows only the
 bucket's error code, never its reply.
 
 Found a problem? Please report it privately to the maintainer rather than in a public issue.

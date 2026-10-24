@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
 import { Code, Landing } from './landing.tsx'
+import { version } from '../package.json'
 
 declare global {
   var dnMarkdown: (md: string) => string
@@ -135,12 +136,13 @@ function Demo({ f }: { f: { name: string; url: string } }) {
 function Attachment({ f }: { f: { name: string; type: string; size: number; url: string } }) {
   const [html, setHtml] = useState<string>()
   useEffect(() => {
-    // only text: files uploaded before the allow-list (svg, video) are listed as application/octet-stream
+    // only text: files uploaded before the allow-list (svg) are listed as application/octet-stream
     if (f.type.startsWith('text/') && f.type !== 'text/html') fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(dnPreview(f.name, t)), () => setHtml('<p>could not load</p>'))
   }, [f.url])
   return <div className="file-card">
     <div className="where"><a href={f.url} target="_blank" rel="noreferrer">{f.name}</a> · {bytes(f.size)}</div>
     {f.type.startsWith('image/') ? <img src={f.url} alt={f.name} />
+      : f.type.startsWith('video/') ? <video src={f.url} controls muted playsInline preload="metadata" />
       : f.type === 'text/html' ? <Demo f={f} />
       : html !== undefined && <div className="md preview" dangerouslySetInnerHTML={{ __html: html }} />}
   </div>
@@ -168,8 +170,9 @@ type Me = { user: User; accounts: { id: string; name: string; role: string }[]; 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
 const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
 const Footer = () => <footer className="foot">
-  <span>diffnotes · self-hosted PR annotations · MIT</span>
+  <span>diffnotes {version} · self-hosted PR annotations · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
+  <Link to="/privacy">privacy</Link>
   <a href={SOURCE} target="_blank" rel="noreferrer">source</a>
 </footer>
 
@@ -257,6 +260,37 @@ function Invite({ token }: { token: string }) {
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>join</button>
     </form>
+  </div>
+}
+
+// the privacy policy (also the Chrome Web Store listing's): what the extension and a DiffNotes server keep, and who sees it
+function Privacy() {
+  return <div style={{ maxWidth: 680 }}>
+    <h1>privacy</h1>
+    <p className="hint">DiffNotes browser extension and DiffNotes servers. Last updated October 2026.</p>
+    <h2>The browser extension</h2>
+    <ul>
+      <li>It stores, in your browser only (<code>chrome.storage.local</code>), the addresses of the DiffNotes servers you connect and the
+        access token you paste for each, plus which notes you folded, whether notes are switched off, and, for pull requests with notes you
+        opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token.</li>
+      <li>It talks only to the servers you connect. On a GitHub, GitLab or Bitbucket pull request page it sends that server the
+        repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.</li>
+      <li>It reads the pull request page only to place notes next to the changed lines. It does not send page contents, code, your
+        browsing history or anything else anywhere.</li>
+      <li>It has no analytics, no tracking, no ads and no third-party code, and it sells or shares nothing.</li>
+    </ul>
+    <h2>A DiffNotes server</h2>
+    <ul>
+      <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash),
+        sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (30 days by default).
+        Its operator decides where it runs and who can access it.</li>
+      <li>Notes and files are visible only to members of the account that owns the repository.</li>
+      <li>The app's pages load nothing from third parties. The operator may enable Umami analytics on the landing page (<code>/</code>) only:
+        one anonymous page view, never on the app's pages. Errors may be reported to the operator's own error tracker with the route pattern only.</li>
+    </ul>
+    <h2>Contact</h2>
+    <p>Questions or requests: open an issue at <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">{SOURCE.replace('https://', '')}/issues</a>,
+      or contact the operator of your DiffNotes server about the data it holds.</p>
   </div>
 }
 
@@ -420,7 +454,7 @@ function Repositories({ id, data, admin, reload }: TabProps) {
       {data.repositories.length ? data.repositories.map((r) => <div key={r.id}>
         <a className="grow" href={repoUrl(r.full_name)} target="_blank" rel="noreferrer">{r.full_name}</a>
         <span className="chip">{r.pulls} PRs</span>
-        {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Remove ${r.full_name} and all its notes?`)}>remove</button>}
+        {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Delete ${r.full_name}? Its pull requests, notes and uploaded files are deleted too. There is no undo.`)}>delete</button>}
       </div>) : <div className="empty">no repositories yet. they are added on the first upload{admin && ', or here'}.</div>}
     </div>
     {admin && <>
@@ -491,13 +525,22 @@ function PullPage({ id }: { id: string }) {
   </>
 }
 
-function Settings() {
+function Settings({ me }: { me: Me }) {
   const { data, reload } = useLoad<{ id: string; name: string; created_at: string; last_used_at: string | null }[]>('/api/tokens')
   const [name, setName] = useState(''), [fresh, setFresh] = useState('')
   const make = useSubmit(async () => { setFresh((await api('/api/tokens', { name })).token); setName(''); reload() })
   useEffect(() => { if (location.hash === '#tokens') document.getElementById('tokens')?.scrollIntoView() }, [])
   const [cur, setCur] = useState(''), [next, setNext] = useState(''), [done, setDone] = useState(false)
   const pass = useSubmit(async () => { await api('/api/password', { current: cur, password: next }, 'PUT'); setCur(''); setNext(''); setDone(true) })
+  const owned = me.accounts.filter((a) => a.role === 'owner')
+  const [delPass, setDelPass] = useState('')
+  const remove = useSubmit(async () => {
+    const what = owned.length ? `\n\nThese accounts you own are deleted too, with all their repositories, notes and files:\n${owned.map((a) => `- ${a.name}`).join('\n')}` : ''
+    const typed = prompt(`Type your email to delete your user, your tokens and your sign-ins. There is no undo.${what}`)
+    if (typed === null) return // cancelled
+    if (typed.trim().toLowerCase() !== me.user.email.toLowerCase()) throw new Error(`That isn't ${me.user.email}: nothing was deleted`)
+    await api('/api/me', { password: delPass }, 'DELETE'); location.href = '/'
+  })
   return <>
     <h1>settings</h1>
     <h2>connect your agent</h2>
@@ -527,6 +570,15 @@ function Settings() {
       {done && <div className="ok">password changed, other sessions signed out</div>}
       <button disabled={pass.busy}>change password</button>
     </form>
+    <h2>danger zone</h2>
+    <p className="hint">Deleting your user removes your tokens and sign-ins and takes you out of every account.
+      {owned.length ? <> The accounts you own go too, with all their repositories, notes and files: <b>{owned.map((a) => a.name).join(', ')}</b>.</> : ''}
+      {' '}Notes you uploaded to other accounts stay. There is no undo.</p>
+    <form className="stack narrow" onSubmit={remove.submit}>
+      <label>password<input type="password" autoComplete="current-password" value={delPass} onChange={(e) => setDelPass(e.target.value)} /></label>
+      {remove.error && <div className="error">{remove.error}</div>}
+      <button className="danger" disabled={remove.busy || !delPass}>delete my user</button>
+    </form>
   </>
 }
 
@@ -534,6 +586,7 @@ type AdminStats = {
   totals: Record<'users' | 'accounts' | 'repositories' | 'pulls' | 'annotations' | 'tokens' | 'sessions' | 'invites' | 'uploads_24h' | 'uploads_7d'
     | 'files' | 'upload_bytes' | 'db_bytes' | 'disk_free_bytes' | 'disk_total_bytes', number>
   retention_days: number
+  version: string
   accounts: { id: string; name: string; owner: string | null; members: number; repositories: number; pulls: number; bytes: number; created_at: string }[]
   users: { id: string; email: string; name: string; admin: number; accounts: number; created_at: string; token_used_at: string | null; signed_in_at: string | null }[]
 }
@@ -564,7 +617,7 @@ function Admin({ user }: { user: User }) {
       <div className="stat"><b>{bytes(t.disk_free_bytes)}</b><span>disk free of {bytes(t.disk_total_bytes)}</span>
         <div className="meter"><i style={{ width: `${(used / Math.max(1, t.disk_total_bytes)) * 100}%` }} /></div></div>
     </div>
-    <p className="hint">retention: {data.retention_days} days after the last upload.</p>
+    <p className="hint">retention: {data.retention_days} days after the last upload. diffnotes {data.version}.</p>
     <h2>accounts</h2>
     <div className="scroll"><table className="grid">
       <thead><tr><th>account</th><th>owner</th><th className="num">members</th><th className="num">repos</th><th className="num">PRs</th><th className="num">size</th><th>created</th></tr></thead>
@@ -669,12 +722,13 @@ function App() {
     const invite = m(/^\/invite\/([\w-]+)$/)
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || APP_PATHS.test(path))
-    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} /> : login ? <Login /> : <Landing signedIn={!!me} />}</PublicLayout>
+    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} /> : login ? <Login />
+      : path === '/privacy' ? <Privacy /> : <Landing signedIn={!!me} />}</PublicLayout>
   }
   let page: ReactNode
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />
   else if (m(/^\/pulls\/([\w-]+)$/)) page = <PullPage id={m(/^\/pulls\/([\w-]+)$/)!} />
-  else if (path === '/settings') page = <Settings />
+  else if (path === '/settings') page = <Settings me={me} />
   else if (path === '/admin' && me.user.admin) page = <Admin user={me.user} />
   else page = <Dashboard />
   return <AppLayout me={me} path={path}>{page}<Gallery /></AppLayout>

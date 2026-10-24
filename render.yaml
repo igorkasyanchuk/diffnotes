@@ -1,0 +1,22 @@
+# Render Blueprint: one Docker web service with a disk at /data (disks need a paid instance type and keep it to
+# one instance, which is what DiffNotes needs). Every variable: docs/install.md (Environment). See docs/deploy.md.
+services:
+  - type: web
+    name: diffnotes
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PUBLIC_URL # your https:// origin, e.g. https://diffnotes.onrender.com
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: RETENTION_DAYS
+        value: "30"
+      # optional, add when needed (Render sets PORT itself):
+      # ADMIN_PASSWORD, MAX_FILE_MB, MAX_VIDEO_MB, MAX_FILES, MAX_ANNOTATIONS, MAX_PULL_MB, MAX_BODY_KB, MAX_ACCOUNT_MB, MAX_PULLS,
+      # SESSION_SECRET, ENCRYPTION_KEY, CLOUDFLARE_ONLY, BUGSINK_DSN, UMAMI_SCRIPT, UMAMI_WEBSITE_ID

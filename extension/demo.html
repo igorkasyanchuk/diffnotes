@@ -2,12 +2,22 @@
 <meta charset="utf-8">
 <!-- A sandboxed extension page (manifest "sandbox"): opaque origin, no extension APIs, no access to github.com.
      The CSP in manifest.json blocks every network request. The content script posts the uploaded HTML once; it runs in
-     a srcdoc frame inside this page, which inherits the CSP, and whose navigations (location = 'https://…', meta
+     a srcdoc frame inside this page, which inherits the CSP (or, for a note's screen recording, a data: URL plays in a <video>), and whose navigations (location = 'https://…', meta
      refresh) this page's frame-src 'none' refuses, so a demo can't swap itself for a live page. -->
-<style>html, body, iframe { display: block; width: 100%; height: 100%; margin: 0; border: 0; }</style>
+<style>html, body, iframe, video { display: block; width: 100%; height: 100%; margin: 0; border: 0; } video { background: #000; }</style>
 <script>
   addEventListener('message', function load(e) {
-    if (e.source !== parent || typeof e.data?.dnDemo !== 'string') return
+    if (e.source !== parent) return
+    // a note's screen recording (content.js playIn): github.com's own CSP blocks data: and blob: media
+    if (/^data:video\/(mp4|webm);base64,/.test(e.data?.dnVideo)) {
+      removeEventListener('message', load)
+      const v = document.createElement('video')
+      v.controls = v.muted = v.playsInline = true
+      v.addEventListener('loadedmetadata', () => parent.postMessage({ dnVideoSize: [v.videoWidth, v.videoHeight] }, '*'))
+      v.src = e.data.dnVideo
+      return document.body.append(v)
+    }
+    if (typeof e.data?.dnDemo !== 'string') return
     removeEventListener('message', load)
     const f = document.createElement('iframe')
     f.sandbox = 'allow-scripts'

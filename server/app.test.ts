@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import '../extension/markdown.js'
-import { client, png } from './testkit.ts'
+import { client, mp4, png, webm } from './testkit.ts'
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-'))
 process.env.ADMIN_EMAIL = 'admin@example.com'
@@ -11,7 +11,7 @@ process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
 const { db } = await import('./db.ts')
 const { fromCloudflare, purge, repoName } = await import('./app.ts')
-const { call, login } = client(app)
+const { call, login, mcp } = client(app)
 
 // one sequential story: later tests reuse what earlier ones created
 let admin = '', token = '', accountId = '', member = '', pullId = ''
@@ -249,11 +249,109 @@ describe('diffnotes', () => {
     expect((await call('/api/v1/pulls/acme/web/43', { token, method: 'DELETE' })).status).toBe(200)
   })
 
+  it('accepts mp4 and webm screen recordings up to 2 MB by their signatures and serves them as video', async () => {
+    const up = (...files: File[]) => {
+      const form = new FormData()
+      form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: '![Drag](attachment:drag.webm)' }] }))
+      for (const f of files) form.append('file', f)
+      return call('/api/v1/pulls/acme/web/44', { token, form, method: 'PUT' })
+    }
+    expect((await up(new File([webm(1.5 * 1024 * 1024)], 'drag.webm'), new File([mp4()], 'flow.MP4'))).status).toBe(200)
+    const p = (await call('/api/v1/pulls/acme/web/44', { token })).data
+    expect(p.annotations[0].body).toBe(`![Drag](/files/${p.id}/drag.webm)`)
+    for (const [name, type] of [['drag.webm', 'video/webm'], ['flow.MP4', 'video/mp4']]) {
+      const f = await call(`/files/${p.id}/${name}`, { token })
+      expect(f.res.headers.get('content-type')).toBe(type)
+      expect(f.res.headers.get('content-security-policy')).toBe('sandbox')
+      expect(f.res.headers.get('x-content-type-options')).toBe('nosniff')
+      expect(f.res.headers.get('accept-ranges')).toBe('bytes')
+    }
+    // byte ranges, which Safari needs to play a video
+    const part = await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=4-7' } })
+    expect([part.status, part.res.headers.get('content-range'), part.data]).toEqual([206, 'bytes 4-7/16', 'ftyp'])
+    expect((await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=10-' } })).res.headers.get('content-range')).toBe('bytes 10-15/16')
+    expect((await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=99-' } })).status).toBe(416)
+    expect((await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=5-2' } })).status).toBe(200) // invalid: ignored
+    // If-Range: the same version gets the range, another one (re-uploaded under the same name) the whole file
+    const etag = part.res.headers.get('etag')!
+    expect((await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=4-7', 'if-range': etag } })).status).toBe(206)
+    expect((await call(`/files/${p.id}/flow.MP4`, { token, headers: { range: 'bytes=4-7', 'if-range': '"older"' } })).status).toBe(200)
+    expect((await up(new File([png()], 'fake.webm'))).data.error).toBe('fake.webm: not a valid webm video')
+    expect((await up(new File([webm()], 'fake.mp4'))).status).toBe(415)
+    expect((await up(new File(['x'], 'clip.mov'))).status).toBe(415)
+    expect((await up(new File([webm(2 * 1024 * 1024 + 1)], 'big.webm'))).data.error).toBe('Files up to 1MB each, videos (mp4, webm) up to 2MB')
+    expect((await up(new File([png(1024 * 1024 + 1)], 'big.png'))).status).toBe(413) // the video limit is for videos only
+    expect((await call('/api/v1/pulls/acme/web/44', { token, method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('answers MCP clients: initialize, tools/list and the three tools, with the bearer token only', async () => {
+    expect((await call('/mcp')).status).toBe(405)
+    expect((await mcp('ping', {})).status).toBe(401)
+    expect((await mcp('ping', {}, undefined, { cookie: admin })).status).toBe(401) // a cookie never works here
+    expect((await mcp('ping', {}, undefined, { cookie: admin, authorization: 'Basic eDp5' })).status).toBe(401) // nor behind another scheme
+    expect((await mcp('ping', {}, 'not-a-token')).status).toBe(401)
+    expect((await mcp('ping', {}, token, { origin: 'https://evil.example' })).status).toBe(403)
+    const init = await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } }, token)
+    expect(init.data.result.protocolVersion).toBe('2025-03-26')
+    expect(init.data.result.capabilities).toEqual({ tools: {} })
+    expect(init.data.result.serverInfo.name).toBe('diffnotes')
+    expect((await mcp('initialize', { protocolVersion: '1999-01-01' }, token)).data.result.protocolVersion).toBe('2025-06-18')
+    const note = await call('/mcp', { token, body: { jsonrpc: '2.0', method: 'notifications/initialized' } })
+    expect([note.status, note.data]).toEqual([202, ''])
+    expect((await mcp('ping', undefined, token)).data).toEqual({ jsonrpc: '2.0', id: expect.any(Number), result: {} })
+    const tools = (await mcp('tools/list', {}, token)).data.result.tools
+    expect(tools.map((t: { name: string }) => t.name)).toEqual(['get_notes', 'upload_notes', 'delete_notes'])
+    expect(tools[1].description).toMatch(/One note per changed block[\s\S]*up to 2 MB each/)
+    expect((await mcp('resources/list', {}, token)).data.error.code).toBe(-32601)
+    expect((await mcp('tools/call', { name: 'nope' }, token)).data.error.code).toBe(-32602)
+    expect((await mcp('tools/call', { name: 'constructor' }, token)).data.error.code).toBe(-32602)
+    expect((await call('/mcp', { token, body: [{ jsonrpc: '2.0', id: 1, method: 'ping' }] })).data.error.code).toBe(-32600)
+    const garbled = await app.request('/mcp', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{' })
+    expect([garbled.status, (await garbled.json()).error.code]).toEqual([400, -32700])
+    expect((await call('/mcp', { token, body: { jsonrpc: '2.0', id: 9, method: 5 } })).data.error.code).toBe(-32600)
+    expect((await call('/mcp', { token, body: { jsonrpc: '2.0', id: 9, result: {} } })).status).toBe(202) // a reply to us
+
+    const tool = async (name: string, args: unknown) => (await mcp('tools/call', { name, arguments: args }, token)).data.result
+    const target = { repo: 'https://github.com/acme/web', number: 45 }
+    expect((await tool('get_notes', target)).isError).toBe(true)
+    const payload = { title: 'Drag cards', head_sha: 'abc', summary: 'Cards move. ![after](attachment:after.png)',
+      annotations: [{ path: 'board.ts', line: 3, body: '![Dragging](attachment:drag.webm)', risk: 'high' }] }
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64')
+    const up = await tool('upload_notes', { ...target, payload, files: [{ name: 'after.png', base64: `data:image/png;base64,${b64(png())}` }, { name: 'drag.webm', base64: b64(webm()) }] })
+    expect(up.isError).toBeUndefined()
+    expect(up.structuredContent).toMatchObject({ annotations: 1, files: 2 })
+    expect(JSON.parse(up.content[0].text).id).toBe(up.structuredContent.id)
+    const got = (await tool('get_notes', target)).structuredContent
+    expect(got.annotations[0].body).toBe(`![Dragging](/files/${got.id}/drag.webm)`)
+    expect(got.files.map((f: { type: string }) => f.type)).toEqual(['image/png', 'video/webm'])
+    expect((await call(`/files/${got.id}/drag.webm`, { token })).status).toBe(200)
+    // the HTTP API's refusals come back as tool errors the model can act on, and change nothing
+    expect((await tool('upload_notes', { ...target, payload, files: [{ name: 'fake.png', base64: b64(webm()) }] })).content[0].text).toBe('fake.png: not a valid png image')
+    expect((await tool('upload_notes', { ...target, payload, files: [{ name: 'big.webm', base64: b64(webm(2 * 1024 * 1024 + 1)) }] })).content[0].text).toMatch(/videos \(mp4, webm\) up to 2MB/)
+    expect((await tool('upload_notes', { ...target, payload, files: 'x' })).content[0].text).toBe('files must be an array')
+    expect((await tool('upload_notes', { ...target, payload, files: [{ base64: '' }] })).content[0].text).toBe('files[0].name is required')
+    expect((await tool('upload_notes', { ...target, payload, files: [null] })).content[0].text).toBe('files[0].name is required')
+    expect((await tool('upload_notes', { ...target, payload, files: [{ name: 'a.png' }] })).content[0].text).toBe('files[0].base64 is required')
+    expect((await tool('upload_notes', { ...target, payload: {} })).content[0].text).toBe('annotations must be an array')
+    expect((await tool('upload_notes', { ...target, number: 0, payload })).content[0].text).toBe('Bad pull request number')
+    expect((await tool('get_notes', target)).structuredContent.files).toHaveLength(2)
+    // a member reads; removing is for the uploader or an admin
+    const memberToken = (await call('/api/tokens', { cookie: member, body: { name: 'mcp' } })).data.token
+    expect((await mcp('tools/call', { name: 'delete_notes', arguments: target }, memberToken)).data.result.isError).toBe(true)
+    expect((await tool('delete_notes', target)).structuredContent).toEqual({ ok: true })
+    expect((await tool('get_notes', target)).content[0].text).toBe('No annotations for this pull request')
+  })
+
   it('takes GitLab (nested groups, self-hosted) and Bitbucket repositories as host/path', async () => {
     expect(repoName('https://gitlab.com/Acme/Platform/API.git')).toBe('gitlab.com/Acme/Platform/API')
     expect(repoName('git@bitbucket.org:team/app.git')).toBe('bitbucket.org/team/app')
     expect(repoName('https://GitLab.Acme.dev:8443/a/b/')).toBe('gitlab.acme.dev:8443/a/b')
     expect(repoName('https://github.com/rails/rails')).toBe('rails/rails')
+    // a PR / MR URL (what an MCP client is likely to pass) names its repository, never a repository of its own
+    expect(repoName('https://github.com/acme/web/pull/45/files')).toBe('acme/web')
+    expect(repoName('https://gitlab.com/group/proj/-/merge_requests/5/diffs?view=x')).toBe('gitlab.com/group/proj')
+    expect(repoName('https://bitbucket.org/team/app/pull-requests/7')).toBe('bitbucket.org/team/app')
+    expect(repoName('https://gitlab.com/group/proj/-/tree/main/src')).toBe('gitlab.com/group/proj')
     const body = { annotations: [{ path: 'a.ts', line: 1, body: 'why' }] }
     for (const repo of ['gitlab.com/acme/platform/api', 'bitbucket.org/team/app', 'gitlab.acme.dev:8443/a/b']) {
       expect((await call(`/api/v1/pulls/${repo}/7`, { token, body, method: 'PUT' })).status).toBe(200)
@@ -282,6 +380,8 @@ describe('diffnotes', () => {
   it('serves the skill with the host filled in', async () => {
     const r = await call('http://dn.test/skill/SKILL.md')
     expect(r.data).toContain('http://dn.test')
+    expect(r.data).toContain('Up to **1 MB each** (videos 2 MB),\n  30 files and 20 MB per PR')
+    expect(r.data).not.toContain('{{')
     expect((await call('http://dn.test/install.sh')).data).toContain('http://dn.test/skill/SKILL.md')
   })
 
@@ -353,6 +453,7 @@ describe('diffnotes', () => {
     const st = (await call('/api/admin/stats', { cookie: admin })).data
     expect(st.totals).toMatchObject({ accounts: 2, pulls: 1, annotations: 2, upload_bytes: 10 })
     expect(st.totals.disk_free_bytes).toBeGreaterThan(0)
+    expect(st.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(st.accounts.find((a: { name: string }) => a.name === 'Other').owner).toBe('admin@example.com')
     const dev = st.users.find((u: { email: string }) => u.email === 'dev@example.com')
     const me = st.users.find((u: { email: string }) => u.email === 'admin@example.com')
@@ -423,5 +524,28 @@ describe('diffnotes', () => {
     expect(await purge()).toBe(1)
     expect(objects.has(key)).toBe(false)
     server.close()
+  })
+  it('lets a user delete themselves with the accounts they own, never the last super admin', async () => {
+    const inv = await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { email: 'leaving@example.com', role: 'member' } })
+    const joined = await call(`/api/invites/${inv.data.token}/accept`, { body: { password: 'leaving-pass' } })
+    const cookie = joined.res.headers.get('set-cookie')!.split(';')[0]
+    const own = (await call('/api/accounts', { cookie, body: { name: 'Leaving Co' } })).data.id
+    const tok = (await call('/api/tokens', { cookie, body: { name: 'cli' } })).data.token
+    const form = new FormData()
+    form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: 'x' }] }))
+    expect((await call(`/api/accounts/${own}/repositories`, { cookie, body: { full_name: 'leaving/app' } })).status).toBe(200)
+    expect((await call('/api/v1/pulls/leaving/app/1', { token: tok, form, method: 'PUT' })).status).toBe(200)
+    // a token can't do it, a wrong password can't, and the only super admin can't
+    expect((await call('/api/me', { token: tok, method: 'DELETE', body: { password: 'leaving-pass' } })).status).toBe(401)
+    expect((await call('/api/me', { cookie, method: 'DELETE', body: { password: 'nope' } })).status).toBe(401)
+    expect((await call('/api/me', { cookie: admin, method: 'DELETE', body: { password: 'admin-pass' } })).status).toBe(400)
+    const gone = await call('/api/me', { cookie, method: 'DELETE', body: { password: 'leaving-pass' } })
+    expect(gone.status).toBe(200)
+    expect(gone.res.headers.get('set-cookie')).toContain('sid=;')
+    expect((await call('/api/me', { cookie })).data.user).toBeNull()
+    expect((await call('/api/v1/pulls/leaving/app/1', { token: tok })).status).toBe(401)
+    expect((await call('/api/login', { body: { email: 'leaving@example.com', password: 'leaving-pass' } })).status).toBe(401)
+    expect((await call(`/api/accounts/${own}`, { cookie: admin })).status).toBe(404)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: admin })).data.members.map((m: { email: string }) => m.email)).not.toContain('leaving@example.com')
   })
 })

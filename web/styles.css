@@ -161,6 +161,7 @@ table.grid tr:hover td { background: var(--panel-2); }
 .md img { display: inline-block; vertical-align: top; max-width: min(100%, 260px); max-height: 160px; object-fit: cover; object-position: top left;
   margin: 6px 8px 2px 0; border-radius: 4px; border: 1px solid var(--line); background: var(--panel-2); }
 .md img:hover { border-color: var(--accent); }
+.md video, .file-card video { display: block; max-width: min(100%, 480px); max-height: 320px; margin: 6px 0; border-radius: 4px; border: 1px solid var(--line); background: #000; }
 .md input[type=checkbox] { width: auto; margin: 0 6px 0 0; vertical-align: -1px; }
 .md p { margin: 6px 0; }
 .md code { background: var(--panel-2); padding: 1px 4px; border-radius: 3px; }

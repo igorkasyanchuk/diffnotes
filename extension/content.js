@@ -9,15 +9,36 @@
   const FOLD_DAYS = 60
   let folded = {} // note key → when it was folded
   const fresh = (all) => { const cut = Date.now() - FOLD_DAYS * 86400_000; for (const [k, t] of Object.entries(all)) if (t < cut) delete all[k]; return all }
-  const foldsLoaded = chrome.storage.local.get('folded').then((s) => { folded = fresh(s.folded ?? {}) }, () => {})
-  chrome.storage.onChanged.addListener((ch) => { if (ch.folded) folded = ch.folded.newValue ?? {} })
+  // Changed since your last visit: per PR, the note hashes (and anchors: server, path, side, line) shown last time. A note
+  // whose hash wasn't among them is "new", or "updated" when its anchor was. The first visit of a PR marks nothing.
+  // prior keeps the state this tab found, so badges stay through a redraw (remove note, navigating back) until a reload.
+  let visits = {} // PR key → {t, h: [note hashes], a: [anchor hashes]}
+  const prior = new Map()
+  const foldsLoaded = chrome.storage.local.get(['folded', 'visits']).then((s) => { folded = fresh(s.folded ?? {}); visits = s.visits ?? {} }, () => {})
+  chrome.storage.onChanged.addListener((ch) => { if (ch.folded) folded = ch.folded.newValue ?? {}; if (ch.visits) visits = ch.visits.newValue ?? {} })
   const hash = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return (h >>> 0).toString(36) }
+  // complete: every server answered. Else what was stored stays too, so the notes of a server that didn't answer this
+  // time don't count as new on the next visit; skipping the save instead would lose every visit while one connected
+  // server is down or rejects its token.
+  const visit = (key, notes, complete) => {
+    // a first visit is its own baseline: notes uploaded while this tab stays open are marked when it comes back to the PR
+    if (!prior.has(key)) prior.set(key, visits[key] ?? { h: notes.map((a) => a.fold), a: notes.map((a) => a.anchor) })
+    const before = prior.get(key), was = visits[key]
+    for (const a of notes) a.changed = before && !before.h.includes(a.fold) ? (before.a.includes(a.anchor) ? 'updated' : 'new') : ''
+    const keep = (now, old) => (complete || !old ? now : [...new Set([...now, ...old])])
+    visits[key] = { t: Date.now(), h: keep(notes.map((a) => a.fold), was?.h), a: keep(notes.map((a) => a.anchor), was?.a) }
+    // bounded: FOLD_DAYS like folds, and the 500 most recent PRs
+    const cut = Date.now() - FOLD_DAYS * 86400_000
+    visits = Object.fromEntries(Object.entries(visits).filter(([, v]) => v.t > cut).sort(([, x], [, y]) => y.t - x.t).slice(0, 500))
+    Promise.resolve().then(() => chrome.storage.local.set({ visits })).catch(() => {})
+  }
   const fold = (notes, c) => {
     for (const a of notes) if (c) folded[a.fold] = Date.now(); else delete folded[a.fold]
     // in a microtask: after an extension update this orphaned script's chrome.* calls throw instead of rejecting
     Promise.resolve().then(() => chrome.storage.local.set({ folded: fresh(folded) })).catch(() => {})
   }
-  const fetched = new Map() // server + /files/… → a promise of its data: URL (images and html demos), fetched once
+  const fetched = new Map() // server + /files/… → a promise of its data: URL (images, videos and html demos), fetched once
+  let fetchedFor = '' // the PR they belong to: another PR's are let go (a 2 MB video is a ~2.7 MB string)
   const file = (server, url) => {
     const k = server + url
     if (!fetched.has(k)) fetched.set(k, chrome.runtime.sendMessage({ type: 'file', server, url }).then((r) => r?.url, () => null))
@@ -36,6 +57,7 @@
     head.type = 'button'
     head.append(el('span', 'dn-badge', 'DN'), el('span', 'dn-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)))
     if (RISKS.includes(a.risk)) head.append(el('span', `dn-risk dn-risk-${a.risk}`, `${a.risk} risk`))
+    if (a.changed) head.append(el('span', 'dn-changed', a.changed))
     head.append(el('span', 'dn-where', where(a)))
     const body = el('div', 'dn-body dn-md')
     body.append(md(a.body, a.server))
@@ -92,6 +114,10 @@
       img.removeAttribute('src')
       if (!src.startsWith('/files/')) return // only the note's server's files load: another path would hit this site
       file(server, src).then((u) => { if (u) img.src = u })
+    })
+    root.querySelectorAll('video[data-dn-src]').forEach((v) => {
+      if (!v.dataset.dnSrc.startsWith('/files/')) return v.remove()
+      v.replaceWith(videoFrame(server, v.dataset.dnSrc, v.title))
     })
     // links to attached files open a preview here instead of navigating the page to /files/…
     root.querySelectorAll('a[href^="/files/"]').forEach((a) => {
@@ -189,6 +215,9 @@
           row.before(tr)
         } else {
           const div = el('div', 'dn-row dn-grid-row') // a div grid (Bitbucket): stays in view when the code scrolls sideways
+          // as wide as the file's visible box, not the grid: a long code line widens the grid past the file and would cut the note off
+          // ponytail: measured when drawn; a window resize keeps the old width until the page re-renders the diff
+          if (f.box.clientWidth) div.style.maxWidth = `${f.box.clientWidth}px`
           div.append(note(a, i))
           row.before(div)
         }
@@ -259,6 +288,7 @@
         // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo.
         // remove note needs its listener: that stays in the box
         copy.querySelectorAll('.dn-demo, .dn-actions').forEach((d) => d.remove())
+        copy.querySelectorAll('iframe.dn-video').forEach(playIn) // a recording is posted in again
         pop.append(copy)
         // a clone has no listeners: note headers toggle (and are remembered) through the pop
         pop.addEventListener('click', (e) => {
@@ -268,7 +298,7 @@
         document.body.append(pop)
       })
       top.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
-      d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), notesSwitch(), summary, top)
+      d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), ...changedLink(), notesSwitch(), summary, top)
     }
     // watch the box's header bar: once it is above the viewport the dock takes over, even if the tall summary still shows
     const bar = box.firstElementChild
@@ -281,6 +311,16 @@
     })
     seen.target = bar
     seen.observe(bar)
+  }
+
+  // "N changed since your last visit": jumps to the first (the click is delegated, so it works from the dock too)
+  const changedLink = () => {
+    const i = pull.annotations.findIndex((a) => a.changed), n = pull.annotations.filter((a) => a.changed).length
+    if (i < 0) return []
+    const b = el('button', 'dn-link dn-changed-link', `${n} changed since your last visit`)
+    b.type = 'button'
+    b.dataset.dnJump = i
+    return [b]
   }
 
   const errorBar = () => {
@@ -313,7 +353,20 @@
         () => removeNotes(p.server, `/api/v1/pulls/${p.repo}/${p.number}?id=${p.id}`)))
       return b
     })
-    bar.append(title, notesSwitch(), expand, collapse, ...opens, ...removes)
+    // the summary as Markdown for the PR's description: /files/… links point at their server (readers sign in there),
+    // images become links (the site can't load them without a session). Nothing is posted anywhere.
+    const summaries = pull.pulls.filter((p) => p.summary), copy = el('button', 'dn-link', 'copy summary')
+    copy.type = 'button'
+    copy.title = 'Copy the summary as Markdown, e.g. for the PR description'
+    copy.addEventListener('click', () => {
+      const text = summaries.map((p) => (many ? `### ${new URL(p.server).host}\n\n` : '') +
+        p.summary.replace(/!?\[([^\]]*)\]\((\/files\/[^)\s]+)\)/g, (m, label, u) => `[${label || 'image'}](${p.server}${u})`)).join('\n\n')
+      navigator.clipboard.writeText(text).then(() => 'copied ✓', () => 'copy failed').then((t) => {
+        copy.textContent = t
+        setTimeout(() => { copy.textContent = 'copy summary' }, 1500)
+      })
+    })
+    bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...opens, ...removes)
     const body = el('div', 'dn-box-body')
     // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
     const risky = pull.annotations.map((a, i) => [a, i]).filter(([a]) => RISKS.includes(a.risk))
@@ -370,9 +423,9 @@
     }
     if (!long && more) more.remove()
   }
-  // risk map: jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
+  // risk map and "changed" link: jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
   document.addEventListener('click', (e) => {
-    const i = e.target.closest?.('.dn-risk-row')?.dataset.dnJump
+    const i = e.target.closest?.('[data-dn-jump]')?.dataset.dnJump
     if (i == null) return
     if (hidden) setHidden(false)
     document.getElementById('dn-pop')?.remove()
@@ -398,7 +451,11 @@
 
   // An uploaded HTML demo runs in the extension's sandboxed demo.html: an opaque origin with no access to github.com,
   // its cookies or the extension, and a CSP (manifest.json) that blocks every network request. The HTML is posted in once.
+  // Safari has no manifest sandbox pages (Chromium has, Firefox since 154): there demo.html would be a privileged
+  // extension page whose CSP blocks inline scripts, so a demo stays a link to try on the DiffNotes server instead.
+  const sandboxed = !chrome.runtime.getURL('').startsWith('safari')
   function demoFrame(html) {
+    if (!sandboxed) return el('div', 'dn-hint', 'Live demos don’t run in Safari: use “open in DiffNotes” to try it.')
     const f = el('iframe', 'dn-demo-frame')
     f.setAttribute('sandbox', 'allow-scripts')
     f.setAttribute('referrerpolicy', 'no-referrer')
@@ -407,6 +464,37 @@
     f.src = chrome.runtime.getURL('demo.html')
     return f
   }
+  // A screen recording: github.com's CSP (media-src) refuses data: and blob: videos from the page, so it plays in the
+  // sandboxed demo.html instead (its CSP allows media from data:), fetched by the background with the token like images.
+  // demo.html answers with the video's size, so the frame takes its shape. Safari: no sandboxed demo.html, so a hint.
+  function videoFrame(server, src, title) {
+    if (!sandboxed) return el('div', 'dn-hint', 'Videos don’t play in Safari: use “open in DiffNotes” to watch it.')
+    const f = el('iframe', 'dn-video')
+    f.title = title || 'video'
+    f.setAttribute('sandbox', 'allow-scripts')
+    f.setAttribute('referrerpolicy', 'no-referrer')
+    f.allow = 'fullscreen'
+    f.dataset.dnSrc = src
+    f.dataset.dnServer = server
+    playIn(f)
+    return f
+  }
+  function playIn(f) {
+    file(f.dataset.dnServer, f.dataset.dnSrc).then((u) => {
+      if (!u) return
+      // every load: moving an iframe in the DOM reloads it
+      f.addEventListener('load', () => f.contentWindow.postMessage({ dnVideo: u }, '*'))
+      f.src = chrome.runtime.getURL('demo.html')
+    })
+  }
+  addEventListener('message', (e) => {
+    const [w, h] = Array.isArray(e.data?.dnVideoSize) ? e.data.dnVideoSize : []
+    if (!(w > 0 && h > 0)) return // the page's own messages: no DOM walk for them
+    const f = [...document.querySelectorAll('iframe.dn-video')].find((x) => x.contentWindow === e.source)
+    if (!f) return
+    f.style.aspectRatio = `${w} / ${h}`
+    clamp(f.closest('.dn-note > .dn-body, .dn-summary'))
+  })
   // a link to an .html attachment in a note gets a live preview under it; "expand" opens it large
   function inlineDemo(link, server) {
     const wrap = el('div', 'dn-demo'), bar = el('div', 'dn-demo-bar'), open = el('button', 'dn-demo-open', 'expand ⤢')
@@ -424,12 +512,14 @@
   // an attached md / csv / txt file in a modal, an html demo in a sandboxed frame; images open in the lightbox
   async function preview(link) {
     const url = link.dataset.dnFile, name = decodeURIComponent(url.split('/').pop())
-    const r = await chrome.runtime.sendMessage({ type: 'file', server: link.dataset.dnServer, url }).catch(() => null)
-    if (!r?.url) return
+    // through the cache: a video's frame asks for the same file again (fetched once, not twice per open)
+    const u = await file(link.dataset.dnServer, url)
+    if (!u) return
     const box = el('div', 'dn-lightbox')
-    if (/^data:image\//.test(r.url)) { const big = el('img'); big.src = r.url; box.append(big) }
+    if (/^data:image\//.test(u)) { const big = el('img'); big.src = u; box.append(big) }
+    else if (/^data:video\//.test(u)) box.append(videoFrame(link.dataset.dnServer, url, name)) // not text: never decoded as such
     else {
-      const text = decode(r.url)
+      const text = decode(u)
       const demo = /\.html$/i.test(name)
       const doc = el('div', `dn-doc dn-md${demo ? ' dn-demo-doc' : ''}`), head = el('div', 'dn-bar')
       head.append(el('span', 'dn-badge', 'DN'), el('b', '', name))
@@ -517,17 +607,20 @@
     if (key === current) return
     current = key
     clear()
+    if (key && key !== fetchedFor) { fetched.clear(); fetchedFor = key }
     if (!m) return void chrome.runtime.sendMessage({ type: 'clear' }).catch(() => {})
     const res = await chrome.runtime.sendMessage({ type: 'pull', repo: m.repo, number: m.number }).catch(() => null)
     if (current !== key) return
     if (res?.pulls?.length) {
       const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
       pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: p.can_delete,
-        fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')) }))) }
+        fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')),
+        anchor: hash([key, p.server, a.path, a.side, a.line].join('\n')) }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')
     else return
     await foldsLoaded
     if (current !== key) return
+    if (pull) visit(key, pull.annotations, !pull.errors?.length)
     apply()
     observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(apply, 200) })
     observer.observe(document.body, { childList: true, subtree: true })

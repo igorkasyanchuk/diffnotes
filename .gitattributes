@@ -1,0 +1,2 @@
+# the image's entrypoint: a CRLF checkout (Git for Windows' default) would break `#!/bin/sh` and stop the container
+*.sh text eol=lf

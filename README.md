@@ -10,10 +10,10 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 ## TL;DR
 
 - Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
-  screenshots, Markdown reports, CSVs and small interactive HTML demos.
+  screenshots, short screen recordings, Markdown reports, CSVs and small interactive HTML demos. Through the skill or the MCP endpoint.
 - The notes go to **your own DiffNotes server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
-- Reviewers with the **browser extension** see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
-  changed lines, image galleries, file previews, one switch to hide everything.
+- Reviewers with the **browser extension** (Chrome, Firefox) see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
+  changed lines, image galleries, file previews, what changed since their last visit, one switch to hide everything.
 - Notes **expire on their own** (30 days by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
 - Up and running in **about 3 minutes**: one container, one `curl | sh`, one extension.
 
@@ -54,6 +54,7 @@ git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
 docker build -t diffnotes . && docker run -d -p 3000:3000 -v diffnotes:/data \
   -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.company.com diffnotes
 docker logs <container> | grep "first admin"        # the generated password
+#    or: docker compose up -d (docker-compose.yml), or Render / Fly.io / Railway / Coolify: docs/deploy.md
 
 # 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
 curl -fsSL https://reviews.company.com/install.sh | sh
@@ -63,20 +64,24 @@ export DIFFNOTES_URL=https://reviews.company.com DIFFNOTES_TOKEN=dn_…   # toke
 #    then its popup: server + token → Connect
 ```
 
-Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab.
+Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab. No skills in your agent?
+Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"` ([more](docs/skill.md#mcp-instead-of-the-skill)).
 
 ## Docs
 
 | | |
 |---|---|
 | [Install & configure](docs/install.md) | Docker, environment variables, first admin, password reset, upgrades, backups |
+| [Deploy](docs/deploy.md) | Docker Compose, Coolify, Render (one-click), Fly.io, Railway; one instance only |
 | [Agent skill](docs/skill.md) | Install, token, how the agent writes notes, payload format, allowed files |
-| [Browser extension](docs/extension.md) | Install, several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
+| [Browser extension](docs/extension.md) | Install (Chrome, Firefox, Safari), several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
 | [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, super admin, overview pages |
 | [File storage](docs/storage.md) | Disk or S3-compatible (Backblaze B2, Cloudflare R2, AWS S3, MinIO), expiry |
 | [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets |
 | [API](docs/api.md) | The HTTP API the skill and the extension use |
 | [Development](AGENTS.md) | Stack, layout, commands, code rules |
+| [Changelog](CHANGELOG.md) | What changed in each version; releases are tagged `vX.Y.Z` |
+| [Privacy](https://diffnotes.dev/privacy) | What the extension and a server keep (every server also serves it at `/privacy`) |
 
 ## License
 

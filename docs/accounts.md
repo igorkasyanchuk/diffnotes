@@ -10,12 +10,24 @@ a PR is visible only to members of the account that owns its repository. Anyone 
 | Role | Can |
 |---|---|
 | **owner** | everything an admin can, plus delete the account. One per account (who made it); can't be removed or demoted |
-| **admin** | invite people (as admin or member), change roles, remove members, add and remove repositories, rename the account, remove any PR's notes |
+| **admin** | invite people (as admin or member), change roles, remove members, add and delete repositories, rename the account, remove any PR's notes |
 | **member** | read the account's notes, upload notes with the skill, remove the notes they uploaded |
 
 A repository is connected to an account on its first upload by an owner or admin (a member's first upload is refused
 until an admin connects it), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab
 and Bitbucket (`gitlab.com/group/project`, `bitbucket.org/team/app`), or just paste the repository's URL.
+
+## Deleting
+
+- **A repository**: account → **repositories** → **delete** (admins). Its PRs, notes and uploaded files go with it.
+- **An account**: account → **danger zone** → **delete account** (the owner), confirmed by typing its name. Every
+  repository, note and file in it goes.
+- **Your user**: **settings** → **danger zone** → **delete my user**, with your password and your email typed to confirm.
+  Your tokens, sign-ins and memberships go, and so do the accounts you own with everything in them (the page lists them
+  first). Notes you uploaded to other accounts stay. The last super admin can't delete themselves: make someone else
+  super admin on `/admin` first.
+
+There is no undo for any of these, and files are removed from disk or the bucket right away.
 
 ## Invitations
 

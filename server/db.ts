@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 // the only uploads accepted: extension → content type (text is served as text/plain; html renders only as a framed,
-// sandboxed demo, see /files in app.ts)
+// sandboxed demo, see /files in app.ts; videos are short screen recordings, MAX_VIDEO_MB each)
 export const EXT_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  csv: 'text/csv', md: 'text/markdown', txt: 'text/plain', html: 'text/html',
+  mp4: 'video/mp4', webm: 'video/webm', csv: 'text/csv', md: 'text/markdown', txt: 'text/plain', html: 'text/html',
 }
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data')

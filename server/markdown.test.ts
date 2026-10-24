@@ -25,6 +25,15 @@ describe('dnMarkdown', () => {
     expect(md('a\r\nb')).toBe('<p>a b</p>')
   })
 
+  it('plays screen recordings from the note\'s own server only, captioned and escaped', () => {
+    expect(g.dnMarkdown('![Drag "a" <b>](/files/p1/drag.webm)', (u) => `https://dn.example${u}`)).toBe('<p><video controls muted playsinline preload="metadata" '
+      + 'title="Drag &quot;a&quot; &lt;b&gt;" aria-label="Drag &quot;a&quot; &lt;b&gt;" src="https://dn.example/files/p1/drag.webm" data-dn-src="/files/p1/drag.webm"></video></p>')
+    expect(md('![](/files/p1/a.MP4?v=2)')).toContain('aria-label="video" src="/files/p1/a.MP4?v=2"')
+    expect(md('![x](https://evil.example/a.webm)')).toBe('<p><a href="https://evil.example/a.webm" target="_blank" rel="noopener noreferrer">x ↗</a></p>')
+    expect(md('![x](javascript:a.mp4)')).toBe('<p>![x](javascript:a.mp4)</p>')
+    expect(md('![x](/files/p1/a.webm.png)')).toContain('<img')
+  })
+
   it('renders tables, short rows and a pipe that is no table', () => {
     expect(md('a | b\n--- | :---:\n1 | 2\n3 |\n\nx')).toBe('<div class="dn-table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody>'
       + '<tr><td>1</td><td>2</td></tr><tr><td>3</td><td></td></tr></tbody></table></div><p>x</p>')

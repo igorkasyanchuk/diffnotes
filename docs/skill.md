@@ -39,7 +39,7 @@ lines inside one changed block) and only uploads what is true at the PR's head c
 stored notes, keeps and fixes the ones that still hold and drops the rest; with nothing left to say it deletes them
 (`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**, and the uploader or an admin can remove single
 notes right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
-after image pairs (shown with a drag handle) and Mermaid flowcharts (drawn as diagrams).
+after image pairs (shown with a drag handle), short screen recordings and Mermaid flowcharts (drawn as diagrams).
 
 ## What a note looks like
 
@@ -72,6 +72,7 @@ curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: B
 | Allowed | Checked | Shown as |
 |---|---|---|
 | `.png .jpg .jpeg .gif .webp` | the file must really be that image format | thumbnails, gallery |
+| `.mp4 .webm` | the file must really be MP4 (`ftyp`) / WebM (EBML header) | an inline video, muted, with controls |
 | `.md` | UTF-8 text, no NUL bytes | rendered Markdown preview |
 | `.csv` | UTF-8 text | a table |
 | `.txt` | UTF-8 text | plain text |
@@ -80,5 +81,43 @@ curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: B
 An `.html` demo must be one self-contained file (inline `<style>` and `<script>`, images as `data:` URIs): it runs with
 **no network access**, no cookies or storage, no forms or popups. See [security](security.md#html-demos).
 
-Up to **1 MB per file**, 30 files and 20 MB per PR (server settings). SVG, PDF, archives and video are refused
-with `415`. Details in [security](security.md).
+Up to **1 MB per file**, **2 MB per video**, 30 files and 20 MB per PR (defaults: `MAX_FILE_MB`, `MAX_VIDEO_MB`,
+`MAX_FILES`, `MAX_PULL_MB`; the skill served by your server states its own values). SVG, PDF, archives and other video
+formats (`.mov`) are refused with `415`. Details in [security](security.md).
+
+A **screen recording** is for what a screenshot can't show: an animation, a drag, a multi-step flow. Keep it a few
+seconds and cropped; the skill records with Playwright's `recordVideo` and shrinks the clip with `ffmpeg` when needed.
+
+## MCP instead of the skill
+
+Any MCP client can annotate PRs through the server's `/mcp` endpoint, with the same token and no skill file: the tools
+`upload_notes`, `get_notes` and `delete_notes` carry the skill's key rules in their descriptions. The skill still writes
+better notes (it checks every note against the diff before uploading), so prefer it where your agent supports skills.
+
+```bash
+# Claude Code
+claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
+```
+
+Cursor, `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
+
+```json
+{ "mcpServers": { "diffnotes": { "url": "https://reviews.company.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
+```
+
+Codex, `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.diffnotes]
+url = "https://reviews.company.com/mcp"
+bearer_token_env_var = "DIFFNOTES_TOKEN"
+```
+
+Details in [API](api.md#mcp).
+
+## No secrets in notes
+
+The skill (and the MCP tool descriptions) tell the agent never to upload API keys, passwords, tokens, private keys,
+connection strings, `.env` values, session cookies or personal and customer data, in words or in screenshots and
+recordings: it names the thing ("the Stripe key") instead of the value and crops or blurs it out of images. Still,
+treat notes like any shared document: everyone in the account can read them until they expire.

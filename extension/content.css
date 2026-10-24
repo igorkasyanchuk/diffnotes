@@ -36,6 +36,7 @@ html.dn-dark {
 .dn-md img { display: inline-block; vertical-align: top; max-width: 220px; max-height: 130px; object-fit: cover; object-position: top left;
   border-radius: 6px; border: 1px solid var(--dn-line); margin: 6px 8px 2px 0; cursor: zoom-in; background: var(--dn-muted-bg); }
 .dn-md img:hover { border-color: var(--dn); }
+.dn-md .dn-video { display: block; height: 200px; max-width: 100%; aspect-ratio: 16 / 10; /* the width follows the video (playIn); ⛶ plays it large */ margin: 6px 0; border: 1px solid var(--dn-line, #30363d); border-radius: 6px; background: #000; }
 .dn-md code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--dn-muted-bg); padding: 1px 4px; border-radius: 4px; }
 .dn-md pre { background: var(--dn-muted-bg); padding: 8px; border-radius: 6px; overflow: auto; }
 .dn-md ul, .dn-md ol { margin: 4px 0; padding-left: 20px; }
@@ -60,6 +61,7 @@ html.dn-dark {
 
 .dn-lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.8); display: grid; place-items: center; cursor: zoom-out; }
 .dn-lightbox img { max-width: 94vw; max-height: 94vh; border-radius: 6px; }
+.dn-lightbox .dn-video { width: min(94vw, 960px); max-height: 94vh; aspect-ratio: 16 / 10; border: 0; border-radius: 6px; background: #000; }
 
 /* notes switch */
 .dn-switch { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--dn-soft); }
@@ -185,3 +187,6 @@ html.dn-dark .dn-risk-low { background: rgba(46, 160, 67, .16); color: #3fb950; 
 .dn-dg-edge.bold { stroke-width: 2.6; }
 .dn-dg-arrow { fill: var(--dn-soft); }
 .dn-dg-elabel { fill: var(--dn-soft); font-size: 11px; paint-order: stroke; stroke: var(--dn-bg); stroke-width: 4px; }
+
+/* changed since your last visit */
+.dn-changed { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--dn-link) 15%, transparent); color: var(--dn-link); font: 600 11px/1.6 -apple-system, sans-serif; }

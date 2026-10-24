@@ -20,6 +20,28 @@ Until it is in the Chrome Web Store, load it from this repository:
 
 After `git pull`, press the reload icon on the extension's card.
 
+## Firefox
+
+The same `extension/` folder works in Firefox 154 or later (one manifest for both browsers):
+
+1. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → pick `extension/manifest.json`
+   (a temporary add-on is gone after a restart; for a permanent one, sign it with `npx web-ext sign -s extension`).
+2. In `about:addons` → DiffNotes → **Permissions**, make sure github.com, gitlab.com and bitbucket.org are allowed.
+3. Connect a server from the popup as above. If the popup closes when Firefox asks for access to your server, open it
+   again and press **Connect** once more.
+
+## Safari
+
+Safari takes the same folder through Xcode's converter, which wraps it in a macOS app (not built here):
+
+```bash
+xcrun safari-web-extension-converter extension/ --app-name DiffNotes --macos-only
+```
+
+Build and run the generated project in Xcode, then enable it in Safari → Settings → Extensions (for an unsigned
+build, first allow unsigned extensions in Safari's Develop menu). Safari has no sandboxed extension pages, so live
+`.html` demos and screen recordings show a hint instead: open them from **open in DiffNotes**.
+
 ## Several servers
 
 The popup lists every connected server with your email on it; add more with the same form (different teams, clients,
@@ -32,7 +54,9 @@ Open a PR's **Files changed** tab:
 
 | | |
 |---|---|
-| **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, open in DiffNotes |
+| **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, *copy summary*, open in DiffNotes |
+| **Changed since your last visit** | on a PR you opened before, notes added or changed since get a *new* / *updated* tag, and the box and dock say “N changed since your last visit” (a click jumps to the first). Remembered in the browser for 60 days |
+| **Copy summary** | copies the PR summary as Markdown for the PR description; attachments become links to your DiffNotes server (readers need to sign in there). Nothing is posted |
 | **File cards** under file headers | notes about a whole file (new, renamed, deleted) |
 | **Line notes** above changed blocks | the “why” for that block; click the header to collapse it; it stays collapsed after a reload until the note changes |
 | **Show more / less** | long notes are cut to a few lines |

@@ -25,6 +25,13 @@ never write it into files or commits.
 - **Only upload what you are sure is true at the PR's head.** Annotate committed and pushed code only: `head_sha` is
   the PR's head commit and equals `git rev-parse HEAD`. Every note points at a block that is in the current diff
   (step 5 checks it) and says what that code does now. A wrong note is worse than none: when unsure, leave it out.
+- **Never upload secrets or private data.** Notes, titles, summaries, screenshots, recordings, reports and demos must not
+  contain API keys, passwords, tokens, private keys, certificates, connection strings, `.env` values, session cookies,
+  signed URLs, or personal and customer data (emails, names, addresses, payment details) from real systems. Write
+  "the Stripe key" or "a test user", not the value; use fake data in demos; crop or blur these out of screenshots and
+  recordings (and the browser's address bar or devtools when they show them). If a change can't be explained without a
+  secret, describe it without the value or leave that note out. Reviewers' screens get shared and files are kept for
+  the retention period.
 - **Skip tests and generated files**: `spec/`, `test/`, `__tests__/`, `*_spec.*`, `*.test.*`, `*.spec.*`, fixtures,
   factories, snapshots, lock files, `dist/`, `vendor/`.
 - **Words**: one to three short sentences per note, plain words a non-author understands. Say what it does for the
@@ -42,6 +49,13 @@ never write it into files or commits.
   - before / after: two images next to each other in one note, named `…-before.png` / `…-after.png` (or alt text
     starting with "Before" / "After"), become one image with a drag handle (⤢ opens it large): `![Before: grey button](attachment:login-before.png) ![After: orange button](attachment:login-after.png)`.
     Same size and crop for both, so the handle lines them up.
+  - screen recordings: `![Dragging a card between columns](attachment:drag-card.webm)` (`.webm` or `.mp4`) plays
+    inline, muted, with controls. Use one only when motion is the point (an animation, a drag, a multi-step flow) and
+    a screenshot or two can't show it; keep it a few seconds, cropped to the part that changed, under
+    **{{MAX_VIDEO_MB}} MB**. Record with Playwright (`browser.newContext({ recordVideo: { dir: 'rec', size: { width: 800, height: 500 } } })`,
+    the `.webm` is saved when the context closes), then shrink it if needed:
+    `ffmpeg -i in.webm -t 8 -vf "scale=800:-2,fps=15" -an -c:v libvpx-vp9 -b:v 300k -deadline good clip.webm`
+    or, as MP4, `ffmpeg -i in.webm -t 8 -vf "scale=800:-2,fps=15" -an -c:v libx264 -crf 30 -preset slow -pix_fmt yuv420p -movflags +faststart clip.mp4`.
   - interactive demos: `[try the picker](attachment:picker-demo.html)` when clicking beats a screenshot (a component's
     states, an animation, a form's validation). Reviewers get a live preview under the note and can expand it at phone,
     tablet or desktop width. Write **one self-contained file**: CSS in `<style>`, JS in `<script>`, images as `data:`
@@ -55,8 +69,9 @@ never write it into files or commits.
 - **Risk**: give `"risk": "high" | "medium" | "low"` to the notes where reviewers should look hardest or can relax
   (money, auth, data loss, migrations, concurrency are high; copy and renames low). Reviewers get a "where to look
   hardest" list at the top. Use it sparingly and say why in the note's text; leave it out when there is nothing to flag.
-- **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.md .csv .txt .html` (UTF-8 text).
-  Up to **1 MB each**, 30 files and 20 MB per PR. Anything else (svg, pdf, zip, video) is refused with `415`:
+- **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.mp4 .webm` (screen recordings,
+  checked by content), `.md .csv .txt .html` (UTF-8 text). Up to **{{MAX_FILE_MB}} MB each** (videos {{MAX_VIDEO_MB}} MB),
+  {{MAX_FILES}} files and {{MAX_PULL_MB}} MB per PR (this server's limits). Anything else (svg, pdf, zip, mov…) is refused with `415`:
   convert it first (a PNG screenshot instead of an SVG, a Markdown summary instead of a PDF). Keep screenshots small:
   crop to the part that changed, PNG for UI, JPG for photos.
 - Markdown in `body` and `summary`: headings, paragraphs, `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, lists and
@@ -104,7 +119,7 @@ never write it into files or commits.
      ]
    }
    ```
-   `path` exactly as in the diff; `title` optional; up to 500 annotations.
+   `path` exactly as in the diff; `title` optional; up to {{MAX_ANNOTATIONS}} annotations.
 5. **Check every note against the diff before uploading**; fix or drop each one it reports, then run it again until
    it prints `ok`:
    ```bash

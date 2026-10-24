@@ -1,0 +1,40 @@
+# DiffNotes: one container, one volume. `docker compose up -d`, then `docker compose logs | grep "first admin"`.
+# Every variable is explained in docs/install.md (Environment). Run exactly one instance: see docs/install.md.
+services:
+  diffnotes:
+    build: .
+    image: diffnotes
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - diffnotes:/data
+    environment:
+      # server
+      PUBLIC_URL: https://reviews.company.com   # your https:// origin
+      ADMIN_EMAIL: you@company.com              # the first admin, only used when there are no users yet
+      RETENTION_DAYS: 30
+      # ADMIN_PASSWORD: ""                      # default: random, printed once in the logs
+      # PORT: 3000
+      # DATA_DIR: /data
+      # limits
+      # MAX_FILE_MB: 1
+      # MAX_VIDEO_MB: 2
+      # MAX_FILES: 30
+      # MAX_ANNOTATIONS: 500
+      # MAX_PULL_MB: 20
+      # MAX_BODY_KB: 1024
+      # MAX_ACCOUNT_MB: 1024
+      # MAX_PULLS: 1000
+      # security
+      # SESSION_SECRET: ""                      # default: random, kept in /data
+      # ENCRYPTION_KEY: ""                      # default: random, kept in /data
+      # CLOUDFLARE_ONLY: 1
+      # integrations (all off unless set; use your own)
+      # BUGSINK_DSN: ""
+      # UMAMI_SCRIPT: ""
+      # UMAMI_WEBSITE_ID: ""
+      # S3 storage is not an env var: set it on /admin (docs/storage.md)
+
+volumes:
+  diffnotes:
