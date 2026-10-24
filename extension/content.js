@@ -144,6 +144,13 @@
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('.r42-lightbox')?.remove() })
 
+  function showError(text) {
+    const panel = el('div', 'r42-bar')
+    panel.id = 'r42-panel'
+    panel.append(el('b', '', 'Reviews42'), el('span', 'r42-hint', text))
+    document.body.append(panel)
+  }
+
   function clear() {
     observer?.disconnect()
     observer = null
@@ -158,7 +165,9 @@
     clear()
     if (!m) return void chrome.runtime.sendMessage({ type: 'clear' }).catch(() => {})
     const res = await chrome.runtime.sendMessage({ type: 'pull', repo: `${m[1]}/${m[2]}`, number: m[3] }).catch(() => null)
-    if (current !== key || !res?.pull) return
+    if (current !== key) return
+    if (res?.error && res.error !== 'not connected') return showError(res.error)
+    if (!res?.pull) return
     pull = { ...res.pull, server: res.server }
     collapsed.clear()
     apply()

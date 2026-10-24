@@ -4,9 +4,13 @@ const settings = () => chrome.storage.local.get(['server', 'token'])
 async function call(path) {
   const { server, token } = await settings()
   if (!server || !token) return { error: 'not connected' }
+  // a network or permission failure throws; say so instead of showing nothing
   const res = await fetch(server + path, { headers: { authorization: `Bearer ${token}` } })
+    .catch(() => null)
+  if (!res) return { error: `can't reach ${server}: open the Reviews42 popup and connect again` }
   if (res.status === 404) return { none: true }
-  if (!res.ok) return { error: `HTTP ${res.status}` }
+  if (res.status === 401) return { error: 'the token was rejected: open the Reviews42 popup and connect with a new one' }
+  if (!res.ok) return { error: `server answered HTTP ${res.status}` }
   return res
 }
 
