@@ -19,6 +19,11 @@
   (`Sec-Fetch-Site`), on top of `SameSite=Lax`, so a sibling subdomain can't post to the API either.
 - **Repositories** belong to an account; the same name can be connected in several accounts, and each only ever sees
   its own notes. Only owners and admins connect new ones (also by uploading).
+- **Behind Cloudflare**: with `CLOUDFLARE_ONLY=1` the server answers only Cloudflare's addresses (the last
+  `X-Forwarded-For` entry, added by the proxy in front, is checked against Cloudflare's ranges), so its own IP can't be
+  used to skip Cloudflare. Without it, the client is that last entry; client-sent ones are ignored.
+- **No third parties**: the page loads nothing from elsewhere (self-hosted font, CSP `'self'`), and note images load
+  only from the note's server, so no outside service learns who opens the app or reads a note.
 - **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk.
 
 ## Uploads
@@ -68,8 +73,9 @@ Reviews42 listens to). Only members of the PR's account can see it, like every o
 
 Notes are untrusted input. They are rendered by one small Markdown renderer
 ([`extension/markdown.js`](../extension/markdown.js)) used by both the web app and the extension: everything is
-HTML-escaped first, only `http(s)` and relative URLs survive in links and images (not `//host` or `/\host`), and
-generated tags are protected from later passes. Attached `.md` / `.csv` / `.txt` files go through the same escaping.
+HTML-escaped first, only `http(s)` and relative URLs survive in links (not `//host` or `/\host`), images load only
+from the note's own server (a remote image becomes a link, so no third party learns who read a note), and generated
+tags are protected from later passes. Attached `.md` / `.csv` / `.txt` files go through the same escaping.
 
 The extension holds tokens in its background worker; the sites' pages never see them. It fetches only
 `/files/<pull>/<name>` paths from connected servers, connects only to `https://` servers (`http://` for localhost),
@@ -84,8 +90,8 @@ database alone doesn't reveal it. Keep `/data` (or `ENCRYPTION_KEY`) with your b
 ## Headers
 
 Every response carries `secureHeaders` (`X-Frame-Options`, HSTS, `Referrer-Policy: no-referrer`, …). The web app's
-page adds a CSP: scripts only from the server itself, fonts and styles also from Google Fonts, frames only from the
-server (the sandboxed demos), `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`. Server errors can be
+page adds a CSP: scripts, styles, fonts and images only from the server itself (the font is self-hosted), frames only
+from the server (the sandboxed demos), `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`. Server errors can be
 reported to a Sentry-compatible DSN with the route pattern only, never the URL or body. An S3 error shows only the
 bucket's error code, never its reply.
 

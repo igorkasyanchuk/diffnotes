@@ -61,6 +61,7 @@ It prints a new random password and signs that user out everywhere; their agent 
 | `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |
+| `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing) and `cf-connecting-ip` is trusted as the client |
 | `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
 
 File storage (disk or an S3-compatible bucket) is not an environment variable: a super admin sets it on `/admin`, see
@@ -69,8 +70,10 @@ File storage (disk or an S3-compatible bucket) is not an environment variable: a
 ## Upgrades and backups
 
 - Upgrade: pull, rebuild, restart. The database migrates itself on start.
-- Back up the whole `/data` volume (Coolify: Backups → volume backup to S3). With S3 storage, uploads live in the
-  bucket; the volume still holds the database and the encryption key that unlocks the S3 secret.
+- Back up the whole `/data` volume (Coolify: the app's Backups → add the volume, daily, enable S3). With S3 storage,
+  uploads live in the bucket; the volume still holds the database and the encryption key that unlocks the S3 secret.
+  Archives taken while the app runs can catch the live database mid-write, so the app also writes a consistent copy
+  every hour to `/data/backup/reviews42.db`: restore from that one.
 - An hourly job deletes expired PRs, their files, old sessions and expired invitations.
 
 ## Local development

@@ -9,7 +9,7 @@ process.env.ADMIN_EMAIL = 'admin@example.com'
 process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
 const { db } = await import('./db.ts')
-const { purge, repoName } = await import('./app.ts')
+const { fromCloudflare, purge, repoName } = await import('./app.ts')
 // a real PNG signature plus padding up to n bytes
 const png = (n = 16) => { const b = new Uint8Array(n); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b }
 
@@ -142,6 +142,13 @@ describe('reviews42', () => {
     expect((await call(`/api/accounts/${mine.id}`, { cookie: outsider, method: 'DELETE' })).status).toBe(200)
   })
 
+  it('knows Cloudflare addresses (CLOUDFLARE_ONLY lets only those connect)', () => {
+    expect(fromCloudflare('104.16.1.1')).toBe(true)
+    expect(fromCloudflare('2606:4700::1')).toBe(true)
+    expect(fromCloudflare('8.8.8.8')).toBe(false)
+    expect(fromCloudflare('not an ip')).toBe(false)
+  })
+
   it('keeps tokens to annotations and files, and cookie writes to this site', async () => {
     expect((await call('/api/tokens', { token })).status).toBe(401)
     expect((await call('/api/tokens', { token, body: { name: 'x' } })).status).toBe(401)
@@ -242,8 +249,9 @@ describe('reviews42', () => {
 
   it('renders Markdown without letting a later pass rewrite inside generated tags', async () => {
     const md = (globalThis as unknown as { r42Markdown: (s: string) => string }).r42Markdown
-    expect(md('![x](http://a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
+    expect(md('![x](/a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
     expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
+    expect(md('![s](https://t.io/p.png)')).not.toContain('<img') // remote images are links: nothing loads from a third party
     // hostile input stays cheap: deep quotes don't overflow the stack, long lines under a pipe don't backtrack
     expect(md('>'.repeat(5000) + ' x')).toContain('<blockquote>')
     const t = performance.now()

@@ -31,7 +31,7 @@ never write it into files or commits.
 - **New, renamed or deleted files get one file note** (no `line`), not per-line notes.
 - **Screenshots and files are welcome** when they show the change better than words. Reference each upload in a
   note's Markdown as `attachment:<file name>`:
-  - images: `![Checkout on mobile](attachment:checkout-mobile.png)`. Put **several images in one note** when they belong
+  - images: `![Checkout on mobile](attachment:checkout-mobile.png)` (upload them: an image from another site shows as a link). Put **several images in one note** when they belong
     together, e.g. a component at mobile and desktop width, or before and after: reviewers flip through them in a gallery
     with the arrow keys. The alt text is the caption, so make it say what the image shows.
   - reports and data: `[test report](attachment:report.md)`, `[timings](attachment:bench.csv)`, `[log](attachment:out.txt)`;

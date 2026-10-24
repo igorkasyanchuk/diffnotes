@@ -1,5 +1,6 @@
 // Tiny Markdown → HTML for annotation bodies, shared by the extension (content script global) and the web app (import).
 // Everything is escaped first; only http(s), relative and /files/ URLs survive. resolve(url) turns /files/… into a usable src.
+// Images load only from the note's own server: a remote one is a link, so opening a note never tells a third party who read it.
 ;(() => {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   // `/\\host` is no relative path: browsers read it as //host
@@ -11,6 +12,7 @@
     let s = esc(text.replace(/\u0000/g, '')).replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`))
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
       const u = safeUrl(url.replace(/&amp;/g, '&'))
+      if (/^https?:/i.test(u)) return `${hold(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">`)}${alt || 'image'} ↗</a>`
       return u ? hold(`<img alt="${alt}" src="${esc(resolve(u))}" data-r42-src="${esc(u)}">`) : m
     })
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {

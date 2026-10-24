@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
+import { BlockList, isIP } from 'node:net'
 import path from 'node:path'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -48,6 +49,24 @@ type Env = { Variables: { user: User } }
 export const app = new Hono<Env>()
 
 app.use(secureHeaders({ referrerPolicy: 'no-referrer' }))
+// CLOUDFLARE_ONLY=1: only Cloudflare's edge may connect (Cloudflare's published ranges, cloudflare.com/ips), so the
+// server's own address serves nothing and Cloudflare can't be bypassed. /healthz stays open for the container healthcheck.
+const CLOUDFLARE_ONLY = process.env.CLOUDFLARE_ONLY === '1'
+const CLOUDFLARE = new BlockList()
+for (const r of ('173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 ' +
+  '188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 ' +
+  '2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32').split(' ')) {
+  const [ip, bits] = r.split('/')
+  CLOUDFLARE.addSubnet(ip, Number(bits), isIP(ip) === 6 ? 'ipv6' : 'ipv4')
+}
+const peerIp = (c: Context) => (c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim() ||
+  (() => { try { return getConnInfo(c).remote.address ?? '' } catch { return '' } })()).replace(/^::ffff:(?=\d+\.)/, '')
+export const fromCloudflare = (ip: string) => isIP(ip) > 0 && CLOUDFLARE.check(ip, isIP(ip) === 6 ? 'ipv6' : 'ipv4')
+app.use('*', async (c, next) => {
+  if (CLOUDFLARE_ONLY && c.req.path !== '/healthz' && !fromCloudflare(peerIp(c))) return c.text('Forbidden', 403)
+  await next()
+})
+
 // Cookie-signed-in writes must come from this site's own pages. SameSite=Lax lets sibling subdomains through, so ask
 // the browser (Sec-Fetch-Site); curl, the skill and the extension send Bearer tokens instead and aren't affected.
 app.use('/api/*', async (c, next) => {
@@ -143,10 +162,10 @@ const recordFailure = (key: string) => failures.set(key, [...(failures.get(key) 
 const loginKeys = (c: Context, email: string) => { const ip = clientIp(c); return [`ie:${ip}:${email}`, `i:${ip}`, `e:${email}`] }
 const throttled = ([ie, i, e]: string[]) => throttle(ie, 10, 600_000) || throttle(`${ie}:s`, 1, 1000) || throttle(i, 100, 600_000) || throttle(e, 50, 600_000)
 const failed = (keys: string[]) => [...keys, `${keys[0]}:s`].forEach(recordFailure)
-// ponytail: trusts the proxy's client-IP headers (Cloudflare, then Traefik/nginx); reachable without a proxy, they can be
-// spoofed, which only moves a guesser from the per-IP budgets to the per-email one
-const clientIp = (c: Context) =>
-  c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? (() => { try { return getConnInfo(c).remote.address } catch { return '' } })() ?? ''
+// Behind Cloudflare, cf-connecting-ip is the client; it's only trusted with CLOUDFLARE_ONLY, which also refuses every
+// connection that isn't Cloudflare's. Else the client is the peer: the last X-Forwarded-For entry (the one the proxy in
+// front of us, Traefik or nginx, appended; earlier ones are whatever the client sent), or the socket without a proxy.
+const clientIp = (c: Context) => (CLOUDFLARE_ONLY && c.req.header('cf-connecting-ip')) || peerIp(c)
 
 app.post('/api/login', async (c) => {
   const body = await json(c)
@@ -738,9 +757,9 @@ app.get('/sitemap.xml', (c) => c.body(`<?xml version="1.0" encoding="UTF-8"?>
 `, 200, { 'content-type': 'application/xml; charset=utf-8' }))
 
 // the web app's one page, with this server's address in its canonical and Open Graph tags (index.html: __ORIGIN__)
-// and a CSP: scripts only from here, styles and fonts also from Google Fonts, frames only /files demos
-const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-  "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https: http:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
+// and a CSP: everything from here only (no third party learns who opens the app), frames only /files demos
+const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
   "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 let indexHtml: string | undefined
 const page = (c: Context) => {

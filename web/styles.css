@@ -1,4 +1,8 @@
 /* Terminal look: mono everywhere, dark first, one orange accent, green for prompts. Light when the OS is light. */
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+}
 :root {
   --bg: #0a0b0d;
   --panel: #101216;
