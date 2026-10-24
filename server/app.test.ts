@@ -142,6 +142,19 @@ describe('reviews42', () => {
     expect((await call(`/api/accounts/${mine.id}`, { cookie: outsider, method: 'DELETE' })).status).toBe(200)
   })
 
+  it('deletes a pull request\'s notes by id, for members of its account only', async () => {
+    const put = await call('/api/v1/pulls/acme/web/77', { token, method: 'PUT', body: { annotations: [{ path: 'a.ts', body: 'stale' }] } })
+    expect(put.status).toBe(200)
+    const other = (await call('/api/accounts', { cookie: admin, body: { name: 'Elsewhere' } })).data
+    const { token: t } = (await call(`/api/accounts/${other.id}/invites`, { cookie: admin, body: { email: 'else@example.com' } })).data
+    const stranger = (await call(`/api/invites/${t}/accept`, { body: { password: 'stranger-pass' } })).res.headers.get('set-cookie')!.split(';')[0]
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: stranger, method: 'DELETE' })).status).toBe(404)
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    expect((await call('/api/v1/pulls/acme/web/77', { token })).status).toBe(404)
+    expect((await call(`/api/accounts/${other.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
+    db.prepare('delete from users where email = ?').run('else@example.com')
+  })
+
   it('knows Cloudflare addresses (CLOUDFLARE_ONLY lets only those connect)', () => {
     expect(fromCloudflare('104.16.1.1')).toBe(true)
     expect(fromCloudflare('2606:4700::1')).toBe(true)

@@ -32,7 +32,11 @@ Open the PR's branch in your agent and ask: **“annotate this PR with reviews42
 3. adds screenshots when the change is visible (for responsive UI: the same screen at mobile and desktop width, in one note → a gallery);
 4. uploads everything in one request and reports the link.
 
-Re-running after a push replaces the previous notes and files, so it is safe to repeat.
+Re-running after a push replaces the previous notes and files, so it is safe to repeat. Before every upload the agent
+checks each note against the current diff (a small script in the skill: the file must be changed in the PR and the
+lines inside one changed block) and only uploads what is true at the PR's head commit. After new commits it reads the
+stored notes, keeps and fixes the ones that still hold and drops the rest; with nothing left to say it deletes them
+(`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**.
 
 ## What a note looks like
 

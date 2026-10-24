@@ -12,7 +12,7 @@ declare global {
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { path: string; line: number | null; end_line: number | null; side: string; title: string; body: string }
-type Pull = { id: string; repository: string; number: number; title: string; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -440,9 +440,11 @@ function PullPage({ id }: { id: string }) {
   if (!data) return null
   const byFile = Map.groupBy(data.annotations, (a) => a.path)
   return <>
-    <p className="hint">{data.repository}#{data.number} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
+    <p className="hint">{data.repository}#{data.number}{data.head_sha && <> · written for commit <code>{data.head_sha.slice(0, 7)}</code></>} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
     <h1>{data.title || 'untitled pull request'}</h1>
-    <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a></p>
+    <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
+      <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
+        'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.')}>delete notes</button></p>
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
     {[...byFile].map(([file, notes]) => <div className="file" key={file}>
       <h3>{file}</h3>

@@ -487,11 +487,17 @@ const findPull = (c: Context<Env>) => {
 
 app.get('/api/v1/me', (c) => c.json({ user: c.get('user') }))
 app.get(PULL_PATH, (c) => c.json(pullOut(findPull(c))))
-app.get('/api/pulls/:id', (c) => {
-  const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('id')) as Pull | undefined
+const pullById = (c: Context<Env>) => {
+  const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('id') ?? '') as Pull | undefined
   if (!p) fail(404, 'Not found')
   role(p!.account_id, c.get('user'))
-  return c.json(pullOut(p!))
+  return p!
+}
+app.get('/api/pulls/:id', (c) => c.json(pullOut(pullById(c))))
+// the web app's "delete notes": by id, so it's always the PR on the page even when its name is connected in several accounts
+app.delete('/api/pulls/:id', async (c) => {
+  await dropPulls([pullById(c).id])
+  return c.json({ ok: true })
 })
 app.delete(PULL_PATH, async (c) => {
   const p = findPull(c)

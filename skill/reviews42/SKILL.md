@@ -1,6 +1,6 @@
 ---
 name: reviews42
-description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to Reviews42; teammates then see them inside the diff through the Reviews42 browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, or to upload annotations to Reviews42. Nothing is posted to GitHub, GitLab or Bitbucket itself.
+description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to Reviews42; teammates then see them inside the diff through the Reviews42 browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, to upload annotations to Reviews42, or to refresh or remove notes that are out of date after new commits. Nothing is posted to GitHub, GitLab or Bitbucket itself.
 ---
 
 # Reviews42: annotate a pull request
@@ -22,6 +22,9 @@ never write it into files or commits.
 ## Rules
 
 - **Never touch the code or the PR to explain it.** No code comments, no PR comments, no PR body edits.
+- **Only upload what you are sure is true at the PR's head.** Annotate committed and pushed code only: `head_sha` is
+  the PR's head commit and equals `git rev-parse HEAD`. Every note points at a block that is in the current diff
+  (step 5 checks it) and says what that code does now. A wrong note is worse than none: when unsure, leave it out.
 - **Skip tests and generated files**: `spec/`, `test/`, `__tests__/`, `*_spec.*`, `*.test.*`, `*.spec.*`, fixtures,
   factories, snapshots, lock files, `dist/`, `vendor/`.
 - **Words**: one to three short sentences per note, plain words a non-author understands. Say what it does for the
@@ -92,7 +95,15 @@ never write it into files or commits.
    }
    ```
    `path` exactly as in the diff; `title` optional; up to 500 annotations.
-5. **Upload** (replaces anything uploaded for this PR before, so re-running after a push is safe):
+5. **Check every note against the diff before uploading**; fix or drop each one it reports, then run it again until
+   it prints `ok`:
+   ```bash
+   test "$(git rev-parse HEAD)" = "<headRefOid>" || echo "HEAD is not the PR head: push, or check out the PR branch"
+   python3 check.py reviews42.json "$BASE"   # check.py: the script under “Check script” below
+   ```
+   It only proves the places exist; you still reread each note against the code at those lines.
+6. **Upload** (replaces everything uploaded for this PR before: notes you leave out are deleted, so always send the
+   full, current set):
    ```bash
    H=${REVIEWS42_URL:-{{HOST}}}
    curl -fsS -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN" \
@@ -104,12 +115,64 @@ never write it into files or commits.
    account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
    isn't allowed or doesn't match its extension. A new repository is connected to the account you own or administer on
    its first upload.
-6. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"` returns what
+7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"` returns what
    was stored; the `annotations` count must match what you wrote.
+
+## After new commits: keep the notes true
+
+Old notes go stale when the code under them changes: lines move, blocks disappear, behaviour changes. Whenever you
+push to an annotated PR (or are asked to refresh its notes):
+
+1. Fetch what is stored: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN" > old.json`
+   (`404` = nothing stored yet).
+2. Read the new diff (workflow step 2) and go through every stored note: keep it only if its file is still changed,
+   its block still exists (fix moved line numbers) and its words still describe the code. Rewrite what changed,
+   drop what no longer applies, add notes for new blocks. Keep the attachments that still show the current state
+   (re-upload them with the payload; old files are replaced too).
+3. Run the check (step 5) and upload the full set (step 6). Notes you drop disappear for reviewers right away.
+
+**Remove all notes** of a PR when none of them holds any more and you have nothing new to say, when the PR is closed
+without merging, or when the user asks:
+
+```bash
+curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"   # → {"ok":true}
+```
+
+Teammates can also press **delete notes** on the PR's page in Reviews42.
+
+## Check script
+
+Save as `check.py` next to `reviews42.json` (outside the repo). Exit code 1 lists every note whose file is not in
+the PR's diff or whose lines are not inside one changed block on its side.
+
+```python
+import json, re, subprocess, sys
+pay, base = json.load(open(sys.argv[1])), sys.argv[2]
+diff = subprocess.run(['git', 'diff', '-M', '-U0', '--no-color', base, 'HEAD'], capture_output=True, text=True, check=True).stdout
+files, old, new = {}, None, None
+for l in diff.splitlines():
+    if l.startswith('--- '): old = None if l == '--- /dev/null' else l[6:]
+    elif l.startswith('+++ '):
+        new = None if l == '+++ /dev/null' else l[6:]
+        files[new or old] = {'LEFT': [], 'RIGHT': []}
+    elif (m := re.match(r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', l)):
+        o, oc, n, nc = int(m[1]), int(m[2] or 1), int(m[3]), int(m[4] or 1)
+        if oc: files[new or old]['LEFT'].append((o, o + oc - 1))
+        if nc: files[new or old]['RIGHT'].append((n, n + nc - 1))
+bad = []
+for i, a in enumerate(pay.get('annotations', [])):
+    f, line = files.get(a.get('path')), a.get('line')
+    end = a.get('end_line') or line
+    if f is None: bad.append(f"annotations[{i}] {a.get('path')}: not changed in this PR")
+    elif line and not any(s <= line and end <= e for s, e in f[a.get('side', 'RIGHT')]):
+        bad.append(f"annotations[{i}] {a['path']}:{line}-{end}: not inside one changed block ({a.get('side', 'RIGHT')})")
+print('\n'.join(bad) or 'ok'); sys.exit(1 if bad else 0)
+```
 
 ## Report back
 
-Say how many file notes and line notes you uploaded (and that test files were skipped), list the attached files,
+Say how many file notes and line notes you uploaded (and that test files were skipped), on a refresh how many you kept,
+rewrote and dropped, list the attached files,
 and give the `url` from the upload response plus the diff page where teammates with the extension see the notes:
 `https://github.com/<REPO>/pull/<number>/changes`, `https://<REPO>/-/merge_requests/<number>/diffs` (GitLab) or
 `https://<REPO>/pull-requests/<number>/diff` (Bitbucket).

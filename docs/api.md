@@ -10,6 +10,7 @@ session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make 
 | `PUT` | `/api/v1/pulls/<repository>/<number>` | replace a PR's notes and files (see below) |
 | `GET` | `/api/v1/pulls/<repository>/<number>` | the PR's notes, summary and files; `404` when none or not your account's |
 | `DELETE` | `/api/v1/pulls/<repository>/<number>` | delete the notes and files now |
+| `DELETE` | `/api/pulls/:id` | the same by id (web app's **delete notes**, session cookie) |
 | `GET` | `/api/v1/me` | who the token belongs to |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
