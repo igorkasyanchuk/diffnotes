@@ -17,7 +17,7 @@ export const Code = ({ text, prompt }: { text: string; prompt?: boolean }) =>
 const BENEFITS: [string, string][] = [
   ['review faster', 'Reviewers read why each block changed before reading how. Less back-and-forth, fewer “what does this do?” comments.'],
   ['context from the author', 'The agent that wrote the code explains it while it still remembers why: decisions, trade-offs, what was left out.'],
-  ['screenshots in the diff', 'UI changes come with before/after images next to the lines that caused them. No more “can you post a screenshot?”.'],
+  ['screenshots and live demos', 'Before/after images next to the lines that caused them, and small HTML demos you can click, locked in a sandbox.'],
   ['zero noise on GitHub', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
   ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools. Connect several servers in one browser for different teams or clients.'],
@@ -33,7 +33,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     </section>
     <Demo />
     <section className="lp-after">
-      <p className="lp-lead">A coding agent attaches plain-language notes and screenshots to the lines it changed. Reviewers see them
+      <p className="lp-lead">A coding agent attaches plain-language notes, screenshots and live demos to the lines it changed. Reviewers see them
         right inside GitHub's diff, through a small browser extension. Nothing is posted to the PR.</p>
       <p>{cta} <a href="#install" className="btn">install in 3 minutes</a></p>
     </section>
