@@ -141,14 +141,15 @@ app.post('/api/logout', async (c) => {
   return c.json({ ok: true })
 })
 
+const accountsOf = (userId: string) => db.prepare(`select a.id, a.name, m.role from accounts a join memberships m on m.account_id = a.id
+  where m.user_id = ? order by a.created_at`).all(userId)
+const tokenCount = (userId: string) => (db.prepare('select count(*) as n from tokens where user_id = ?').get(userId) as { n: number }).n
+
 // who is signed in, plus what the app layout shows around every page: their accounts and whether they have a token yet
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
   if (!user) return c.json({ user: null })
-  const accounts = db.prepare(`select a.id, a.name, m.role from accounts a join memberships m on m.account_id = a.id
-    where m.user_id = ? order by a.created_at`).all(user.id)
-  const tokens = (db.prepare('select count(*) as n from tokens where user_id = ?').get(user.id) as { n: number }).n
-  return c.json({ user, accounts, tokens })
+  return c.json({ user, accounts: accountsOf(user.id), tokens: tokenCount(user.id) })
 })
 
 // --- invitations: the only way in besides the first admin
@@ -202,8 +203,7 @@ app.put('/api/password', async (c) => {
 app.get('/api/tokens', (c) => c.json(db.prepare('select id, name, created_at, last_used_at from tokens where user_id = ? order by created_at desc')
   .all(c.get('user').id)))
 app.post('/api/tokens', async (c) => {
-  const body = await json(c), user = c.get('user')
-  const count = (db.prepare('select count(*) as n from tokens where user_id = ?').get(user.id) as { n: number }).n
+  const body = await json(c), user = c.get('user'), count = tokenCount(user.id)
   if (count >= 50) fail(409, 'Too many tokens, delete some first')
   return c.json({ token: newToken(user.id, str(body.name, 60) || `token ${count + 1}`) })
 })
@@ -240,9 +240,7 @@ function usage(dir: string) {
 }
 
 app.get('/api/dashboard', (c) => {
-  const user = c.get('user')
-  const accounts = db.prepare(`select a.id, a.name, m.role from accounts a join memberships m on m.account_id = a.id
-    where m.user_id = ? order by a.created_at`).all(user.id)
+  const user = c.get('user'), accounts = accountsOf(user.id)
   const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository,
     (select count(*) from annotations n where n.pull_id = p.id) as annotations
     from pulls p join repositories r on r.id = p.repository_id join memberships m on m.account_id = r.account_id
