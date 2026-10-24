@@ -40,6 +40,7 @@ printed when unset) with an account "My team". Everyone else joins through an in
 | `RETENTION_DAYS` | `30` | annotations live this long after their last upload |
 | `MAX_FILE_MB` / `MAX_PULL_MB` | `10` / `50` | per uploaded file / per pull request |
 | `SESSION_SECRET` | random, in `DATA_DIR` | cookie signing key |
+| `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry): server 500s are reported with the route pattern only |
 
 ## Use it
 

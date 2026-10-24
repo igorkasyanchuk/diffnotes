@@ -153,4 +153,21 @@ describe('reviews42', () => {
     expect(md('![x](http://a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
     expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
   })
+
+  it('reports 500s to BUGSINK_DSN with the route pattern only', async () => {
+    const { report } = await import('./app.ts')
+    const { vi } = await import('vitest')
+    const sent = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response())
+    report(new Error('boom'), '/api/pulls/:id', 'GET')
+    expect(sent).not.toHaveBeenCalled()
+    process.env.BUGSINK_DSN = 'https://k3y@errors.dev/7'
+    report(new Error('boom'), '/api/pulls/:id', 'GET')
+    delete process.env.BUGSINK_DSN
+    const [url, init] = sent.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://errors.dev/api/7/envelope/')
+    expect((init.headers as Record<string, string>)['x-sentry-auth']).toContain('sentry_key=k3y')
+    const event = JSON.parse(String(init.body).split('\n')[2])
+    expect(event.transaction).toBe('GET /api/pulls/:id')
+    sent.mockRestore()
+  })
 })

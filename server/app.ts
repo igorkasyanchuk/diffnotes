@@ -38,9 +38,33 @@ export const app = new Hono<Env>()
 
 app.use(secureHeaders({ referrerPolicy: 'no-referrer' }))
 app.use('/api/*', bodyLimit({ maxSize: MAX_PULL, onError: (c) => c.json({ error: 'Too large' }, 413) }))
+// Optional error tracking: a Sentry envelope to any Sentry-compatible DSN (Bugsink, GlitchTip, Sentry).
+// Only the route pattern is sent, never the path or body.
+// ponytail: plain fetch, no SDK; no breadcrumbs or source context, add @sentry/node if those matter
+export function report(err: Error, route: string, method: string) {
+  const dsn = URL.parse(process.env.BUGSINK_DSN ?? '')
+  if (!dsn) return
+  const frames = (err.stack ?? '').split('\n').slice(1).reverse().map((l) => {
+    const m = l.match(/at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/)
+    return m ? { function: m[1] ?? '?', filename: m[2], lineno: +m[3], colno: +m[4] } : { function: l.trim() }
+  })
+  const event_id = randomUUID().replaceAll('-', '')
+  const event = {
+    event_id, timestamp: Date.now() / 1000, platform: 'node', level: 'error',
+    transaction: `${method} ${route}`, request: { method, url: route },
+    exception: { values: [{ type: err.name, value: err.message, stacktrace: { frames } }] },
+  }
+  fetch(`${dsn.origin}/api${dsn.pathname}/envelope/`, {
+    method: 'POST',
+    headers: { 'x-sentry-auth': `Sentry sentry_version=7, sentry_key=${dsn.username}` },
+    body: [{ event_id }, { type: 'event' }, event].map((x) => JSON.stringify(x)).join('\n'),
+  }).catch(() => {})
+}
+
 app.onError((err, c) => {
   if (err instanceof HttpError) return c.json({ error: err.message }, err.status as 400)
   console.error(err)
+  report(err, c.req.routePath, c.req.method)
   return c.json({ error: 'Server error' }, 500)
 })
 
