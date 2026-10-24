@@ -212,7 +212,11 @@ describe('reviews42', () => {
     expect((await call(`/api/admin/users/${me.id}`, { cookie: admin, method: 'PUT', body: { admin: false } })).status).toBe(400)
     expect((await call(`/api/admin/users/${dev.id}`, { cookie: admin, method: 'PUT', body: { admin: true } })).status).toBe(200)
     expect((await call('/api/admin/stats', { cookie: member })).status).toBe(200)
-    expect((await call(`/api/admin/users/${dev.id}`, { cookie: admin, method: 'PUT', body: { admin: false } })).status).toBe(200)
+    // a super admin manages an account even where they are only a member
+    expect((await call(`/api/accounts/${accountId}/members/${dev.id}`, { cookie: admin, method: 'PUT', body: { role: 'member' } })).status).toBe(200)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: member })).data.role).toBe('admin')
+    expect((await call(`/api/admin/users/${dev.id}`, { cookie: admin, method: 'PUT', body: { admin: 'false' } })).status).toBe(200)
+    expect((await call('/api/admin/stats', { cookie: member })).status).toBe(404)
   })
 
   it('lets the owner delete the account with its files', async () => {

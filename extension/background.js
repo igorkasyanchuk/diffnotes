@@ -37,13 +37,16 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const list = await servers()
       const results = await Promise.all(list.map(async (s) => {
         const res = await call(s, `/api/v1/pulls/${msg.repo}/${msg.number}`)
-        return res instanceof Response ? { pull: { ...(await res.json()), server: s.server } } : res
+        if (!(res instanceof Response)) return res
+        // one server answering something else (a proxy's HTML page) must not hide the others' notes
+        const pull = await res.json().catch(() => null)
+        return Array.isArray(pull?.annotations) ? { pull: { ...pull, server: s.server } } : { error: `${new URL(s.server).host} did not answer like a Reviews42 server` }
       }))
       const pulls = results.filter((r) => r.pull).map((r) => r.pull), errors = results.filter((r) => r.error).map((r) => r.error)
       const count = pulls.reduce((n, p) => n + p.annotations.length, 0)
       chrome.action.setBadgeBackgroundColor({ color: '#e8622a' })
       chrome.action.setBadgeText({ tabId: sender.tab.id, text: count ? String(count) : '' })
-      return { pulls, errors, connected: list.length }
+      return { pulls, errors }
     }
     if (msg.type === 'clear') return chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
     // exactly /files/<pull>/<name> on a connected server: a `..` segment would send the token to any other API path

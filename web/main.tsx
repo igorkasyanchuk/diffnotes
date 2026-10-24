@@ -211,15 +211,16 @@ function Account({ id, user }: { id: string; user: User }) {
   if (loadError) return <p className="error">{loadError}</p>
   if (!data) return null
   const admin = data.role === 'owner' || data.role === 'admin'
+  const shown = tab === 'settings' && !admin ? 'overview' : tab // #settings from an admin's link, opened by a member
   return <>
     <div className="head"><h1>{data.account.name}</h1><span className="chip hot">{data.role}</span></div>
     <div className="tabs">
-      {TABS.filter((t) => t !== 'settings' || admin).map((t) => <button key={t} className={tab === t ? 'on' : ''} onClick={() => pick(t)}>{t}</button>)}
+      {TABS.filter((t) => t !== 'settings' || admin).map((t) => <button key={t} className={shown === t ? 'on' : ''} onClick={() => pick(t)}>{t}</button>)}
     </div>
-    {tab === 'overview' && <AccountOverview id={id} />}
-    {tab === 'members' && <Members id={id} data={data} admin={admin} user={user} reload={reload} />}
-    {tab === 'repositories' && <Repositories id={id} data={data} admin={admin} reload={reload} />}
-    {tab === 'settings' && admin && <AccountSettings id={id} data={data} user={user} reload={reload} />}
+    {shown === 'overview' && <AccountOverview id={id} />}
+    {shown === 'members' && <Members id={id} data={data} admin={admin} user={user} reload={reload} />}
+    {shown === 'repositories' && <Repositories id={id} data={data} admin={admin} reload={reload} />}
+    {shown === 'settings' && <AccountSettings id={id} data={data} user={user} reload={reload} />}
   </>
 }
 

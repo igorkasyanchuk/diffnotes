@@ -9,7 +9,7 @@ import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import {
-  DATA_DIR, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, hashPassword, newToken, now, pullDir, sessionSecret, sha256, verifyPassword,
+  DATA_DIR, RETENTION_DAYS, bootstrap, createAccount, createUser, daysFromNow, db, hashPassword, newToken, now, pullDir, sessionSecret, sha256, verifyPassword,
 } from './db.ts'
 import type { User } from './db.ts'
 
@@ -210,10 +210,13 @@ app.delete('/api/tokens/:id', (c) => {
 // Roles in an account: owner (made it, one per account), admin (invites, manages people and repositories), member
 // (reads and uploads). A super admin (users.admin) runs the server and may open and manage every account.
 // Not a member and not a super admin: 404, other people's accounts don't exist for you.
+const memberRole = (accountId: string, userId: string) =>
+  (db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, userId) as { role: string } | undefined)?.role
 function role(accountId: string, user: User) {
-  const m = db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, user.id) as { role: string } | undefined
-  if (m) return m.role
-  if (user.admin && db.prepare('select 1 from accounts where id = ?').get(accountId)) return 'admin'
+  const m = memberRole(accountId, user.id)
+  if (m === 'owner' || (m && !user.admin)) return m
+  // a super admin manages every account as an admin, also the ones they are only a member of
+  if (user.admin && (m || db.prepare('select 1 from accounts where id = ?').get(accountId))) return 'admin'
   return fail(404, 'Not found')
 }
 const canManage = (r: string) => r === 'owner' || r === 'admin'
@@ -224,12 +227,12 @@ const requireAdmin = (accountId: string, user: User) => {
 }
 const ROLES = ['admin', 'member']
 
-function dirSize(dir: string): number {
-  if (!fs.existsSync(dir)) return 0
-  return fs.readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((e) => e.isFile()).reduce((n, e) => n + fs.statSync(path.join(e.parentPath, e.name)).size, 0)
+// files and bytes in a pull's upload folder (flat), one pass
+// ponytail: sync walk per request, fine at self-hosted scale; cache sizes in the pulls table if /admin gets slow
+function usage(dir: string) {
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()) : []
+  return { files: files.length, bytes: files.reduce((n, e) => n + fs.statSync(path.join(dir, e.name)).size, 0) }
 }
-const fileCount = (dir: string) => (fs.existsSync(dir) ? fs.readdirSync(dir).length : 0)
 
 app.get('/api/dashboard', (c) => {
   const user = c.get('user')
@@ -267,7 +270,7 @@ app.get('/api/accounts/:id/overview', (c) => {
     (select count(*) from annotations n where n.pull_id = p.id) as annotations
     from pulls p join repositories r on r.id = p.repository_id left join users u on u.id = p.user_id
     where r.account_id = ? order by p.updated_at desc`).all(id) as { id: string; repository: string; annotations: number; expires_at: string }[]
-  const withDisk = pulls.map((p) => ({ ...p, files: fileCount(pullDir(p.id)), bytes: dirSize(pullDir(p.id)) }))
+  const withDisk = pulls.map((p) => ({ ...p, ...usage(pullDir(p.id)) }))
   const repos = db.prepare('select full_name from repositories where account_id = ? order by full_name').all(id) as { full_name: string }[]
   const byRepo = repos.map(({ full_name }) => {
     const ps = withDisk.filter((p) => p.repository === full_name)
@@ -319,8 +322,6 @@ app.delete('/api/accounts/:id/invites/:token', (c) => {
   db.prepare('delete from invites where token = ? and account_id = ?').run(c.req.param('token'), c.req.param('id'))
   return c.json({ ok: true })
 })
-const memberRole = (accountId: string, userId: string) =>
-  (db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, userId) as { role: string } | undefined)?.role
 app.put('/api/accounts/:id/members/:user', async (c) => {
   const id = c.req.param('id'), user = c.get('user'), next = (await json(c)).role as string
   requireAdmin(id, user)
@@ -474,7 +475,7 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
 app.get('/files/:pull/:name', async (c) => {
   const user = await currentUser(c)
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('pull')) as Pull | undefined
-  if (!user || !p || !db.prepare('select 1 from memberships where account_id = ? and user_id = ?').get(p.account_id, user.id)) return c.notFound()
+  if (!user || !p || !(user.admin || memberRole(p.account_id, user.id))) return c.notFound()
   const file = path.join(pullDir(p.id), safeName(c.req.param('name')))
   if (!fs.existsSync(file)) return c.notFound()
   const ext = path.extname(file).slice(1).toLowerCase()
@@ -504,8 +505,9 @@ app.get('/api/admin/stats', (c) => {
       (select count(*) from repositories r where r.account_id = a.id) as repositories,
       (select u.email from memberships m join users u on u.id = m.user_id where m.account_id = a.id and m.role = 'owner') as owner
     from accounts a order by a.created_at`).all() as { id: string }[]).map((a) => {
-    const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(a.id) as { id: string }[]
-    return { ...a, pulls: pulls.length, bytes: pulls.reduce((sum, p) => sum + dirSize(pullDir(p.id)), 0) }
+    const disk = (db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(a.id) as { id: string }[])
+      .map((p) => usage(pullDir(p.id)))
+    return { ...a, pulls: disk.length, files: disk.reduce((n, u) => n + u.files, 0), bytes: disk.reduce((n, u) => n + u.bytes, 0) }
   })
   const users = db.prepare(`select u.id, u.email, u.name, u.admin, u.created_at,
       (select count(*) from memberships m where m.user_id = u.id) as accounts,
@@ -519,8 +521,8 @@ app.get('/api/admin/stats', (c) => {
       tokens: n('select count(*) as n from tokens'), sessions: n('select count(*) as n from sessions'),
       invites: n('select count(*) as n from invites'),
       uploads_24h: n('select count(*) as n from pulls where updated_at > ?', day), uploads_7d: n('select count(*) as n from pulls where updated_at > ?', week),
-      files: fs.readdirSync(UPLOADS).reduce((sum, d) => sum + fileCount(path.join(UPLOADS, d)), 0),
-      upload_bytes: dirSize(UPLOADS), db_bytes: fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0,
+      files: accounts.reduce((n, a) => n + a.files, 0),
+      upload_bytes: accounts.reduce((n, a) => n + a.bytes, 0), db_bytes: fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0,
       disk_free_bytes: disk.bavail * disk.bsize, disk_total_bytes: disk.blocks * disk.bsize,
     },
     retention_days: RETENTION_DAYS, accounts, users,
@@ -530,7 +532,7 @@ app.get('/api/admin/stats', (c) => {
 // promote or demote another super admin; your own flag stays, so the server always keeps one
 app.put('/api/admin/users/:id', async (c) => {
   if (c.req.param('id') === c.get('user').id) fail(400, 'You cannot change your own super admin flag')
-  const res = db.prepare('update users set admin = ? where id = ?').run((await json(c)).admin ? 1 : 0, c.req.param('id'))
+  const res = db.prepare('update users set admin = ? where id = ?').run((await json(c)).admin === true ? 1 : 0, c.req.param('id'))
   if (!res.changes) fail(404, 'Not found')
   return c.json({ ok: true })
 })

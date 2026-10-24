@@ -67,10 +67,11 @@
   }
 
   function apply() {
-    if (error) return renderBox()
-    if (!pull) return
+    if (!pull && !error) return
+    const list = files()
+    if (error) return renderBox(null, list)
     const placed = new Set()
-    for (const f of files()) {
+    for (const f of list) {
       pull.annotations.forEach((a, i) => {
         if (a.path !== f.path) return
         if (f.box.querySelector(`[data-r42="${i}"]`)) return placed.add(i)
@@ -90,16 +91,15 @@
         placed.add(i)
       })
     }
-    renderBox(placed)
+    renderBox(placed, list)
   }
 
   // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when GitHub re-renders.
-  function place(box) {
-    const first = files()[0]?.box
+  function place(box, first) {
     if (first && box.nextElementSibling !== first) first.before(box)
   }
 
-  function renderBox(placed) {
+  function renderBox(placed, list) {
     let box = document.getElementById('r42-box')
     if (!box) { box = el('div'); box.id = 'r42-box' }
     const missing = error ? [] : pull.annotations.map((a, i) => [a, i]).filter(([, i]) => !placed.has(i))
@@ -108,7 +108,7 @@
       box.dataset.key = key
       box.replaceChildren(...(error ? [errorBar()] : boxContent(box, missing)))
     }
-    place(box)
+    place(box, list[0]?.box)
     if (!error) dock(box)
   }
 
@@ -151,6 +151,8 @@
         pop.id = 'r42-pop'
         const body = box.querySelector('.r42-box-body')
         pop.append(body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.'))
+        // a clone has no listeners: note headers toggle through the pop
+        pop.addEventListener('click', (e) => e.target.closest('.r42-head')?.parentElement.classList.toggle('r42-collapsed'))
         document.body.append(pop)
       })
       top.addEventListener('click', () => { document.getElementById('r42-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })

@@ -43,6 +43,8 @@ db.exec(`
     path text not null, line integer, end_line integer, side text not null default 'RIGHT',
     title text not null default '', body text not null default '', position integer not null default 0);
   create index if not exists annotations_pull on annotations(pull_id);
+  -- the first release invited co-owners; an account has one owner now, so pending owner invites make admins
+  update invites set role = 'admin' where role = 'owner';
 `)
 
 export const now = () => new Date().toISOString()
