@@ -141,9 +141,14 @@ app.post('/api/logout', async (c) => {
   return c.json({ ok: true })
 })
 
+// who is signed in, plus what the app layout shows around every page: their accounts and whether they have a token yet
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
-  return c.json({ user: user ?? null })
+  if (!user) return c.json({ user: null })
+  const accounts = db.prepare(`select a.id, a.name, m.role from accounts a join memberships m on m.account_id = a.id
+    where m.user_id = ? order by a.created_at`).all(user.id)
+  const tokens = (db.prepare('select count(*) as n from tokens where user_id = ?').get(user.id) as { n: number }).n
+  return c.json({ user, accounts, tokens })
 })
 
 // --- invitations: the only way in besides the first admin

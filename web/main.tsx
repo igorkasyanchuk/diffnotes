@@ -49,29 +49,64 @@ function useSubmit(fn: () => Promise<unknown>) {
   return { submit, error, busy }
 }
 
-function Shell({ user, path, children }: { user: User | null; path: string; children: ReactNode }) {
-  const logout = async () => { await api('/api/logout', {}); location.href = '/' }
-  const on = (p: string) => (path === p || (p !== '/' && path.startsWith(p)) ? 'on' : undefined)
+type Me = { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number }
+
+const Footer = () => <footer className="foot">
+  <span>reviews42 · self-hosted PR annotations</span>
+  <a href="/skill/SKILL.md">agent skill</a>
+  <a href="https://github.com/igorkasyanchuk/reviews42" target="_blank" rel="noreferrer">source</a>
+</footer>
+
+// public pages: landing, sign in, invitations
+function PublicLayout({ signedIn, children }: { signedIn: boolean; children: ReactNode }) {
   return <>
     <header className="top">
       <Link to="/" className="brand"><img src="/icon.svg" alt="" />reviews42<span className="cursor">_</span></Link>
-      <nav>
-        {user ? <>
-          <Link to="/" className={on('/')}>dashboard</Link>
-          <Link to="/settings" className={on('/settings')}>settings</Link>
-          {!!user.admin && <Link to="/admin" className={on('/admin')}>admin</Link>}
-          <button className="link" onClick={logout}>logout</button>
-        </> : <Link to="/login" className="btn primary">sign in</Link>}
-      </nav>
+      <nav>{signedIn ? <Link to="/dashboard" className="btn primary">dashboard →</Link> : <Link to="/login" className="btn primary">sign in</Link>}</nav>
     </header>
     <main>{children}</main>
-    <footer className="foot">
-      <span>reviews42 · self-hosted PR annotations</span>
-      <a href="/skill/SKILL.md">agent skill</a>
-      <a href="https://github.com/igorkasyanchuk/reviews42" target="_blank" rel="noreferrer">source</a>
-    </footer>
+    <Footer />
   </>
 }
+
+// signed-in pages: a sidebar with the dashboard, your accounts, settings and (super admins) the server page
+function AppLayout({ me, path, children }: { me: Me; path: string; children: ReactNode }) {
+  const logout = async () => { await api('/api/logout', {}); location.href = '/' }
+  const on = (p: string) => (path === p || path.startsWith(`${p}/`) ? 'on' : undefined)
+  return <div className="app">
+    <aside className="side">
+      <Link to="/" className="brand"><img src="/icon.svg" alt="" />reviews42<span className="cursor">_</span></Link>
+      <nav>
+        <Link to="/dashboard" className={on('/dashboard')}>dashboard</Link>
+        <span className="side-h">accounts</span>
+        {me.accounts.map((a) => <Link key={a.id} to={`/accounts/${a.id}`} className={on(`/accounts/${a.id}`)}>{a.name}</Link>)}
+        <span className="side-h">you</span>
+        <Link to="/settings" className={on('/settings')}>settings</Link>
+        {!!me.user.admin && <Link to="/admin" className={on('/admin')}>server admin</Link>}
+        <button className="link" onClick={logout}>logout</button>
+      </nav>
+      <div className="side-me hint">{me.user.email}</div>
+    </aside>
+    <div className="app-main">
+      {!me.tokens && <div className="nag">
+        <span><b>no agent token yet.</b> create one to connect your coding agent and the browser extension.</span>
+        {path !== '/settings' && <Link to="/settings#tokens" className="btn primary">create token →</Link>}
+      </div>}
+      <main>{children}</main>
+      <Footer />
+    </div>
+  </div>
+}
+
+// copy-to-clipboard for commands and tokens
+function Copy({ text }: { text: string }) {
+  const [done, setDone] = useState(false)
+  return <button type="button" className="copy" onClick={async () => {
+    await navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500)
+  }}>{done ? 'copied ✓' : 'copy'}</button>
+}
+const Code = ({ text, prompt }: { text: string; prompt?: boolean }) =>
+  <div className="code"><pre>{prompt && <span className="prompt">$ </span>}{text}</pre><Copy text={text} /></div>
 
 // the terminal on the landing page: lines appear one after another
 const TERM: [string, string][] = [
@@ -116,13 +151,13 @@ function Landing() {
       <li>Everyone in your account opens it on GitHub and reads the notes on the changed lines.</li>
     </ol>
     <h2>install the skill</h2>
-    <pre><span className="prompt">$ </span>curl -fsSL {location.origin}/install.sh | sh</pre>
+    <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
   </>
 }
 
 function Login() {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
-  const { submit, error, busy } = useSubmit(async () => { await api('/api/login', { email, password }); location.href = '/' })
+  const { submit, error, busy } = useSubmit(async () => { await api('/api/login', { email, password }); location.href = '/dashboard' })
   return <div className="narrow">
     <h1>sign in</h1>
     <form className="stack" onSubmit={submit}>
@@ -139,7 +174,7 @@ function Login() {
 function Invite({ token }: { token: string }) {
   const { data, error: loadError } = useLoad<{ email: string; account: string; exists: boolean }>(`/api/invites/${token}`)
   const [name, setName] = useState(''), [password, setPassword] = useState('')
-  const { submit, error, busy } = useSubmit(async () => { await api(`/api/invites/${token}/accept`, { name, password }); location.href = '/' })
+  const { submit, error, busy } = useSubmit(async () => { await api(`/api/invites/${token}/accept`, { name, password }); location.href = '/dashboard' })
   if (loadError) return <p className="error">{loadError}</p>
   if (!data) return null
   return <div className="narrow">
@@ -167,10 +202,10 @@ const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: 
   </div>
 
 type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number })[]; retention_days: number }
-function Dashboard() {
+function Dashboard({ onChange }: { onChange: () => void }) {
   const { data, reload } = useLoad<Dash>('/api/dashboard')
   const [name, setName] = useState('')
-  const { submit, error } = useSubmit(async () => { await api('/api/accounts', { name }); setName(''); reload() })
+  const { submit, error } = useSubmit(async () => { await api('/api/accounts', { name }); setName(''); reload(); onChange() })
   if (!data) return null
   return <>
     <h1>dashboard</h1>
@@ -204,7 +239,7 @@ type Overview = {
   recent: (Pull & { annotations: number; uploader: string | null; files: number; bytes: number })[]
 }
 const TABS = ['overview', 'members', 'repositories', 'settings'] as const
-function Account({ id, user }: { id: string; user: User }) {
+function Account({ id, user, onChange }: { id: string; user: User; onChange: () => void }) {
   const { data, error: loadError, reload } = useLoad<Acc>(`/api/accounts/${id}`)
   const [tab, setTab] = useState<(typeof TABS)[number]>(() => (TABS as readonly string[]).includes(location.hash.slice(1)) ? location.hash.slice(1) as 'overview' : 'overview')
   const pick = (t: (typeof TABS)[number]) => { setTab(t); history.replaceState(null, '', `#${t}`) }
@@ -220,7 +255,7 @@ function Account({ id, user }: { id: string; user: User }) {
     {shown === 'overview' && <AccountOverview id={id} />}
     {shown === 'members' && <Members id={id} data={data} admin={admin} user={user} reload={reload} />}
     {shown === 'repositories' && <Repositories id={id} data={data} admin={admin} reload={reload} />}
-    {shown === 'settings' && <AccountSettings id={id} data={data} user={user} reload={reload} />}
+    {shown === 'settings' && <AccountSettings id={id} data={data} user={user} reload={() => { reload(); onChange() }} />}
   </>
 }
 
@@ -328,7 +363,7 @@ function AccountSettings({ id, data, user, reload }: Omit<TabProps, 'admin'> & {
   const rename = useSubmit(async () => { await api(`/api/accounts/${id}`, { name }, 'PUT'); setSaved(true); reload() })
   const remove = useSubmit(async () => {
     if (prompt(`Type the account name to delete it with all its repositories, notes and files: ${data.account.name}`) !== data.account.name) return
-    await api(`/api/accounts/${id}`, undefined, 'DELETE'); go('/')
+    await api(`/api/accounts/${id}`, undefined, 'DELETE'); go('/dashboard')
   })
   return <>
     <h2>name</h2>
@@ -368,27 +403,29 @@ function PullPage({ id }: { id: string }) {
   </>
 }
 
-function Settings() {
+function Settings({ onChange }: { onChange: () => void }) {
   const { data, reload } = useLoad<{ id: string; name: string; created_at: string; last_used_at: string | null }[]>('/api/tokens')
   const [name, setName] = useState(''), [fresh, setFresh] = useState('')
-  const make = useSubmit(async () => { setFresh((await api('/api/tokens', { name })).token); setName(''); reload() })
+  const make = useSubmit(async () => { setFresh((await api('/api/tokens', { name })).token); setName(''); reload(); onChange() })
+  useEffect(() => { if (location.hash === '#tokens') document.getElementById('tokens')?.scrollIntoView() }, [])
   const [cur, setCur] = useState(''), [next, setNext] = useState(''), [done, setDone] = useState(false)
   const pass = useSubmit(async () => { await api('/api/password', { current: cur, password: next }, 'PUT'); setCur(''); setNext(''); setDone(true) })
   return <>
     <h1>settings</h1>
     <h2>connect your agent</h2>
     <p>1. install the skill for Claude Code, Codex, Cursor and other Agent Skills tools:</p>
-    <pre><span className="prompt">$ </span>curl -fsSL {location.origin}/install.sh | sh</pre>
-    <p>2. make a token below and add it to your shell profile:</p>
-    <pre>{`export REVIEWS42_URL=${location.origin}\nexport REVIEWS42_TOKEN=${fresh || '<token>'}`}</pre>
+    <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
+    <p>2. make a token below and add it to your shell profile (~/.zshrc or ~/.bashrc):</p>
+    <Code text={`export REVIEWS42_URL=${location.origin}\nexport REVIEWS42_TOKEN=${fresh || '<token>'}`} />
     <p>3. in the browser extension's popup, add this server with the same (or another) token.</p>
-    <h2>tokens</h2>
-    {fresh && <p className="token">{fresh}<br /><span className="hint">copy it now: it is shown only once.</span></p>}
+    <h2 id="tokens">tokens</h2>
+    {fresh && <div className="token"><div className="code"><pre>{fresh}</pre><Copy text={fresh} /></div>
+      <span className="hint">copy it now: it is shown only once.</span></div>}
     <div className="list">
       {data?.length ? data.map((t) => <div key={t.id}>
         <span className="grow">{t.name}</span>
         <span className="hint">{t.last_used_at ? `used ${fmt(t.last_used_at)}` : 'never used'}</span>
-        <button className="link danger" onClick={() => del(`/api/tokens/${t.id}`, reload, 'Delete this token? Agents and extensions using it stop working.')}>delete</button>
+        <button className="link danger" onClick={() => del(`/api/tokens/${t.id}`, () => { reload(); onChange() }, 'Delete this token? Agents and extensions using it stop working.')}>delete</button>
       </div>) : <div className="empty">no tokens yet</div>}
     </div>
     <form className="row" onSubmit={make.submit}>
@@ -462,25 +499,32 @@ function Admin({ user }: { user: User }) {
   </>
 }
 
+const APP_PATHS = /^\/(dashboard|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$/
+
 function App() {
-  const [path, setPath] = useState(location.pathname), [user, setUser] = useState<User | null>()
+  const [path, setPath] = useState(location.pathname), [me, setMe] = useState<Me | null>(), [n, setN] = useState(0)
   useEffect(() => {
     const on = () => setPath(location.pathname)
     addEventListener('popstate', on)
-    api<{ user: User | null }>('/api/me').then((r) => setUser(r.user))
     return () => removeEventListener('popstate', on)
   }, [])
-  if (user === undefined) return null
+  // reloaded on navigation and after changes, so the sidebar and the token bar stay current
+  useEffect(() => { api<Me | { user: null }>('/api/me').then((r) => setMe(r.user ? r as Me : null)) }, [path, n])
+  if (me === undefined) return null
+  const refresh = () => setN((x) => x + 1)
   const m = (re: RegExp) => path.match(re)?.[1]
+  if (!APP_PATHS.test(path)) {
+    const invite = m(/^\/invite\/([\w-]+)$/)
+    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} /> : path === '/login' && !me ? <Login /> : <Landing />}</PublicLayout>
+  }
+  if (!me) { location.replace('/login'); return null }
   let page: ReactNode
-  if (m(/^\/invite\/([\w-]+)$/)) page = <Invite token={m(/^\/invite\/([\w-]+)$/)!} />
-  else if (!user) page = path === '/login' ? <Login /> : <Landing />
-  else if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={user} />
+  if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} onChange={refresh} />
   else if (m(/^\/pulls\/([\w-]+)$/)) page = <PullPage id={m(/^\/pulls\/([\w-]+)$/)!} />
-  else if (path === '/settings') page = <Settings />
-  else if (path === '/admin' && user.admin) page = <Admin user={user} />
-  else page = <Dashboard />
-  return <Shell user={user} path={path}>{page}</Shell>
+  else if (path === '/settings') page = <Settings onChange={refresh} />
+  else if (path === '/admin' && me.user.admin) page = <Admin user={me.user} />
+  else page = <Dashboard onChange={refresh} />
+  return <AppLayout me={me} path={path}>{page}</AppLayout>
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)

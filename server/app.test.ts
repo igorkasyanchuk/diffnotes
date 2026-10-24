@@ -66,6 +66,9 @@ describe('reviews42', () => {
     expect(list).toHaveLength(1)
     expect(JSON.stringify(list)).not.toContain(token)
     expect((await call('/api/v1/me', { token })).data.user.email).toBe('admin@example.com')
+    const me = (await call('/api/me', { cookie: admin })).data
+    expect(me).toMatchObject({ tokens: 1, accounts: [{ role: 'owner' }] })
+    expect((await call('/api/me', { cookie: member })).data.tokens).toBe(0)
     expect((await call('/api/v1/me', { token: 'r42_wrong' })).status).toBe(401)
   })
 
