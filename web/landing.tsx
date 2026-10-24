@@ -92,23 +92,27 @@ function FragmentRow({ show, children }: { show: boolean; children: ReactNode })
   </>
 }
 
+const STEP_MS = 5200
+
 function Walkthrough() {
   const [step, setStep] = useState(0), [paused, setPaused] = useState(false), [hide, setHide] = useState(false)
   useEffect(() => {
     if (paused || matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const t = setTimeout(() => setStep((s) => (s + 1) % STEPS.length), 5200)
+    const t = setTimeout(() => setStep((s) => (s + 1) % STEPS.length), STEP_MS)
     return () => clearTimeout(t)
   }, [step, paused])
   useEffect(() => { if (step !== 3) setHide(false) }, [step])
-  return <section className="walk" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+  // paused while the mouse or keyboard focus is inside (WCAG 2.2.2); no aria-live: it would re-read the stage every step
+  const pause = () => setPaused(true), resume = () => setPaused(false)
+  return <section className="walk" onMouseEnter={pause} onMouseLeave={resume} onFocus={pause} onBlur={resume}>
     <div className="walk-steps" role="tablist">
       {STEPS.map((s, i) => <button key={i} type="button" role="tab" aria-selected={step === i} className={step === i ? 'on' : ''} onClick={() => setStep(i)}>
         <span className="walk-n">0{i + 1}</span>
         <span><b>{s.title}</b><span className="walk-t">{s.text}</span></span>
-        {step === i && !paused && <span className="walk-bar" />}
+        {step === i && !paused && <span className="walk-bar" style={{ animationDuration: `${STEP_MS}ms` }} />}
       </button>)}
     </div>
-    <div className="walk-stage" aria-live="polite">
+    <div className="walk-stage">
       {step === 0 ? <Terminal /> : <MockPR step={step} hide={hide} setHide={setHide} />}
     </div>
   </section>
@@ -119,7 +123,7 @@ const BENEFITS: [string, string][] = [
   ['context from the author', 'The agent that wrote the code explains it while it still remembers why: decisions, trade-offs, what was left out.'],
   ['screenshots in the diff', 'UI changes come with before/after images next to the lines that caused them. No more “can you post a screenshot?”.'],
   ['zero noise on GitHub', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
-  ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own after 30 days.'],
+  ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools. Connect several servers in one browser for different teams or clients.'],
 ]
 

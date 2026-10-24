@@ -17,7 +17,7 @@
 .walk-n { color: var(--accent); font-weight: 700; }
 .walk-t { display: none; font-size: 12px; line-height: 1.5; }
 .walk-steps button.on .walk-t { display: block; }
-.walk-bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--accent); transform-origin: left; animation: walk-fill 5.2s linear; }
+.walk-bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--accent); transform-origin: left; animation: walk-fill linear; } /* duration: STEP_MS, inline */
 @keyframes walk-fill { from { transform: scaleX(0); } }
 .walk-stage { min-height: 430px; border-radius: 10px; border: 1px solid var(--line-2); background: #0d1117; overflow: hidden; position: relative;
   box-shadow: 0 24px 60px rgba(0, 0, 0, .35); }
@@ -60,6 +60,7 @@
 .r42-sw { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #9198a1; }
 .r42-sw i { position: relative; width: 26px; height: 15px; border-radius: 999px; background: #30363d; transition: background .15s; }
 .r42-sw i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.r42-sw:focus-visible { outline: 2px solid #e8622a; outline-offset: 2px; border-radius: 4px; }
 .r42-sw.on i { background: #e8622a; }
 .r42-sw.on i::after { transform: translateX(11px); }
 .r42-sum { padding: 8px 12px 10px; color: #c9d1d9; }
@@ -86,6 +87,7 @@
 .lp-benefits h3::before { content: '+ '; color: var(--prompt); }
 .lp-benefits p { color: var(--muted); margin: 0; font-size: 13px; }
 
+#install { scroll-margin-top: 72px; } /* clears the sticky .top header */
 .lp-install { list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: i; }
 .lp-install li { counter-increment: i; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 14px 16px; }
 .lp-step { display: flex; gap: 10px; align-items: center; }
@@ -94,7 +96,7 @@
 .lp-install .hint { margin: 6px 0; }
 .lp-install pre { white-space: pre-wrap; word-break: break-all; }
 
-@media (prefers-reduced-motion: reduce) { .walk-bar, .r42-box, .r42-note, .r42-dock { animation: none; } .gh-term .line { animation: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .walk-bar { display: none; } .r42-box, .r42-note, .r42-dock { animation: none; } .gh-term .line { animation: none; opacity: 1; } }
 @media (max-width: 820px) {
   .walk { grid-template-columns: 1fr; }
   .walk-stage { min-height: 380px; }

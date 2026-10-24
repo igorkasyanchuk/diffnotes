@@ -15,7 +15,8 @@ See README.md for what it is. Same stack and habits as specdrop.
 server/db.ts      schema, password hashing, bootstrap (first admin + account), tokens, purgeExpired
 server/app.ts     all routes: auth, invites, accounts, repos, tokens, /api/v1 pulls (skill + extension), /files, /install.sh
 server/index.ts   start, hourly purge, SIGTERM
-web/main.tsx      landing, login, invite, dashboard, account, pull preview, settings
+web/main.tsx      routing, public + app (sidebar) layouts, login, invite, dashboard, account, pull preview, settings
+web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
 skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
 extension/        manifest, background (holds the tokens, asks every connected server), content (draws on github.com:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)

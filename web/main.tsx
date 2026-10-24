@@ -103,11 +103,11 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
 
 function Login() {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
-  // on /login go to the dashboard; on an app page (a deep link opened signed out) reload that same page
+  // api() fires r42:change, so App reloads /api/me and shows the app page in place (a deep link opened signed out);
+  // only /login needs to move on, to the dashboard
   const { submit, error, busy } = useSubmit(async () => {
     await api('/api/login', { email, password })
-    if (location.pathname === '/login') location.href = '/dashboard'
-    else location.reload()
+    if (location.pathname === '/login') go('/dashboard')
   })
   return <div className="narrow">
     <h1>sign in</h1>
@@ -464,7 +464,8 @@ function App() {
   // also pick up what other people changed; `live` drops a response that a newer request already superseded
   useEffect(() => {
     let live = true
-    api<Me | { user: null }>('/api/me').then((r) => { if (live) setMe(r.user ? r as Me : null) })
+    // a failed request keeps who we knew; on the very first load it falls back to signed out instead of a blank page
+    api<Me | { user: null }>('/api/me').then((r) => { if (live) setMe(r.user ? r as Me : null) }, () => { if (live) setMe((x) => x ?? null) })
     return () => { live = false }
   }, [path, n])
   if (me === undefined) return null

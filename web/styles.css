@@ -143,32 +143,10 @@ table.grid tr:hover td { background: var(--panel-2); }
 .copy { position: absolute; top: 7px; right: 7px; padding: 3px 9px; font-size: 11px; }
 .token .code pre { margin: 0 0 6px; background: var(--panel); }
 
-/* landing */
-.hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 36px; align-items: center; padding: 32px 0 8px; }
-.hero h1 { font-size: 36px; letter-spacing: -0.03em; }
-.hero h1::before { content: none; }
-.hero h1 em { font-style: normal; color: var(--accent); }
-.hero p { color: var(--muted); }
-.term { background: #07080a; color: #d8dbe1; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.35); font-size: 12px; }
-.term .chrome { display: flex; gap: 6px; align-items: center; padding: 9px 12px; border-bottom: 1px solid #1d2026; background: #0e1013; }
-.term .chrome i { width: 10px; height: 10px; border-radius: 50%; background: #2a2e35; }
-.term .chrome span { margin-left: auto; color: #646b76; font-size: 11px; }
-.term .body { padding: 14px 16px; min-height: 230px; }
-.term .line { white-space: pre-wrap; opacity: 0; animation: show .01s forwards; }
-.term .p { color: #4ade80; }
-.term .o { color: #8b919c; }
-.term .a { color: #ff8a3d; }
-.term .block { display: inline-block; width: 8px; height: 14px; vertical-align: -2px; background: #ff8a3d; animation: blink 1.1s steps(1) infinite; }
-.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 32px 0; }
-.three .card h3 { font-size: 14px; color: var(--accent); }
-.three .card h3::before { content: '> '; color: var(--soft); }
-.three .card p { color: var(--muted); margin: 0; font-size: 13px; }
-.steps { list-style: none; padding: 0; display: grid; gap: 8px; counter-reset: s; }
-.steps li { counter-increment: s; display: flex; gap: 12px; color: var(--muted); }
-.steps li::before { content: '0' counter(s); color: var(--accent); }
+/* the landing page lives in landing.css; these keyframes are shared (.cursor here, .gh-term there) */
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes show { to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .term .line { animation: none; opacity: 1; } .cursor, .term .block { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
 
 /* annotations preview (same idea as the extension) */
 .note { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--panel); padding: 10px 14px; }
@@ -186,7 +164,6 @@ table.grid tr:hover td { background: var(--panel-2); }
 .foot a { color: var(--muted); }
 
 @media (max-width: 760px) {
-  .hero { grid-template-columns: 1fr; }
   .app { grid-template-columns: 1fr; }
   .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
   .side nav { flex-direction: row; flex-wrap: wrap; }
@@ -198,5 +175,4 @@ table.grid tr:hover td { background: var(--panel-2); }
 @media (max-width: 560px) {
   .top { padding: 10px 16px; }
   main { padding: 24px 16px 56px; }
-  .hero h1 { font-size: 27px; }
 }
