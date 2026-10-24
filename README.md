@@ -30,7 +30,9 @@ docker run -p 3000:3000 -v reviews42-data:/data -e ADMIN_EMAIL=you@example.com -
 ```
 
 On first boot (no users) the server creates the admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (a random password is
-printed when unset) with an account "My team". Everyone else joins through an invitation link an account owner makes.
+printed when unset) with an account "My team"; that user is a super admin (server stats on `/admin`). Everyone else
+joins through an invitation link an account owner or admin makes. Roles: owner, admin (invites, manages people and
+repositories), member (reads and uploads).
 
 Lost password: `npm run reset-password [-- email]` on the server (in the container) prints a new random password for
 that user, by default the first admin, and signs them out everywhere.

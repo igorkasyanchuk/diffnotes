@@ -17,7 +17,8 @@ server/app.ts     all routes: auth, invites, accounts, repos, tokens, /api/v1 pu
 server/index.ts   start, hourly purge, SIGTERM
 web/main.tsx      landing, login, invite, dashboard, account, pull preview, settings
 skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
-extension/        manifest, background (holds the token, fetches), content (draws on github.com), popup (connect)
+extension/        manifest, background (holds the tokens, asks every connected server), content (draws on github.com:
+                  box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
 ```
 
 ## Rules
@@ -25,6 +26,10 @@ extension/        manifest, background (holds the token, fetches), content (draw
 - Keep it small: few files, no dependency for what a few lines do. Mark deliberate shortcuts with `// ponytail:`.
 - Access: everything about a PR is visible only to members of the account that owns its repository; other
   accounts' rows answer 404. Tokens are stored as sha256 only.
+- Roles per account (`memberships.role`): `owner` (made it; can't be removed or demoted; deletes the account),
+  `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads). `users.admin` = super
+  admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
+  The first user (bootstrap) is a super admin.
 - Annotation Markdown is untrusted: render it only through `r42Markdown` (escapes everything, keeps http(s) and relative URLs).
 - `/files/*` is served with `CSP: sandbox` + `nosniff`.
 - GitHub's diff DOM: `extension/content.js` supports the React changes view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`)

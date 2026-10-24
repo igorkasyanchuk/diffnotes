@@ -2,7 +2,7 @@
 // GitHub renders more of the diff (it renders lazily) and only adds what is missing.
 ;(() => {
   const PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/(changes|files)/
-  let current = '', pull = null, error = null, observer = null, timer = 0
+  let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
   const collapsed = new Map() // annotation index → collapsed; survives re-renders
   const images = new Map() // /files/… → data: URL (or a promise of it)
 
@@ -109,6 +109,64 @@
       box.replaceChildren(...(error ? [errorBar()] : boxContent(box, missing)))
     }
     place(box)
+    if (!error) dock(box)
+  }
+
+  // Notes on/off for the whole diff, remembered across PRs. Every switch on the page shows the same state.
+  let hidden = false
+  chrome.storage.local.get('hideNotes').then((s) => setHidden(!!s.hideNotes, false))
+  function setHidden(v, save = true) {
+    hidden = v
+    document.documentElement.classList.toggle('r42-hide-notes', v)
+    document.querySelectorAll('.r42-switch').forEach((b) => b.setAttribute('aria-checked', String(!v)))
+    if (save) chrome.storage.local.set({ hideNotes: v })
+  }
+  function notesSwitch() {
+    const b = el('button', 'r42-switch')
+    b.type = 'button'
+    b.setAttribute('role', 'switch')
+    b.setAttribute('aria-checked', String(!hidden))
+    b.title = 'Show or hide Reviews42 notes in the diff'
+    b.append(el('i'), el('span', '', 'notes'))
+    b.addEventListener('click', () => setHidden(!hidden))
+    return b
+  }
+
+  // Once the box scrolls away, a floating dock at the bottom keeps the count, the notes switch and the summary at hand.
+  function dock(box) {
+    let d = document.getElementById('r42-dock')
+    if (!d) {
+      d = el('div', 'r42-float')
+      d.id = 'r42-dock'
+      document.body.append(d)
+    }
+    if (d.dataset.key !== box.dataset.key) {
+      d.dataset.key = box.dataset.key
+      const summary = el('button', 'r42-pill-btn', 'summary'), top = el('button', 'r42-pill-btn', '↑')
+      top.title = 'Back to the Reviews42 box'
+      summary.addEventListener('click', () => {
+        const open = document.getElementById('r42-pop')
+        if (open) return open.remove()
+        const pop = el('div', 'r42-float r42-pop')
+        pop.id = 'r42-pop'
+        const body = box.querySelector('.r42-box-body')
+        pop.append(body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.'))
+        document.body.append(pop)
+      })
+      top.addEventListener('click', () => { document.getElementById('r42-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
+      d.replaceChildren(el('span', 'r42-badge', 'R42'), el('b', '', `${pull.annotations.length} notes`), notesSwitch(), summary, top)
+    }
+    // watch the box's header bar: once it is above the viewport the dock takes over, even if the tall summary still shows
+    const bar = box.firstElementChild
+    if (!bar || seen?.target === bar) return
+    seen?.disconnect()
+    seen = new IntersectionObserver(([e]) => {
+      const away = !e.isIntersecting && e.boundingClientRect.top < 0
+      d.classList.toggle('r42-show', away)
+      if (!away) document.getElementById('r42-pop')?.remove()
+    })
+    seen.target = bar
+    seen.observe(bar)
   }
 
   const errorBar = () => {
@@ -134,7 +192,7 @@
       open.target = '_blank'
       return open
     })
-    bar.append(title, expand, collapse, ...opens)
+    bar.append(title, notesSwitch(), expand, collapse, ...opens)
     const body = el('div', 'r42-box-body')
     for (const p of pull.pulls.filter((x) => x.summary)) {
       const s = el('div', 'r42-md r42-summary')
@@ -164,13 +222,14 @@
     box.addEventListener('click', () => box.remove())
     document.body.append(box)
   })
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('.r42-lightbox')?.remove() })
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.r42-lightbox, #r42-pop').forEach((n) => n.remove()) })
 
   function clear() {
     observer?.disconnect()
     observer = null
-    pull = error = null
-    document.querySelectorAll('.r42-row, .r42-file, #r42-box').forEach((n) => n.remove())
+    seen?.disconnect()
+    pull = error = seen = null
+    document.querySelectorAll('.r42-row, .r42-file, #r42-box, #r42-dock, #r42-pop').forEach((n) => n.remove())
   }
 
   async function check() {

@@ -170,4 +170,54 @@ describe('reviews42', () => {
     expect(event.transaction).toBe('GET /api/pulls/:id')
     sent.mockRestore()
   })
+
+  it('lets admins manage people and repositories, members only read and upload', async () => {
+    const acc = (await call(`/api/accounts/${accountId}`, { cookie: admin })).data
+    const dev = acc.members.find((m: { email: string }) => m.email === 'dev@example.com')
+    const owner = acc.members.find((m: { role: string }) => m.role === 'owner')
+    expect((await call(`/api/accounts/${accountId}/repositories`, { cookie: member, body: { full_name: 'acme/members-cannot' } })).status).toBe(403)
+    expect((await call(`/api/accounts/${accountId}/members/${dev.id}`, { cookie: admin, method: 'PUT', body: { role: 'owner' } })).status).toBe(400)
+    expect((await call(`/api/accounts/${accountId}/members/${dev.id}`, { cookie: admin, method: 'PUT', body: { role: 'admin' } })).status).toBe(200)
+    // now an admin: invites people, but can't touch the owner or themselves
+    const inv = await call(`/api/accounts/${accountId}/invites`, { cookie: member, body: { email: 'new@example.com', role: 'admin' } })
+    expect(inv.status).toBe(200)
+    expect((await call(`/api/invites/${inv.data.token}`)).data.email).toBe('new@example.com')
+    expect((await call(`/api/accounts/${accountId}/members/${owner.id}`, { cookie: member, method: 'PUT', body: { role: 'member' } })).status).toBe(400)
+    expect((await call(`/api/accounts/${accountId}/members/${owner.id}`, { cookie: member, method: 'DELETE' })).status).toBe(400)
+    expect((await call(`/api/accounts/${accountId}/members/${dev.id}`, { cookie: member, method: 'PUT', body: { role: 'member' } })).status).toBe(400)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: member, method: 'PUT', body: { name: 'Core team' } })).status).toBe(200)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: member, method: 'DELETE' })).status).toBe(403)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: admin })).data.account.name).toBe('Core team')
+  })
+
+  it('shows an account overview with storage per repository', async () => {
+    const form = new FormData()
+    form.set('payload', JSON.stringify({ title: 'Overview', annotations: [{ path: 'a.ts', line: 1, body: 'x' }, { path: 'b.ts', body: 'y' }] }))
+    form.append('file', new File([new Uint8Array(10)], 'shot.png', { type: 'image/png' }))
+    expect((await call('/api/v1/pulls/acme/web/7', { token, form, method: 'PUT' })).status).toBe(200)
+    const o = (await call(`/api/accounts/${accountId}/overview`, { cookie: member })).data
+    expect(o.totals).toMatchObject({ members: 2, admins: 2, repositories: 2, pulls: 1, annotations: 2, files: 1, bytes: 10 })
+    expect(o.repositories.find((r: { repository: string }) => r.repository === 'acme/web')).toMatchObject({ pulls: 1, files: 1, bytes: 10 })
+    expect(o.recent[0]).toMatchObject({ title: 'Overview', uploader: 'admin@example.com', annotations: 2 })
+  })
+
+  it('gives super admins server stats and every account, nobody else', async () => {
+    expect((await call('/api/admin/stats', { cookie: member })).status).toBe(404)
+    const st = (await call('/api/admin/stats', { cookie: admin })).data
+    expect(st.totals).toMatchObject({ accounts: 2, pulls: 1, annotations: 2, upload_bytes: 10 })
+    expect(st.totals.disk_free_bytes).toBeGreaterThan(0)
+    expect(st.accounts.find((a: { name: string }) => a.name === 'Other').owner).toBe('admin@example.com')
+    const dev = st.users.find((u: { email: string }) => u.email === 'dev@example.com')
+    const me = st.users.find((u: { email: string }) => u.email === 'admin@example.com')
+    expect((await call(`/api/admin/users/${me.id}`, { cookie: admin, method: 'PUT', body: { admin: false } })).status).toBe(400)
+    expect((await call(`/api/admin/users/${dev.id}`, { cookie: admin, method: 'PUT', body: { admin: true } })).status).toBe(200)
+    expect((await call('/api/admin/stats', { cookie: member })).status).toBe(200)
+    expect((await call(`/api/admin/users/${dev.id}`, { cookie: admin, method: 'PUT', body: { admin: false } })).status).toBe(200)
+  })
+
+  it('lets the owner delete the account with its files', async () => {
+    const other = (await call('/api/dashboard', { cookie: admin })).data.accounts.find((a: { name: string }) => a.name === 'Other')
+    expect((await call(`/api/accounts/${other.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/accounts/${other.id}`, { cookie: admin })).status).toBe(404)
+  })
 })

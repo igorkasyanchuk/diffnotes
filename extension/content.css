@@ -1,5 +1,5 @@
 /* Follows GitHub's own theme: its CSS variables (new and classic names) with light fallbacks, dark ones below. */
-.r42-note, #r42-box {
+.r42-note, #r42-box, .r42-float {
   --r42: #e8622a;
   --r42-bg: var(--bgColor-default, var(--color-canvas-default, #ffffff));
   --r42-muted-bg: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
@@ -13,7 +13,7 @@
   white-space: normal;
 }
 @media (prefers-color-scheme: dark) {
-  .r42-note, #r42-box { --r42-bg: var(--bgColor-default, var(--color-canvas-default, #0d1117)); --r42-muted-bg: var(--bgColor-muted, var(--color-canvas-subtle, #151b23));
+  .r42-note, #r42-box, .r42-float { --r42-bg: var(--bgColor-default, var(--color-canvas-default, #0d1117)); --r42-muted-bg: var(--bgColor-muted, var(--color-canvas-subtle, #151b23));
     --r42-fg: var(--fgColor-default, var(--color-fg-default, #f0f6fc)); --r42-soft: var(--fgColor-muted, var(--color-fg-muted, #9198a1));
     --r42-line: var(--borderColor-default, var(--color-border-default, #3d444d)); --r42-link: var(--fgColor-accent, var(--color-accent-fg, #4493f8)); }
 }
@@ -42,9 +42,11 @@
 .r42-md a { color: var(--r42-link); }
 
 /* the box above the diff */
-#r42-box { border: 1px solid var(--r42-line); border-radius: 6px; background: var(--r42-bg); margin: 0 0 16px; overflow: hidden; }
-.r42-bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px; background: var(--r42-muted-bg); }
-#r42-box:not(.r42-collapsed) .r42-bar { border-bottom: 1px solid var(--r42-line); }
+#r42-box { border: 1px solid var(--r42-line); border-top: 2px solid var(--r42); border-radius: 8px; background: var(--r42-bg); margin: 0 0 16px; overflow: hidden;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.25); }
+.r42-bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--r42) 9%, var(--r42-muted-bg)), var(--r42-muted-bg) 60%); }
+#r42-box:not(.r42-collapsed) > .r42-bar { border-bottom: 1px solid var(--r42-line); }
 .r42-box-title { width: auto; flex: 1; padding: 0; }
 .r42-box-title::after { content: '▾'; color: var(--r42-soft); }
 #r42-box.r42-collapsed .r42-box-title::after { content: '▸'; }
@@ -57,3 +59,30 @@
 
 .r42-lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.8); display: grid; place-items: center; cursor: zoom-out; }
 .r42-lightbox img { max-width: 94vw; max-height: 94vh; border-radius: 6px; }
+
+/* notes switch */
+.r42-switch { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--r42-soft); }
+.r42-switch i { position: relative; width: 26px; height: 15px; border-radius: 999px; background: var(--r42-line); transition: background .15s; }
+.r42-switch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+.r42-switch[aria-checked='true'] i { background: var(--r42); }
+.r42-switch[aria-checked='true'] i::after { transform: translateX(11px); }
+.r42-switch:focus-visible i { outline: 2px solid var(--r42-link); outline-offset: 2px; }
+html.r42-hide-notes .r42-row, html.r42-hide-notes .r42-file { display: none !important; }
+
+/* floating dock: appears when the box scrolls away */
+#r42-dock { position: fixed; left: 50%; bottom: 18px; z-index: 90; display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 10px;
+  border: 1px solid var(--r42-line); border-radius: 999px; background: color-mix(in srgb, var(--r42-bg) 82%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow: 0 10px 30px -8px rgba(0,0,0,.35), 0 0 0 1px color-mix(in srgb, var(--r42) 18%, transparent);
+  transform: translate(-50%, 24px); opacity: 0; pointer-events: none; transition: transform .2s ease, opacity .2s ease; }
+#r42-dock.r42-show { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+#r42-dock b { font-size: 12.5px; white-space: nowrap; }
+.r42-pill-btn { all: unset; cursor: pointer; font-size: 12px; padding: 4px 10px; border-radius: 999px; color: var(--r42-fg); background: var(--r42-muted-bg);
+  border: 1px solid var(--r42-line); }
+.r42-pill-btn:hover { border-color: var(--r42); }
+.r42-pop { position: fixed; left: 50%; bottom: 68px; z-index: 90; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); max-height: 55vh; overflow: auto;
+  border: 1px solid var(--r42-line); border-top: 2px solid var(--r42); border-radius: 10px; background: var(--r42-bg); box-shadow: 0 18px 50px -12px rgba(0,0,0,.45);
+  padding: 4px; animation: r42-up .15s ease; }
+@keyframes r42-up { from { opacity: 0; transform: translate(-50%, 8px); } }
+@media (prefers-reduced-motion: reduce) { #r42-dock, .r42-pop { transition: none; animation: none; } }

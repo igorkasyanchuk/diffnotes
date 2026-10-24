@@ -9,7 +9,7 @@ import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import {
-  RETENTION_DAYS, bootstrap, createAccount, createUser, daysFromNow, db, hashPassword, newToken, now, pullDir, sessionSecret, sha256, verifyPassword,
+  DATA_DIR, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, hashPassword, newToken, now, pullDir, sessionSecret, sha256, verifyPassword,
 } from './db.ts'
 import type { User } from './db.ts'
 
@@ -170,9 +170,9 @@ app.post('/api/invites/:token/accept', async (c) => {
     if (password.length < 8) fail(400, 'Password needs at least 8 characters')
     user = { id: createUser(inv.email, password, str(body.name, 100)), password: '' }
   }
-  // an owner invite upgrades an existing member; a member invite never downgrades an owner
+  // an admin invite upgrades an existing member; nothing downgrades an admin or the owner
   db.prepare(`insert into memberships (account_id, user_id, role) values (?, ?, ?)
-    on conflict do update set role = excluded.role where excluded.role = 'owner'`).run(inv.account_id, user.id, inv.role)
+    on conflict do update set role = excluded.role where excluded.role = 'admin' and role = 'member'`).run(inv.account_id, user.id, inv.role)
   db.prepare('delete from invites where token = ?').run(token)
   await startSession(c, user.id)
   return c.json({ ok: true })
@@ -207,14 +207,29 @@ app.delete('/api/tokens/:id', (c) => {
   return c.json({ ok: true })
 })
 
-// role of the user in an account, or 404 (other people's accounts don't exist for you)
+// Roles in an account: owner (made it, one per account), admin (invites, manages people and repositories), member
+// (reads and uploads). A super admin (users.admin) runs the server and may open and manage every account.
+// Not a member and not a super admin: 404, other people's accounts don't exist for you.
 function role(accountId: string, user: User) {
   const m = db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, user.id) as { role: string } | undefined
-  return m?.role ?? fail(404, 'Not found')
+  if (m) return m.role
+  if (user.admin && db.prepare('select 1 from accounts where id = ?').get(accountId)) return 'admin'
+  return fail(404, 'Not found')
 }
-const requireOwner = (accountId: string, user: User) => {
-  if (role(accountId, user) !== 'owner' && !user.admin) fail(403, 'Only account owners can do that')
+const canManage = (r: string) => r === 'owner' || r === 'admin'
+const requireAdmin = (accountId: string, user: User) => {
+  const r = role(accountId, user)
+  if (!canManage(r)) fail(403, 'Only account admins can do that')
+  return r
 }
+const ROLES = ['admin', 'member']
+
+function dirSize(dir: string): number {
+  if (!fs.existsSync(dir)) return 0
+  return fs.readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile()).reduce((n, e) => n + fs.statSync(path.join(e.parentPath, e.name)).size, 0)
+}
+const fileCount = (dir: string) => (fs.existsSync(dir) ? fs.readdirSync(dir).length : 0)
 
 app.get('/api/dashboard', (c) => {
   const user = c.get('user')
@@ -239,30 +254,88 @@ app.get('/api/accounts/:id', (c) => {
     where m.account_id = ? order by u.email`).all(id)
   const repositories = db.prepare(`select r.id, r.full_name, (select count(*) from pulls p where p.repository_id = r.id) as pulls
     from repositories r where r.account_id = ? order by r.full_name`).all(id)
-  const invites = my === 'owner' || user.admin
+  const invites = canManage(my)
     ? db.prepare('select token, email, role, expires_at from invites where account_id = ? order by created_at desc').all(id) : []
   return c.json({ account, role: my, members, repositories, invites })
 })
 
+// what the account holds: people, repositories, annotated PRs, files and bytes on disk, latest uploads
+app.get('/api/accounts/:id/overview', (c) => {
+  const id = c.req.param('id')
+  role(id, c.get('user'))
+  const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, u.email as uploader,
+    (select count(*) from annotations n where n.pull_id = p.id) as annotations
+    from pulls p join repositories r on r.id = p.repository_id left join users u on u.id = p.user_id
+    where r.account_id = ? order by p.updated_at desc`).all(id) as { id: string; repository: string; annotations: number; expires_at: string }[]
+  const withDisk = pulls.map((p) => ({ ...p, files: fileCount(pullDir(p.id)), bytes: dirSize(pullDir(p.id)) }))
+  const repos = db.prepare('select full_name from repositories where account_id = ? order by full_name').all(id) as { full_name: string }[]
+  const byRepo = repos.map(({ full_name }) => {
+    const ps = withDisk.filter((p) => p.repository === full_name)
+    return { repository: full_name, pulls: ps.length, annotations: ps.reduce((n, p) => n + p.annotations, 0),
+      files: ps.reduce((n, p) => n + p.files, 0), bytes: ps.reduce((n, p) => n + p.bytes, 0) }
+  })
+  const count = (sql: string) => (db.prepare(sql).get(id) as { n: number }).n
+  const soon = daysFromNow(7)
+  return c.json({
+    totals: {
+      members: count('select count(*) as n from memberships where account_id = ?'),
+      admins: count(`select count(*) as n from memberships where account_id = ? and role in ('owner', 'admin')`),
+      invites: count('select count(*) as n from invites where account_id = ?'),
+      repositories: repos.length, pulls: pulls.length,
+      annotations: byRepo.reduce((n, r) => n + r.annotations, 0), files: byRepo.reduce((n, r) => n + r.files, 0),
+      bytes: byRepo.reduce((n, r) => n + r.bytes, 0), expiring_soon: pulls.filter((p) => p.expires_at < soon).length,
+    },
+    retention_days: RETENTION_DAYS, repositories: byRepo, recent: withDisk.slice(0, 10),
+  })
+})
+
+app.put('/api/accounts/:id', async (c) => {
+  const id = c.req.param('id'), name = str((await json(c)).name, 80) || fail(400, 'Name is required')
+  requireAdmin(id, c.get('user'))
+  db.prepare('update accounts set name = ? where id = ?').run(name, id)
+  return c.json({ ok: true })
+})
+app.delete('/api/accounts/:id', (c) => {
+  const id = c.req.param('id'), user = c.get('user')
+  if (role(id, user) !== 'owner' && !user.admin) fail(403, 'Only the owner can delete the account')
+  const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(id) as { id: string }[]
+  db.prepare('delete from accounts where id = ?').run(id)
+  for (const p of pulls) fs.rmSync(pullDir(p.id), { recursive: true, force: true })
+  return c.json({ ok: true })
+})
+
 app.post('/api/accounts/:id/invites', async (c) => {
   const id = c.req.param('id'), user = c.get('user'), body = await json(c)
-  requireOwner(id, user)
+  requireAdmin(id, user)
   const email = str(body.email).toLowerCase()
   if (!/^[^@\s]+@[^@\s]+$/.test(email)) fail(400, 'Enter an email address')
   const token = randomBytes(24).toString('base64url')
   db.prepare('insert into invites (token, account_id, email, role, created_by, created_at, expires_at) values (?, ?, ?, ?, ?, ?, ?)')
-    .run(token, id, email, body.role === 'owner' ? 'owner' : 'member', user.id, now(), daysFromNow(INVITE_DAYS))
+    .run(token, id, email, body.role === 'admin' ? 'admin' : 'member', user.id, now(), daysFromNow(INVITE_DAYS))
   return c.json({ token })
 })
 app.delete('/api/accounts/:id/invites/:token', (c) => {
-  requireOwner(c.req.param('id'), c.get('user'))
+  requireAdmin(c.req.param('id'), c.get('user'))
   db.prepare('delete from invites where token = ? and account_id = ?').run(c.req.param('token'), c.req.param('id'))
+  return c.json({ ok: true })
+})
+const memberRole = (accountId: string, userId: string) =>
+  (db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, userId) as { role: string } | undefined)?.role
+app.put('/api/accounts/:id/members/:user', async (c) => {
+  const id = c.req.param('id'), user = c.get('user'), next = (await json(c)).role as string
+  requireAdmin(id, user)
+  if (!ROLES.includes(next)) fail(400, 'Role is admin or member')
+  if (c.req.param('user') === user.id) fail(400, 'You cannot change your own role')
+  const current = memberRole(id, c.req.param('user')) ?? fail(404, 'Not found')
+  if (current === 'owner') fail(400, 'The owner keeps their role')
+  db.prepare('update memberships set role = ? where account_id = ? and user_id = ?').run(next, id, c.req.param('user'))
   return c.json({ ok: true })
 })
 app.delete('/api/accounts/:id/members/:user', (c) => {
   const id = c.req.param('id'), user = c.get('user')
-  requireOwner(id, user)
+  requireAdmin(id, user)
   if (c.req.param('user') === user.id) fail(400, 'You cannot remove yourself')
+  if (memberRole(id, c.req.param('user')) === 'owner') fail(400, 'The owner cannot be removed')
   db.prepare('delete from memberships where account_id = ? and user_id = ?').run(id, c.req.param('user'))
   return c.json({ ok: true })
 })
@@ -270,7 +343,7 @@ app.delete('/api/accounts/:id/members/:user', (c) => {
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 app.post('/api/accounts/:id/repositories', async (c) => {
   const id = c.req.param('id'), name = str((await json(c)).full_name).replace(/^https:\/\/github\.com\//, '').replace(/\/$/, '')
-  role(id, c.get('user'))
+  requireAdmin(id, c.get('user'))
   if (!REPO.test(name)) fail(400, 'Use owner/name, e.g. rails/rails')
   if (db.prepare('select 1 from repositories where full_name = ?').get(name)) fail(409, 'This repository is already connected')
   const repo = randomUUID()
@@ -280,7 +353,7 @@ app.post('/api/accounts/:id/repositories', async (c) => {
 app.delete('/api/repositories/:id', (c) => {
   const repo = db.prepare('select id, account_id from repositories where id = ?').get(c.req.param('id')) as { id: string; account_id: string } | undefined
   if (!repo) fail(404, 'Not found')
-  requireOwner(repo!.account_id, c.get('user'))
+  requireAdmin(repo!.account_id, c.get('user'))
   const pulls = db.prepare('select id from pulls where repository_id = ?').all(repo!.id) as { id: string }[]
   db.prepare('delete from repositories where id = ?').run(repo!.id)
   for (const p of pulls) fs.rmSync(pullDir(p.id), { recursive: true, force: true })
@@ -332,7 +405,7 @@ function repositoryFor(fullName: string, user: User) {
   if (!REPO.test(fullName)) fail(400, 'Bad repository name')
   const repo = db.prepare('select id, account_id from repositories where full_name = ?').get(fullName) as { id: string; account_id: string } | undefined
   if (repo) return role(repo.account_id, user) && repo.id
-  const acc = db.prepare(`select account_id from memberships where user_id = ? order by role = 'owner' desc limit 1`).get(user.id) as { account_id: string } | undefined
+  const acc = db.prepare(`select account_id from memberships where user_id = ? order by role in ('owner', 'admin') desc limit 1`).get(user.id) as { account_id: string } | undefined
   if (!acc) fail(403, 'You are not in any account')
   const id = randomUUID()
   db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(id, acc!.account_id, fullName, now())
@@ -411,6 +484,55 @@ app.get('/files/:pull/:name', async (c) => {
     'content-type': type ?? 'application/octet-stream', 'content-security-policy': 'sandbox', 'x-content-type-options': 'nosniff',
     'cache-control': 'private, max-age=3600',
   })
+})
+
+// --- super admin: the people who run this server (users.admin); `npm run reset-password` restores the first one
+
+const requireSuper = async (c: Context<Env>, next: () => Promise<void>) => {
+  if (!c.get('user').admin) return c.json({ error: 'Not found' }, 404)
+  await next()
+}
+app.use('/api/admin/*', requireSuper)
+
+app.get('/api/admin/stats', (c) => {
+  const n = (sql: string, ...args: string[]) => (db.prepare(sql).get(...args) as { n: number }).n
+  const day = new Date(Date.now() - 86400_000).toISOString(), week = new Date(Date.now() - 7 * 86400_000).toISOString()
+  const disk = fs.statfsSync(DATA_DIR)
+  const dbFile = path.join(DATA_DIR, 'reviews42.db')
+  const accounts = (db.prepare(`select a.id, a.name, a.created_at,
+      (select count(*) from memberships m where m.account_id = a.id) as members,
+      (select count(*) from repositories r where r.account_id = a.id) as repositories,
+      (select u.email from memberships m join users u on u.id = m.user_id where m.account_id = a.id and m.role = 'owner') as owner
+    from accounts a order by a.created_at`).all() as { id: string }[]).map((a) => {
+    const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(a.id) as { id: string }[]
+    return { ...a, pulls: pulls.length, bytes: pulls.reduce((sum, p) => sum + dirSize(pullDir(p.id)), 0) }
+  })
+  const users = db.prepare(`select u.id, u.email, u.name, u.admin, u.created_at,
+      (select count(*) from memberships m where m.user_id = u.id) as accounts,
+      (select max(t.last_used_at) from tokens t where t.user_id = u.id) as token_used_at,
+      (select max(s.created_at) from sessions s where s.user_id = u.id) as signed_in_at
+    from users u order by u.created_at`).all()
+  return c.json({
+    totals: {
+      users: n('select count(*) as n from users'), accounts: accounts.length, repositories: n('select count(*) as n from repositories'),
+      pulls: n('select count(*) as n from pulls'), annotations: n('select count(*) as n from annotations'),
+      tokens: n('select count(*) as n from tokens'), sessions: n('select count(*) as n from sessions'),
+      invites: n('select count(*) as n from invites'),
+      uploads_24h: n('select count(*) as n from pulls where updated_at > ?', day), uploads_7d: n('select count(*) as n from pulls where updated_at > ?', week),
+      files: fs.readdirSync(UPLOADS).reduce((sum, d) => sum + fileCount(path.join(UPLOADS, d)), 0),
+      upload_bytes: dirSize(UPLOADS), db_bytes: fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0,
+      disk_free_bytes: disk.bavail * disk.bsize, disk_total_bytes: disk.blocks * disk.bsize,
+    },
+    retention_days: RETENTION_DAYS, accounts, users,
+  })
+})
+
+// promote or demote another super admin; your own flag stays, so the server always keeps one
+app.put('/api/admin/users/:id', async (c) => {
+  if (c.req.param('id') === c.get('user').id) fail(400, 'You cannot change your own super admin flag')
+  const res = db.prepare('update users set admin = ? where id = ?').run((await json(c)).admin ? 1 : 0, c.req.param('id'))
+  if (!res.changes) fail(404, 'Not found')
+  return c.json({ ok: true })
 })
 
 // --- skill install, health, static web app
