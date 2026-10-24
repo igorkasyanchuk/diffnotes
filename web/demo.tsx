@@ -2,20 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import './demo.css'
 
-// A full-width, auto-playing tour of Reviews42 on a GitHub pull request. The page is annotated from the first frame;
-// an arrow with a label moves from feature to feature (summary, note, screenshots, live demo, notes switch, the agent),
-// measured from the real elements so it lands right at any width. Scene actions are CSS animations keyed on `.dm-sN`.
+// A full-width, auto-playing tour of Reviews42 on a GitHub pull request: the plain review page first, then an arrow with a
+// label walks through the bar, a note, screenshots, a live demo, the sticky dock and its switch. Positions are measured
+// from the real elements so it lands right at any width. Scene actions are CSS animations keyed on `.dm-x-<name>`.
 
-type Target = 'box' | 'noteA' | 'thumbs' | 'live' | 'switch' | 'term'
-// opens on what words can't show: screenshots and a live demo, then the notes themselves
-const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' | 'express'; label?: string; caption: ReactNode }[] = [
-  { name: 'shots', ms: 7000, at: 'thumbs', click: 'thumb', label: 'Screenshots open in a gallery', caption: <>Mobile and desktop shots right in the diff; <b>← →</b> to flip.</> },
-  { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
-  { name: 'summary', ms: 4200, at: 'box', label: 'The whole PR in two lines', caption: <>Your agent's <b>summary</b> sits above the diff, with links to its reports.</> },
+type Target = 'box' | 'noteA' | 'thumbs' | 'live' | 'dock'
+const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' | 'express' | 'switch'; label?: string; caption: ReactNode }[] = [
+  { name: 'page', ms: 2600, caption: <>A pull request on GitHub, like any other day.</> },
+  { name: 'bar', ms: 4200, at: 'box', label: 'Reviews42 adds one bar on top', caption: <>Your agent's <b>summary</b> of the PR, with links to its reports.</> },
   { name: 'note', ms: 4200, at: 'noteA', label: 'The why, next to the change', caption: <>Every changed block gets <b>a plain-language note</b> on its own lines.</> },
-  { name: 'off', ms: 4400, at: 'switch', click: 'switch', label: 'One switch hides every note', caption: <>Want the bare diff? <b>Notes off</b>, and back on whenever you like.</> },
-  { name: 'agent', ms: 4800, at: 'term', label: 'All of it from one prompt', caption: <>You ask your agent: <b>“annotate this PR with reviews42”</b>. That's it.</> },
-  { name: 'end', ms: 5200, caption: <>Free, self-hosted, <b>3 minutes</b> to install.</> },
+  { name: 'shots', ms: 8600, at: 'thumbs', click: 'thumb', label: 'Screenshots, three widths', caption: <>Click one: a gallery opens, <b>← →</b> to flip.</> },
+  { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
+  { name: 'dock', ms: 3800, at: 'dock', label: 'Stays with you as you scroll', caption: <>The <b>dock</b> keeps the notes and the switch in reach.</> },
+  { name: 'off', ms: 5200, at: 'dock', click: 'switch', label: 'One switch hides every note', caption: <>Want the bare diff? <b>Notes off</b>, and back on whenever you like.</> },
+  { name: 'end', ms: 6500, caption: <>Free, self-hosted, <b>3 minutes</b> to install.</> },
 ]
 
 type Row = [kind: ' ' | '+' | '-', old: number | '', now: number | '', code: string]
@@ -35,6 +35,12 @@ const FILE_B: Row[] = [
   ['+', '', 15, '  onChange={setShipping} />'],
   [' ', 13, 16, '<PayButton total={total} />'],
 ]
+const FILE_C: Row[] = [
+  [' ', 8, 8, '<Line label="Subtotal" value={subtotal} />'],
+  ['-', 9, '', '<Line label="Total" value={subtotal} strong />'],
+  ['+', '', 9, '{express && <Line label="Express" value={EXPRESS_FEE} />}'],
+  ['+', '', 10, '<Line label="Total" value={subtotal + fee} strong />'],
+]
 
 const Badge = () => <span className="dm-badge">R42</span>
 
@@ -52,8 +58,10 @@ const Note = ({ title, where, children, refEl }: { title: string; where: string;
     <div className="dm-nb">{children}</div>
   </div></td></tr>
 
-// the two "screenshots" a note carries: the shipping picker at phone and desktop width
-const Shot = ({ mobile }: { mobile?: boolean }) => <div className={`dm-shot${mobile ? ' mobile' : ''}`}>
+// the "screenshots" a note carries: the shipping picker at phone, tablet and desktop width
+type Width = 'mobile' | 'tablet' | 'desktop'
+const WIDTHS: Width[] = ['mobile', 'tablet', 'desktop']
+const Shot = ({ w }: { w: Width }) => <div className={`dm-shot ${w}`}>
   <div className="dm-shot-bar" /><div className="dm-shot-line w60" /><div className="dm-shot-line w40" />
   <div className="dm-shot-opts"><span>standard</span><span className="on">express</span></div>
   <div className="dm-shot-pay">pay $42</div>
@@ -61,10 +69,11 @@ const Shot = ({ mobile }: { mobile?: boolean }) => <div className={`dm-shot${mob
 
 export function Demo() {
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-  // reduced motion: hold the summary scene, not a gallery mid-animation
-  const [scene, setScene] = useState(reduce ? 2 : 0), [playing, setPlaying] = useState(!reduce), [round, setRound] = useState(0), [moving, setMoving] = useState(false)
-  const [view, setView] = useState({ scroll: 0, hl: null as null | { x: number; y: number; w: number; h: number }, cursor: null as null | { x: number; y: number }, below: true })
+  // reduced motion: hold the bar scene, not a gallery mid-animation
+  const [scene, setScene] = useState(reduce ? 1 : 0), [playing, setPlaying] = useState(!reduce), [round, setRound] = useState(0), [moving, setMoving] = useState(false)
+  const [view, setView] = useState({ scroll: 0, hl: null as null | { x: number; y: number; w: number; h: number }, cursor: null as null | { x: number; y: number }, below: true, docked: false })
   const els = useRef<Record<string, HTMLElement | null>>({}), screen = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null)
+  const lastScroll = useRef(0)
   const ref = (k: string) => (e: HTMLElement | null) => { els.current[k] = e }
 
   useEffect(() => {
@@ -82,19 +91,22 @@ export function Demo() {
       const s = SCENES[scene], scr = screen.current!, body = content.current!
       const box = (el: HTMLElement | null | undefined, scroll: number) => {
         if (!el) return null
-        if (!body.contains(el)) return { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight }
         const r = el.getBoundingClientRect(), b = body.getBoundingClientRect(), sr = scr.getBoundingClientRect()
+        if (!body.contains(el)) return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height }
         return { x: r.left - sr.left, y: body.offsetTop + r.top - b.top - scroll, w: r.width, h: r.height }
       }
       const el = s.at && els.current[s.at]
-      let scroll = 0
+      // the dock is outside the page: the page stays where it was
+      let scroll = el && !body.contains(el) ? lastScroll.current : 0
       if (el && body.contains(el)) {
         // stay at the top of the page while the feature and its label fit; else bring it up to a third of the screen
         const { y, h } = box(el, 0)!
         if (y + h + 130 > scr.clientHeight) scroll = Math.max(0, Math.min(y - scr.clientHeight * 0.3, body.offsetTop + body.offsetHeight - scr.clientHeight))
       }
-      const hl = box(el, scroll), c = s.click && box(els.current[s.click], scroll)
-      setView({ scroll, hl, cursor: c ? { x: c.x + c.w * 0.55, y: c.y + c.h * 0.6 } : null, below: !hl || hl.y + hl.h + 110 < scr.clientHeight })
+      lastScroll.current = scroll
+      const hl = box(el, scroll), c = s.click && box(els.current[s.click], scroll), bar = box(els.current.box, 0)!
+      setView({ scroll, hl, cursor: c ? { x: c.x + c.w * 0.55, y: c.y + c.h * 0.6 } : null, below: !hl || hl.y + hl.h + 110 < scr.clientHeight,
+        docked: scroll > bar.y - body.offsetTop + bar.h })
     }
     measure()
     // the first frame lands in place; after that the page, arrow and cursor glide between scenes
@@ -105,7 +117,7 @@ export function Demo() {
 
   const s = scene, end = s === SCENES.length - 1, hl = view.hl
   const callX = hl ? Math.max(12, Math.min(hl.x + Math.min(hl.w / 2, 140) - 24, (screen.current?.clientWidth ?? 800) - 300)) : 0
-  return <section className={`dm dm-x-${SCENES[s].name}${reduce ? ' dm-still' : ''}${moving ? ' dm-moving' : ''}`} aria-label="How Reviews42 looks on a GitHub pull request">
+  return <section className={`dm dm-x-${SCENES[s].name}${view.docked ? ' dm-docked' : ''}${reduce ? ' dm-still' : ''}${moving ? ' dm-moving' : ''}`} aria-label="How Reviews42 looks on a GitHub pull request">
     <div className="dm-screen" ref={screen} key={round}>
       <div className="dm-page">
         <div className="dm-gh-top"><span className="dm-cat">◉</span><span>acme / <b>shop</b></span><span className="dm-gh-pr">Pull requests</span></div>
@@ -114,21 +126,38 @@ export function Demo() {
             <h3>Express shipping at checkout <span>#42</span></h3>
             <div className="dm-meta"><span className="dm-open">Open</span> ana wants to merge 3 commits into <code>main</code></div>
             <div className="dm-tabs"><span>Conversation <i>2</i></span><span>Commits <i>3</i></span><span className="on">Files changed <i>3</i></span>
-              <em className="dm-ext"><Badge />5</em></div>
+              <em className="dm-ext"><Badge />3</em></div>
           </div>
           <div className="dm-scroll">
             <div className="dm-box" ref={ref('box')}>
-              <div className="dm-bar"><Badge /><b>Reviews42 · 5 notes</b>
-                <span className="dm-sw" ref={ref('switch')}><i />notes</span><span className="dm-link">expand all</span><span className="dm-link">open in Reviews42</span></div>
+              <div className="dm-bar"><Badge /><b>Reviews42 · 3 notes</b>
+                <span className="dm-sw"><i />notes</span><span className="dm-link">expand all</span><span className="dm-link">open in Reviews42</span></div>
               <div className="dm-sum">Adds an <b>express</b> shipping option. Empty carts now stop before the payment call. Tested on mobile and desktop.
                 {' '}<span className="dm-a">test report</span> · <span className="dm-a">timings.csv</span></div>
+            </div>
+            <div className="dm-file">
+              <div className="dm-fh">⌄ app/checkout.ts <span className="add">+3</span> <span className="del">−1</span></div>
+              <Diff rows={FILE_A} notes={{
+                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45">
+                  An empty cart used to reach the payment provider with $0. It now returns early; express orders pay the fee.
+                </Note>,
+              }} />
             </div>
             <div className="dm-file">
               <div className="dm-fh">⌄ app/ShippingPicker.tsx <span className="add">+3</span></div>
               <Diff rows={FILE_B} notes={{
                 1: <Note title="Shipping picker on checkout" where="line 13–15">
-                  Customers choose standard or express before paying.
-                  <div className="dm-thumbs" ref={ref('thumbs')}><span className="dm-thumb hit" ref={ref('thumb')}><Shot mobile /></span><span className="dm-thumb"><Shot /></span></div>
+                  Customers choose standard or express before paying. Checked at three widths:
+                  <div className="dm-thumbs" ref={ref('thumbs')}>{WIDTHS.map((w, i) =>
+                    <span key={w} className={`dm-thumb ${w}`} ref={i ? undefined : ref('thumb')}><Shot w={w} /></span>)}</div>
+                </Note>,
+              }} />
+            </div>
+            <div className="dm-file">
+              <div className="dm-fh">⌄ app/OrderTotal.tsx <span className="add">+2</span> <span className="del">−1</span></div>
+              <Diff rows={FILE_C} notes={{
+                2: <Note title="The total follows the shipping choice" where="line 9–10">
+                  Try it: pick express and watch the total.
                   <div className="dm-live" ref={ref('live')}>
                     <div className="dm-live-bar"><span>live demo · sandboxed</span><span className="dm-pill">expand ⤢</span></div>
                     <div className="dm-live-app">
@@ -137,14 +166,6 @@ export function Demo() {
                       <span className="dm-total">Total <b className="t1">$40.00</b><b className="t2">$47.00</b></span>
                     </div>
                   </div>
-                </Note>,
-              }} />
-            </div>
-            <div className="dm-file">
-              <div className="dm-fh">⌄ app/checkout.ts <span className="add">+3</span> <span className="del">−1</span></div>
-              <Diff rows={FILE_A} notes={{
-                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45">
-                  An empty cart used to reach the payment provider with $0. It now returns early; express orders pay the fee.
                 </Note>,
               }} />
             </div>
@@ -160,25 +181,18 @@ export function Demo() {
         </div>
       </>}
 
-      <div className="dm-term" ref={ref('term')}>
-        <div className="dm-term-bar"><i /><i /><i /><span>~/acme/shop</span></div>
-        <div className="dm-term-body">
-          <div className="l p">$ claude "annotate this PR with reviews42"</div>
-          <div className="l o" style={{ animationDelay: '1.1s' }}>· reading the diff: 3 files, 5 changed blocks</div>
-          <div className="l o" style={{ animationDelay: '1.9s' }}>· screenshots + demo: picker-mobile.png, picker-desktop.png, picker.html</div>
-          <div className="l a" style={{ animationDelay: '2.8s' }}>✓ uploaded 5 notes + 3 files → reviews.acme.dev</div>
-        </div>
-      </div>
+      <div className="dm-dock" ref={ref('dock')}><Badge /><b>3 notes</b><span className="dm-sw" ref={ref('switch')}><i />notes</span><span className="dm-link">↑ summary</span></div>
 
       <div className="dm-gallery">
-        <div className="dm-gallery-track"><Shot mobile /><Shot /></div>
-        <div className="dm-cap"><span className="dm-cap-a">Picker on mobile · 1 / 2</span><span className="dm-cap-b">Picker on desktop · 2 / 2</span></div>
+        <div className="dm-gallery-track"><div className="dm-strip">{WIDTHS.map((w, i) =>
+          <div key={w} className="dm-slide"><Shot w={w} /><span className="dm-cap">Picker on {w} · {i + 1} / 3</span></div>)}</div></div>
         <span className="dm-key">←</span><span className="dm-key r">→</span>
       </div>
 
       <div className="dm-end">
-        <div className="dm-end-tags"><span>free</span><span>self-hosted</span><span>any agent</span><span>nothing posted to GitHub</span></div>
-        <h3>Set it up in 3 minutes</h3>
+        <h3>Review the why, not just the diff.</h3>
+        <p className="dm-slogan">Your agent knows why every line changed. Ask it to <b>“annotate this PR with reviews42”</b>, and your team reviews faster.</p>
+        <div className="dm-end-tags"><span>free</span><span>self-hosted</span><span>any agent</span><span>nothing posted to the PR</span></div>
         <ol>
           <li><b>docker run</b> the server</li>
           <li><b>curl …/install.sh | sh</b> for your agent</li>
@@ -187,7 +201,7 @@ export function Demo() {
         <a href="#install" className="btn primary">how to install ↓</a>
       </div>
 
-      <div className="dm-cursor" aria-hidden="true" style={view.cursor ? { left: view.cursor.x, top: view.cursor.y } : undefined}><i key={s} /></div>
+      <div className="dm-cursor" aria-hidden="true" style={view.cursor ? { left: view.cursor.x, top: view.cursor.y } : { opacity: 0 }}><i key={s} /></div>
     </div>
 
     <div className="dm-controls">
