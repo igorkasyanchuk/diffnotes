@@ -7,14 +7,15 @@ import './demo.css'
 // measured from the real elements so it lands right at any width. Scene actions are CSS animations keyed on `.dm-sN`.
 
 type Target = 'box' | 'noteA' | 'thumbs' | 'live' | 'switch' | 'term'
-const SCENES: { ms: number; at?: Target; click?: Target | 'thumb' | 'express'; label?: string; caption: ReactNode }[] = [
-  { ms: 4200, at: 'box', label: 'The whole PR in two lines', caption: <>Your agent's <b>summary</b> sits above the diff, with links to its reports.</> },
-  { ms: 4200, at: 'noteA', label: 'The why, next to the change', caption: <>Every changed block gets <b>a plain-language note</b> on its own lines.</> },
-  { ms: 5400, at: 'thumbs', click: 'thumb', label: 'Screenshots open in a gallery', caption: <>Mobile and desktop shots in one note; <b>← →</b> to flip.</> },
-  { ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
-  { ms: 4400, at: 'switch', click: 'switch', label: 'One switch hides every note', caption: <>Want the bare diff? <b>Notes off</b>, and back on whenever you like.</> },
-  { ms: 4800, at: 'term', label: 'All of it from one prompt', caption: <>You ask your agent: <b>“annotate this PR with reviews42”</b>. That's it.</> },
-  { ms: 5200, caption: <>Free, self-hosted, <b>3 minutes</b> to install.</> },
+// opens on what words can't show: screenshots and a live demo, then the notes themselves
+const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' | 'express'; label?: string; caption: ReactNode }[] = [
+  { name: 'shots', ms: 5400, at: 'thumbs', click: 'thumb', label: 'Screenshots open in a gallery', caption: <>Mobile and desktop shots right in the diff; <b>← →</b> to flip.</> },
+  { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
+  { name: 'summary', ms: 4200, at: 'box', label: 'The whole PR in two lines', caption: <>Your agent's <b>summary</b> sits above the diff, with links to its reports.</> },
+  { name: 'note', ms: 4200, at: 'noteA', label: 'The why, next to the change', caption: <>Every changed block gets <b>a plain-language note</b> on its own lines.</> },
+  { name: 'off', ms: 4400, at: 'switch', click: 'switch', label: 'One switch hides every note', caption: <>Want the bare diff? <b>Notes off</b>, and back on whenever you like.</> },
+  { name: 'agent', ms: 4800, at: 'term', label: 'All of it from one prompt', caption: <>You ask your agent: <b>“annotate this PR with reviews42”</b>. That's it.</> },
+  { name: 'end', ms: 5200, caption: <>Free, self-hosted, <b>3 minutes</b> to install.</> },
 ]
 
 type Row = [kind: ' ' | '+' | '-', old: number | '', now: number | '', code: string]
@@ -60,7 +61,8 @@ const Shot = ({ mobile }: { mobile?: boolean }) => <div className={`dm-shot${mob
 
 export function Demo() {
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-  const [scene, setScene] = useState(0), [playing, setPlaying] = useState(!reduce), [round, setRound] = useState(0)
+  // reduced motion: hold the summary scene, not a gallery mid-animation
+  const [scene, setScene] = useState(reduce ? 2 : 0), [playing, setPlaying] = useState(!reduce), [round, setRound] = useState(0), [moving, setMoving] = useState(false)
   const [view, setView] = useState({ scroll: 0, hl: null as null | { x: number; y: number; w: number; h: number }, cursor: null as null | { x: number; y: number }, below: true })
   const els = useRef<Record<string, HTMLElement | null>>({}), screen = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null)
   const ref = (k: string) => (e: HTMLElement | null) => { els.current[k] = e }
@@ -94,13 +96,15 @@ export function Demo() {
       setView({ scroll, hl, cursor: c ? { x: c.x + c.w * 0.55, y: c.y + c.h * 0.6 } : null, below: !hl || hl.y + hl.h + 110 < scr.clientHeight })
     }
     measure()
+    // the first frame lands in place; after that the page, arrow and cursor glide between scenes
+    requestAnimationFrame(() => setMoving(true))
     addEventListener('resize', measure)
     return () => removeEventListener('resize', measure)
   }, [scene, round])
 
   const s = scene, end = s === SCENES.length - 1, hl = view.hl
   const callX = hl ? Math.max(12, Math.min(hl.x + Math.min(hl.w / 2, 140) - 24, (screen.current?.clientWidth ?? 800) - 300)) : 0
-  return <section className={`dm dm-s${s}${reduce ? ' dm-still' : ''}`} aria-label="How Reviews42 looks on a GitHub pull request">
+  return <section className={`dm dm-x-${SCENES[s].name}${reduce ? ' dm-still' : ''}${moving ? ' dm-moving' : ''}`} aria-label="How Reviews42 looks on a GitHub pull request">
     <div className="dm-screen" ref={screen} key={round}>
       <div className="dm-page">
         <div className="dm-gh-top"><span className="dm-cat">◉</span><span>acme / <b>shop</b></span><span className="dm-gh-pr">Pull requests</span></div>
