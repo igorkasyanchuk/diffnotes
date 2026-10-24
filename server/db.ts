@@ -6,7 +6,7 @@ import path from 'node:path'
 // the only uploads accepted: extension → content type (text is served as text/plain, never rendered as HTML)
 export const EXT_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  csv: 'text/csv', md: 'text/markdown', txt: 'text/plain',
+  csv: 'text/csv', md: 'text/markdown', txt: 'text/plain', html: 'text/html',
 }
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data')
@@ -82,7 +82,8 @@ function secret(name: string) {
   if (!fs.existsSync(file)) {
     const tmp = `${file}.${randomBytes(6).toString('hex')}`
     fs.writeFileSync(tmp, randomBytes(32).toString('hex'), { mode: 0o600 })
-    try { fs.linkSync(tmp, file) } catch {} finally { fs.rmSync(tmp, { force: true }) }
+    // EEXIST: the other one won. Anything else (a volume without hard links): rename, atomic too, last one wins
+    try { fs.linkSync(tmp, file) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') fs.renameSync(tmp, file) } finally { fs.rmSync(tmp, { force: true }) }
   }
   return fs.readFileSync(file, 'utf8').trim()
 }
@@ -150,12 +151,16 @@ export function purgeExpired() {
   return ids
 }
 
-// Files written before the files table existed: one row per file found on disk, once.
-for (const pull of fs.readdirSync(UPLOADS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
-  if (!db.prepare('select 1 from pulls where id = ?').get(pull)) continue
-  for (const f of fs.readdirSync(path.join(UPLOADS, pull), { withFileTypes: true }).filter((e) => e.isFile())) {
-    const ext = path.extname(f.name).slice(1).toLowerCase()
-    db.prepare(`insert or ignore into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, 'disk')`)
-      .run(pull, f.name, EXT_TYPES[ext] ?? 'application/octet-stream', fs.statSync(path.join(UPLOADS, pull, f.name)).size)
+// Files written before the files table existed: one row per file found on disk, once (on later boots a file without a
+// row is a leftover of an interrupted replace or delete, not an attachment)
+if (!getSetting('files_migrated')) {
+  const add = db.prepare(`insert or ignore into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, 'disk')`)
+  for (const pull of fs.readdirSync(UPLOADS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
+    if (!db.prepare('select 1 from pulls where id = ?').get(pull)) continue
+    for (const f of fs.readdirSync(path.join(UPLOADS, pull), { withFileTypes: true }).filter((e) => e.isFile())) {
+      const ext = path.extname(f.name).slice(1).toLowerCase()
+      add.run(pull, f.name, EXT_TYPES[ext] ?? 'application/octet-stream', fs.statSync(path.join(UPLOADS, pull, f.name)).size)
+    }
   }
+  setSetting('files_migrated', true)
 }

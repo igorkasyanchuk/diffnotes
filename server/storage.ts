@@ -6,6 +6,7 @@ import path from 'node:path'
 // MinIO…), chosen by a super admin in the server settings. Each file row remembers its backend, so switching keeps old
 // files readable. Keys are `<prefix>pulls/<pull id>/<name>`; names are already reduced to [A-Za-z0-9._-].
 
+// endpoint without a trailing slash, prefix '' or `a/b/`: PUT /api/admin/storage normalizes both before saving
 export type S3Config = { endpoint: string; region: string; bucket: string; key_id: string; secret: string; prefix: string }
 
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
@@ -27,7 +28,7 @@ export function sign(method: string, url: URL, headers: Record<string, string>, 
 }
 
 export async function s3(cfg: S3Config, method: string, key: string, body?: Buffer, extra: Record<string, string> = {}, query = '') {
-  const url = new URL(`${cfg.endpoint.replace(/\/+$/, '')}/${cfg.bucket}/${key}${query ? `?${query}` : ''}`)
+  const url = new URL(`${cfg.endpoint}/${cfg.bucket}/${key}${query ? `?${query}` : ''}`)
   const payload = body ?? Buffer.alloc(0)
   const headers = sign(method, url, { 'x-amz-content-sha256': sha(payload), ...extra }, new Date(), cfg.key_id, cfg.secret, cfg.region || 'auto')
   delete (headers as Record<string, string>).host
@@ -38,7 +39,7 @@ export async function s3(cfg: S3Config, method: string, key: string, body?: Buff
   return res
 }
 
-const objectKey = (cfg: S3Config, pull: string, name: string) => `${cfg.prefix.replace(/^\/+/, '')}pulls/${pull}/${name}`
+const objectKey = (cfg: S3Config, pull: string, name: string) => `${cfg.prefix}pulls/${pull}/${name}`
 
 // config: the bucket's credentials (kept for reading and deleting older files); useS3: whether new uploads go there
 export function storage(uploads: string, config: () => S3Config | null, useS3: () => boolean) {
@@ -80,7 +81,7 @@ const need = (cfg: S3Config | null) => cfg ?? (() => { throw new Error('S3 stora
 // Safety net besides the server's own purge: a bucket lifecycle rule that expires everything under the prefix a day
 // after the retention period (every re-upload writes new objects, so their age restarts). Replaces the bucket's rules.
 export async function applyLifecycle(cfg: S3Config, days: number) {
-  const prefix = `${cfg.prefix.replace(/^\/+/, '')}pulls/`
+  const prefix = `${cfg.prefix}pulls/`
   const xml = `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>reviews42-expire</ID><Filter><Prefix>${prefix}</Prefix></Filter>` +
     `<Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration></Rule></LifecycleConfiguration>`
   const body = Buffer.from(xml)
@@ -89,7 +90,7 @@ export async function applyLifecycle(cfg: S3Config, days: number) {
 
 // put, read back and delete one object: proves the endpoint, bucket and keys work before saving them
 export async function checkS3(cfg: S3Config) {
-  const key = `${cfg.prefix.replace(/^\/+/, '')}reviews42-check-${Date.now()}.txt`
+  const key = `${cfg.prefix}reviews42-check-${Date.now()}.txt`
   await s3(cfg, 'PUT', key, Buffer.from('ok'), { 'content-type': 'text/plain' })
   const back = await (await s3(cfg, 'GET', key)).text()
   await s3(cfg, 'DELETE', key)

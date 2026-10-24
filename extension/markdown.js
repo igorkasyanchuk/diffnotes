@@ -48,8 +48,8 @@
       }
       if (/^>\s?/.test(line)) { flushPara(); flushList(); quote.push(line.replace(/^>\s?/, '')); continue }
       flushQuote()
-      // a table: a row with pipes followed by a --- rule with as many cells (else `a || b` above a `---` is a table)
-      if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1]) && cells(lines[i + 1]).length === cells(line).length) {
+      // a table: a row with pipes followed by a rule with pipes and as many cells (a bare `---` is a rule, even under `a |`)
+      if (line.includes('|') && lines[i + 1]?.includes('|') && isRule(lines[i + 1]) && cells(lines[i + 1]).length === cells(line).length) {
         flush()
         const head = cells(line), rows = []
         for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]))
