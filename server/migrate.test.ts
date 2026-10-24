@@ -4,8 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 
-// a database and uploads folder from an older release: repositories unique server-wide, no risk column, files on disk without rows
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-old-'))
+// a database and uploads folder from an older release (still named reviews42.db): repositories unique server-wide, no risk column, files on disk without rows
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-old-'))
 const old = new DatabaseSync(path.join(dir, 'reviews42.db'))
 old.exec(`
   create table accounts (id text primary key, name text not null, created_at text not null);
@@ -25,6 +25,8 @@ fs.mkdirSync(path.join(dir, 'uploads/p'), { recursive: true })
 fs.writeFileSync(path.join(dir, 'uploads/p/shot.png'), 'png!')
 fs.writeFileSync(path.join(dir, 'uploads/p/notes.bin'), 'x')
 fs.mkdirSync(path.join(dir, 'uploads/gone'))
+fs.mkdirSync(path.join(dir, 'backup'))
+fs.writeFileSync(path.join(dir, 'backup/reviews42.db'), 'old copy') // its hourly copy from before the rename
 process.env.DATA_DIR = dir
 const { bootstrap, db, sessionSecret, snapshot } = await import('./db.ts')
 
@@ -53,8 +55,13 @@ it('writes a secret where hard links fail', () => {
 
 it('snapshots the database for backups', () => {
   snapshot()
-  const copy = new DatabaseSync(path.join(dir, 'backup/reviews42.db'))
+  const copy = new DatabaseSync(path.join(dir, 'backup/diffnotes.db'))
   expect(copy.prepare('select count(*) as n from pulls').get()).toEqual({ n: 1 })
   copy.close()
-  expect(fs.readdirSync(path.join(dir, 'backup'))).toEqual(['reviews42.db'])
+  expect(fs.readdirSync(path.join(dir, 'backup'))).toEqual(['diffnotes.db'])
+})
+
+it('took over the database under its new name', () => {
+  expect(fs.existsSync(path.join(dir, 'reviews42.db'))).toBe(false)
+  expect(fs.existsSync(path.join(dir, 'diffnotes.db'))).toBe(true)
 })

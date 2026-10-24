@@ -1,22 +1,22 @@
 ---
-name: reviews42
-description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to Reviews42; teammates then see them inside the diff through the Reviews42 browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, to upload annotations to Reviews42, or to refresh or remove notes that are out of date after new commits. Nothing is posted to GitHub, GitLab or Bitbucket itself.
+name: diffnotes
+description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to DiffNotes; teammates then see them inside the diff through the DiffNotes browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, to upload annotations to DiffNotes, or to refresh or remove notes that are out of date after new commits. Nothing is posted to GitHub, GitLab or Bitbucket itself.
 ---
 
-# Reviews42: annotate a pull request
+# DiffNotes: annotate a pull request
 
-You explain a pull request to the people who will review it. You upload the notes to the Reviews42 server
-(`{{HOST}}`); the Reviews42 browser extension draws them next to the diff on GitHub, GitLab (merge requests) or
+You explain a pull request to the people who will review it. You upload the notes to the DiffNotes server
+(`{{HOST}}`); the DiffNotes browser extension draws them next to the diff on GitHub, GitLab (merge requests) or
 Bitbucket for everyone in the account that owns the repository. Notes expire on their own after the server's retention period.
 
 ## Setup (once per machine)
 
 ```bash
-echo "${REVIEWS42_URL:-{{HOST}}}" && test -n "$REVIEWS42_TOKEN" && echo token set || echo "no REVIEWS42_TOKEN"
+echo "${DIFFNOTES_URL:-{{HOST}}}" && test -n "$DIFFNOTES_TOKEN" && echo token set || echo "no DIFFNOTES_TOKEN"
 ```
 
 No token? Stop and tell the user to make one at `{{HOST}}/settings` and add
-`export REVIEWS42_URL={{HOST}}` and `export REVIEWS42_TOKEN=…` to their shell profile. Never print the token,
+`export DIFFNOTES_URL={{HOST}}` and `export DIFFNOTES_TOKEN=…` to their shell profile. Never print the token,
 never write it into files or commits.
 
 ## Rules
@@ -40,7 +40,7 @@ never write it into files or commits.
   - reports and data: `[test report](attachment:report.md)`, `[timings](attachment:bench.csv)`, `[log](attachment:out.txt)`;
     they open as a rendered preview (Markdown, a CSV table, plain text).
   - before / after: two images next to each other in one note, named `…-before.png` / `…-after.png` (or alt text
-    starting with "Before" / "After"), become one image with a drag handle: `![Before: grey button](attachment:login-before.png) ![After: orange button](attachment:login-after.png)`.
+    starting with "Before" / "After"), become one image with a drag handle (⤢ opens it large): `![Before: grey button](attachment:login-before.png) ![After: orange button](attachment:login-after.png)`.
     Same size and crop for both, so the handle lines them up.
   - interactive demos: `[try the picker](attachment:picker-demo.html)` when clicking beats a screenshot (a component's
     states, an animation, a form's validation). Reviewers get a live preview under the note and can expand it at phone,
@@ -65,7 +65,7 @@ never write it into files or commits.
 
 ## Workflow
 
-1. **Find the PR and name the repository** the way Reviews42 does: `owner/name` on GitHub, `host/path` on GitLab and
+1. **Find the PR and name the repository** the way DiffNotes does: `owner/name` on GitHub, `host/path` on GitLab and
    Bitbucket (`gitlab.com/group/sub/project`, `gitlab.acme.dev/team/app` for self-hosted GitLab, `bitbucket.org/team/app`).
    ```bash
    git remote get-url origin   # tells you the host
@@ -90,7 +90,7 @@ never write it into files or commits.
 3. **Screenshots** (optional): when the change is visible in a UI and you can run it, take before/after shots
    with whatever browser tool you have and save them next to the payload. For responsive UI, shoot the same screen at
    mobile (~390px) and desktop (~1280px) width and put both in one note.
-4. **Write `reviews42.json`** (outside the repo, e.g. in a temp dir):
+4. **Write `diffnotes.json`** (outside the repo, e.g. in a temp dir):
    ```json
    {
      "title": "PR title",
@@ -109,23 +109,23 @@ never write it into files or commits.
    it prints `ok`:
    ```bash
    test "$(git rev-parse HEAD)" = "<headRefOid>" || echo "HEAD is not the PR head: push, or check out the PR branch"
-   python3 check.py reviews42.json "$BASE"   # check.py: the script under “Check script” below
+   python3 check.py diffnotes.json "$BASE"   # check.py: the script under “Check script” below
    ```
    It only proves the places exist; you still reread each note against the code at those lines.
 6. **Upload** (replaces everything uploaded for this PR before: notes you leave out are deleted, so always send the
    full, current set):
    ```bash
-   H=${REVIEWS42_URL:-{{HOST}}}
-   curl -fsS -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN" \
-     -F payload=@reviews42.json -F file=@after.png -F file=@before.png
-   # JSON only, no files: -H 'content-type: application/json' --data-binary @reviews42.json
+   H=${DIFFNOTES_URL:-{{HOST}}}
+   curl -fsS -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+     -F payload=@diffnotes.json -F file=@after.png -F file=@before.png
+   # JSON only, no files: -H 'content-type: application/json' --data-binary @diffnotes.json
    # → {"id":"…","url":"…/pulls/<id>","annotations":3,"files":2}
    ```
    `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
    account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
    isn't allowed or doesn't match its extension. A new repository is connected to the account you own or administer on
    its first upload.
-7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"` returns what
+7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
    was stored; the `annotations` count must match what you wrote.
 
 ## After new commits: keep the notes true
@@ -133,7 +133,7 @@ never write it into files or commits.
 Old notes go stale when the code under them changes: lines move, blocks disappear, behaviour changes. Whenever you
 push to an annotated PR (or are asked to refresh its notes):
 
-1. Fetch what is stored: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN" > old.json`
+1. Fetch what is stored: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" > old.json`
    (`404` = nothing stored yet).
 2. Read the new diff (workflow step 2) and go through every stored note: keep it only if its file is still changed,
    its block still exists (fix moved line numbers) and its words still describe the code. Rewrite what changed,
@@ -145,18 +145,18 @@ push to an annotated PR (or are asked to refresh its notes):
 without merging, or when the user asks:
 
 ```bash
-curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"   # → {"ok":true}
+curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"   # → {"ok":true}
 ```
 
 `403` = a teammate uploaded these notes and you are only a member: ask them or an account admin to remove them.
 
 The PR's uploader and account admins can also remove single notes or all of them right in the diff (**remove note**,
-**remove all notes**) or with **delete notes** on the PR's page in Reviews42; a re-run must not bring removed notes
+**remove all notes**) or with **delete notes** on the PR's page in DiffNotes; a re-run must not bring removed notes
 back unless they are true again.
 
 ## Check script
 
-Save as `check.py` next to `reviews42.json` (outside the repo). Exit code 1 lists every note whose file is not in
+Save as `check.py` next to `diffnotes.json` (outside the repo). Exit code 1 lists every note whose file is not in
 the PR's diff or whose lines are not inside one changed block on its side.
 
 ```python

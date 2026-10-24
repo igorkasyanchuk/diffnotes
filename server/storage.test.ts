@@ -23,10 +23,10 @@ test('checks a bucket by writing, reading and deleting one object', async () => 
     })
   }).listen(0)
   const port = (server.address() as { port: number }).port
-  await checkS3({ endpoint: `http://127.0.0.1:${port}`, region: 'auto', bucket: 'b', key_id: 'k', secret: 's', prefix: 'r42/' })
+  await checkS3({ endpoint: `http://127.0.0.1:${port}`, region: 'auto', bucket: 'b', key_id: 'k', secret: 's', prefix: 'dn/' })
   server.close()
   expect(seen.map((s) => s.replace(/check-\d+/, 'check-N'))).toEqual([
-    'PUT /b/r42/reviews42-check-N.txt signed', 'GET /b/r42/reviews42-check-N.txt signed', 'DELETE /b/r42/reviews42-check-N.txt signed'])
+    'PUT /b/dn/diffnotes-check-N.txt signed', 'GET /b/dn/diffnotes-check-N.txt signed', 'DELETE /b/dn/diffnotes-check-N.txt signed'])
   expect(objects.size).toBe(0)
 })
 

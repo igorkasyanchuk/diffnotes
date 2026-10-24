@@ -2,7 +2,7 @@
 
 ← [README](../README.md)
 
-Reviews42 is invite-only. People belong to **accounts** (teams); repositories belong to one account, and everything about
+DiffNotes is invite-only. People belong to **accounts** (teams); repositories belong to one account, and everything about
 a PR is visible only to members of the account that owns its repository. Anyone else gets `404`.
 
 ## Roles

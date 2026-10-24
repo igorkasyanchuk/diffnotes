@@ -9,7 +9,7 @@
   super admins). Other users get `404`, so they can't even tell a PR is annotated.
 - **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind `https://` `PUBLIC_URL`), valid 30
   days. Changing your password signs out every other session.
-- **Tokens** (skill, extension): random `r42_…` values, shown once, stored only as SHA-256. Delete one on Settings to
+- **Tokens** (skill, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on Settings to
   revoke it. A token only reads and writes notes and files (`/api/v1/*`, `/files/*`): it can't make more tokens, change
   the password or use `/admin`.
 - **Login throttling**: per IP and email one failure a second and 10 in 10 minutes; per IP 100, per email 50 in 10
@@ -25,7 +25,9 @@
   a private network (Traefik, nginx: the entry it appended); client-sent entries are ignored. The client is
   `cf-connecting-ip` when the peer is Cloudflare, else the peer.
 - **No third parties**: the page loads nothing from elsewhere (self-hosted font, CSP `'self'`), and note images load
-  only from the note's server, so no outside service learns who opens the app or reads a note.
+  only from the note's server, so no outside service learns who opens the app or reads a note. The one opt-in
+  exception: with `UMAMI_SCRIPT` set, the landing page (`/` only) loads that Umami script and counts one page view;
+  every link from it into the app is a full page load, so the script never runs on the app's pages.
 - **Removing notes** (one, or a whole PR) is for the PR's uploader and the account's owner and admins; the server
   checks it on every request, the extension only offers it to them and asks for a confirmation, and ignores clicks that
   a page script fakes (`isTrusted`). Any member may still replace a PR's notes by uploading a new set (that's how a
@@ -67,13 +69,13 @@ img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; 
 - **In the web app** the server sends `.html` as `text/html` with the same CSP (plus `frame-ancestors 'self'`) only
   when it is loaded in a frame (`Sec-Fetch-Dest: iframe`), and the web app frames it with `sandbox="allow-scripts"`.
   Opened as a page of its own (a link, a new tab) it is served as plain-text source, so a demo can never pose as a
-  page of your Reviews42 site.
+  page of your DiffNotes site.
 - **No swapping itself for a live page**: a demo that navigates its own frame (`location = 'https://…'`, a meta
   refresh) is stopped by the parent's `frame-src` (the web app's page CSP, `'none'` in `demo.html`), so it can't load a
   remote page that would have the network.
 
 What it can still do: run scripts and draw inside its own frame, and `postMessage` to its parent (which nothing in
-Reviews42 listens to). Only members of the PR's account can see it, like every other note.
+DiffNotes listens to). Only members of the PR's account can see it, like every other note.
 
 ## Rendering
 
@@ -96,7 +98,8 @@ database alone doesn't reveal it. Keep `/data` (or `ENCRYPTION_KEY`) with your b
 ## Headers
 
 Every response carries `secureHeaders` (`X-Frame-Options`, HSTS, `Referrer-Policy: no-referrer`, …). The web app's
-page adds a CSP: scripts, styles, fonts and images only from the server itself (the font is self-hosted), frames only
+page adds a CSP: scripts, styles, fonts and images only from the server itself (the font is self-hosted; on the landing
+page also the Umami host, when configured), frames only
 from the server (the sandboxed demos), `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`. Server errors can be
 reported to a Sentry-compatible DSN with the route pattern only, never the URL or body. An S3 error shows only the
 bucket's error code, never its reply.

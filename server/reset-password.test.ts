@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-reset-'))
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-reset-'))
 const { createUser, db, verifyPassword } = await import('./db.ts')
 const { resetPassword } = await import('./reset-password.ts')
 

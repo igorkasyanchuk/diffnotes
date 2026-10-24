@@ -15,7 +15,14 @@ export const UPLOADS = path.join(DATA_DIR, 'uploads')
 export const RETENTION_DAYS = Number(process.env.RETENTION_DAYS ?? 30)
 fs.mkdirSync(UPLOADS, { recursive: true })
 
-export const db = new DatabaseSync(path.join(DATA_DIR, 'reviews42.db'))
+export const DB_FILE = path.join(DATA_DIR, 'diffnotes.db')
+// The project was called reviews42: take over its database (and its WAL files) on the first start after the rename.
+// ponytail: one way: an image from before the rename would open an empty reviews42.db (rollback: rename it back first)
+for (const ext of ['-wal', '-shm', '']) { // the main file last: its new name is what marks the move as done
+  const old = path.join(DATA_DIR, `reviews42.db${ext}`)
+  if (fs.existsSync(old) && !fs.existsSync(DB_FILE)) fs.renameSync(old, DB_FILE + ext)
+}
+export const db = new DatabaseSync(DB_FILE)
 db.exec(`
   pragma busy_timeout = 5000;
   pragma journal_mode = wal;
@@ -156,7 +163,7 @@ export function bootstrap(email: string, password: string) {
 }
 
 export function newToken(userId: string, name: string) {
-  const token = `r42_${randomBytes(24).toString('base64url')}`
+  const token = `dn_${randomBytes(24).toString('base64url')}`
   db.prepare('insert into tokens (id, user_id, name, hash, created_at) values (?, ?, ?, ?, ?)')
     .run(randomUUID(), userId, name, sha256(token), now())
   return token
@@ -186,7 +193,7 @@ if (!getSetting('files_migrated')) {
 }
 
 // A consistent copy of the database for volume backups: they archive DATA_DIR while the app runs, and a live WAL database
-// copied file by file can come out torn. DATA_DIR/backup/reviews42.db, rewritten every hour (written aside, then renamed).
+// copied file by file can come out torn. DATA_DIR/backup/diffnotes.db, rewritten every hour (written aside, then renamed).
 export function snapshot() {
   const dir = path.join(DATA_DIR, 'backup'), tmp = path.join(dir, `.${randomUUID()}.db`) // PID is 1 in every container
   fs.mkdirSync(dir, { recursive: true })
@@ -194,6 +201,8 @@ export function snapshot() {
   // ponytail: synchronous, requests wait while it copies (well under a second at this size); a worker thread if it grows
   try {
     db.prepare('vacuum into ?').run(tmp)
-    fs.renameSync(tmp, path.join(dir, 'reviews42.db'))
+    fs.renameSync(tmp, path.join(dir, 'diffnotes.db'))
+    // the copy from before the rename is never rewritten: it would keep expired PRs past RETENTION_DAYS
+    fs.rmSync(path.join(dir, 'reviews42.db'), { force: true })
   } finally { fs.rmSync(tmp, { force: true }) } // a failed copy (disk full) doesn't keep its partial file
 }

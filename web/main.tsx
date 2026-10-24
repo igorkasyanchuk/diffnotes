@@ -6,9 +6,9 @@ import './styles.css'
 import { Code, Landing } from './landing.tsx'
 
 declare global {
-  var r42Markdown: (md: string) => string
-  var r42Preview: (name: string, text: string) => string
-  var r42Compare: (root: ParentNode) => void
+  var dnMarkdown: (md: string) => string
+  var dnPreview: (name: string, text: string) => string
+  var dnCompare: (root: ParentNode) => void
 }
 
 type User = { id: string; email: string; name: string; admin: number }
@@ -24,10 +24,16 @@ async function api<T = any>(url: string, body?: unknown, method = body === undef
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
-  if (method !== 'GET') dispatchEvent(new Event('r42:change')) // App reloads /api/me: sidebar and token bar stay current
+  if (method !== 'GET') dispatchEvent(new Event('dn:change')) // App reloads /api/me: sidebar and token bar stay current
   return data
 }
-const go = (to: string) => { history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate')) }
+// the landing page may carry the analytics script (app.ts page()): leave it with a full load, so it never runs in the app
+const tracked = !!document.querySelector('script[data-website-id]')
+const go = (to: string) => {
+  if (tracked) return location.assign(to)
+  history.pushState(null, '', to)
+  dispatchEvent(new PopStateEvent('popstate'))
+}
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—')
 // owner/name is GitHub; host/path is Bitbucket on bitbucket.org, GitLab anywhere else (gitlab.com or self-hosted)
 const host = (repo: string) => repo.split('/')[0].includes('.') ? repo.split('/')[0] : 'github.com'
@@ -46,12 +52,12 @@ const Link = ({ to, children, className }: { to: string; children: ReactNode; cl
 // Markdown, cut to a few lines when long with a show more / less toggle (re-measured when images load)
 function Md({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [open, setOpen] = useState(false)
-  // once per text, not on every show more / less: the same string keeps React off the HTML, so what r42Compare added stays
-  const html = useMemo(() => r42Markdown(text), [text])
+  // once per text, not on every show more / less: the same string keeps React off the HTML, so what dnCompare added stays
+  const html = useMemo(() => dnMarkdown(text), [text])
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    r42Compare(el) // before / after image pairs get a drag handle
+    dnCompare(el) // before / after image pairs get a drag handle
     const measure = () => setLong(el.scrollHeight > 280)
     const ro = new ResizeObserver(measure)
     ro.observe(el.firstElementChild ?? el)
@@ -130,7 +136,7 @@ function Attachment({ f }: { f: { name: string; type: string; size: number; url:
   const [html, setHtml] = useState<string>()
   useEffect(() => {
     // only text: files uploaded before the allow-list (svg, video) are listed as application/octet-stream
-    if (f.type.startsWith('text/') && f.type !== 'text/html') fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
+    if (f.type.startsWith('text/') && f.type !== 'text/html') fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(dnPreview(f.name, t)), () => setHtml('<p>could not load</p>'))
   }, [f.url])
   return <div className="file-card">
     <div className="where"><a href={f.url} target="_blank" rel="noreferrer">{f.name}</a> · {bytes(f.size)}</div>
@@ -159,11 +165,12 @@ function useSubmit(fn: () => Promise<unknown>) {
 
 type Me = { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number }
 
-const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />reviews42<span className="cursor">_</span></Link>
+const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
+const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
 const Footer = () => <footer className="foot">
-  <span>reviews42 · self-hosted PR annotations · MIT</span>
+  <span>diffnotes · self-hosted PR annotations · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
-  <a href="https://github.com/igorkasyanchuk/reviews42" target="_blank" rel="noreferrer">source</a>
+  <a href={SOURCE} target="_blank" rel="noreferrer">source</a>
 </footer>
 
 // public pages: landing, sign in, invitations
@@ -171,7 +178,13 @@ function PublicLayout({ signedIn, children }: { signedIn: boolean; children: Rea
   return <>
     <header className="top">
       <Brand />
-      <nav>{signedIn ? <Link to="/dashboard" className="btn primary">dashboard →</Link> : <Link to="/login" className="btn primary">sign in</Link>}</nav>
+      <nav>
+        <a href={SOURCE} target="_blank" rel="noreferrer" className="btn gh" aria-label="DiffNotes on GitHub">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
+          <span>GitHub</span>
+        </a>
+        {signedIn ? <Link to="/dashboard" className="btn primary">dashboard →</Link> : <Link to="/login" className="btn primary">sign in</Link>}
+      </nav>
     </header>
     <main>{children}</main>
     <Footer />
@@ -209,7 +222,7 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
 
 function Login() {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
-  // api() fires r42:change, so App reloads /api/me and shows the app page in place (a deep link opened signed out);
+  // api() fires dn:change, so App reloads /api/me and shows the app page in place (a deep link opened signed out);
   // only /login needs to move on, to the dashboard
   const { submit, error, busy } = useSubmit(async () => {
     await api('/api/login', { email, password })
@@ -492,7 +505,7 @@ function Settings() {
     <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
     <p>2. make a token below and add it to your shell profile (~/.zshrc or ~/.bashrc):</p>
     {/* the placeholder must stay valid shell: `<token>` pasted into ~/.zshrc is a redirection and a parse error */}
-    <Code text={`export REVIEWS42_URL=${location.origin}\nexport REVIEWS42_TOKEN=${fresh || 'paste-your-token-here'}`} />
+    <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${fresh || 'paste-your-token-here'}`} />
     <p>3. in the browser extension's popup, add this server with the same (or another) token.</p>
     <h2 id="tokens">tokens</h2>
     {fresh && <div className="token"><Code text={fresh} /><span className="hint">copy it now: it is shown only once.</span></div>}
@@ -609,14 +622,14 @@ function StorageSettings() {
         <label>endpoint<input value={f.endpoint ?? ''} onChange={set('endpoint')} placeholder="https://s3.us-west-004.backblazeb2.com" /></label>
         <div className="two">
           <label>region<input value={f.region ?? ''} onChange={set('region')} placeholder="auto" /></label>
-          <label>bucket<input value={f.bucket ?? ''} onChange={set('bucket')} placeholder="reviews42-files" /></label>
+          <label>bucket<input value={f.bucket ?? ''} onChange={set('bucket')} placeholder="diffnotes-files" /></label>
         </div>
         <div className="two">
           <label>key id<input value={f.key_id ?? ''} onChange={set('key_id')} autoComplete="off" /></label>
           <label>secret key<input type="password" value={f.secret ?? ''} onChange={set('secret')} autoComplete="new-password"
             placeholder={f.has_secret ? 'saved, leave blank to keep' : ''} /></label>
         </div>
-        <label>prefix (folder inside the bucket)<input value={f.prefix ?? ''} onChange={set('prefix')} placeholder="reviews42/" /></label>
+        <label>prefix (folder inside the bucket)<input value={f.prefix ?? ''} onChange={set('prefix')} placeholder="diffnotes/" /></label>
       </>}
       {save.error && <div className="error">{save.error}</div>}
       {ok && <div className="ok">{ok}</div>}
@@ -625,7 +638,7 @@ function StorageSettings() {
     {data.storage.kind === 's3' && <div className="card" style={{ marginTop: 12 }}>
       <p>Files are deleted from the bucket when their PR expires ({data.retention_days} days after the last upload). As a safety net, add a bucket
         rule that expires everything under the prefix after {data.retention_days + 1} days. It replaces the bucket's lifecycle rules: use a bucket
-        just for Reviews42. Some providers (Backblaze B2) only accept rules in their console.</p>
+        just for DiffNotes. Some providers (Backblaze B2) only accept rules in their console.</p>
       <button type="button" onClick={() => rule.submit()} disabled={rule.busy}>set the expiry rule on the bucket</button>
       {rule.error && <div className="error">{rule.error}</div>}
     </div>}
@@ -639,8 +652,8 @@ function App() {
   useEffect(() => {
     const on = () => setPath(location.pathname), change = () => setN((x) => x + 1)
     addEventListener('popstate', on)
-    addEventListener('r42:change', change)
-    return () => { removeEventListener('popstate', on); removeEventListener('r42:change', change) }
+    addEventListener('dn:change', change)
+    return () => { removeEventListener('popstate', on); removeEventListener('dn:change', change) }
   }, [])
   // ponytail: refetched on every navigation and after every change (one small request), so the sidebar and token bar
   // also pick up what other people changed; `live` drops a response that a newer request already superseded

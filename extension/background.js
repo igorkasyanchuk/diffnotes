@@ -1,4 +1,4 @@
-// Talks to the Reviews42 servers for the content script (it holds the tokens; pages never see them).
+// Talks to the DiffNotes servers for the content script (it holds the tokens; pages never see them).
 // storage.local.servers: [{server, token, user}], one per connected server.
 async function servers() {
   const s = await chrome.storage.local.get(['servers', 'server', 'token', 'user'])
@@ -15,7 +15,7 @@ async function call({ server, token }, path) {
   // a network or permission failure throws; say so instead of showing nothing
   const res = await fetch(server + path, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
   const host = new URL(server).host
-  if (!res) return { error: `can't reach ${host}: open the Reviews42 popup and connect it again` }
+  if (!res) return { error: `can't reach ${host}: open the DiffNotes popup and connect it again` }
   if (res.status === 404) return { none: true }
   if (res.status === 401) return { error: `${host} rejected the token: connect it again with a new one` }
   if (!res.ok) return { error: `${host} answered HTTP ${res.status}` }
@@ -40,7 +40,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         if (!(res instanceof Response)) return res
         // one server answering something else (a proxy's HTML page) must not hide the others' notes
         const pull = await res.json().catch(() => null)
-        return Array.isArray(pull?.annotations) ? { pull: { ...pull, server: s.server } } : { error: `${new URL(s.server).host} did not answer like a Reviews42 server` }
+        return Array.isArray(pull?.annotations) ? { pull: { ...pull, server: s.server } } : { error: `${new URL(s.server).host} did not answer like a DiffNotes server` }
       }))
       const pulls = results.filter((r) => r.pull).map((r) => r.pull), errors = results.filter((r) => r.error).map((r) => r.error)
       const count = pulls.reduce((n, p) => n + p.annotations.length, 0)

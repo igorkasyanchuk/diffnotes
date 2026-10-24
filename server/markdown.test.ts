@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import '../extension/markdown.js'
 
 const g = globalThis as unknown as {
-  r42Markdown: (src: unknown, resolve?: (u: string) => string) => string
-  r42Preview: (name: string, text: unknown, resolve?: (u: string) => string) => string
-  r42Compare: (root: Element) => void
+  dnMarkdown: (src: unknown, resolve?: (u: string) => string) => string
+  dnPreview: (name: string, text: unknown, resolve?: (u: string) => string) => string
+  dnCompare: (root: Element) => void
 }
-const md = (s: unknown) => g.r42Markdown(s)
+const md = (s: unknown) => g.dnMarkdown(s)
 
-describe('r42Markdown', () => {
+describe('dnMarkdown', () => {
   it('renders blocks', () => {
     expect(md('# Title\n###### six')).toBe('<h3>Title</h3><h6>six</h6>')
     expect(md('a\nb\n\nc')).toBe('<p>a b</p><p>c</p>')
@@ -26,7 +26,7 @@ describe('r42Markdown', () => {
   })
 
   it('renders tables, short rows and a pipe that is no table', () => {
-    expect(md('a | b\n--- | :---:\n1 | 2\n3 |\n\nx')).toBe('<div class="r42-table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody>'
+    expect(md('a | b\n--- | :---:\n1 | 2\n3 |\n\nx')).toBe('<div class="dn-table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody>'
       + '<tr><td>1</td><td>2</td></tr><tr><td>3</td><td></td></tr></tbody></table></div><p>x</p>')
     expect(md('a | b\n---')).toBe('<p>a | b</p><hr>')
     expect(md('a | b\n--- | --- | ---')).toContain('<p>')
@@ -42,8 +42,8 @@ describe('r42Markdown', () => {
   })
 
   it('loads images only from the note server and resolves /files/ paths', () => {
-    const r = g.r42Markdown('![shot](/files/p/a.png) ![](https://cdn.example/x.png) ![bad](data:x)', (u) => `https://srv${u}`)
-    expect(r).toContain('<img alt="shot" src="https://srv/files/p/a.png" data-r42-src="/files/p/a.png">')
+    const r = g.dnMarkdown('![shot](/files/p/a.png) ![](https://cdn.example/x.png) ![bad](data:x)', (u) => `https://srv${u}`)
+    expect(r).toContain('<img alt="shot" src="https://srv/files/p/a.png" data-dn-src="/files/p/a.png">')
     expect(r).toContain('<a href="https://cdn.example/x.png" target="_blank" rel="noopener noreferrer">image ↗</a>')
     expect(r).toContain('![bad](data:x)')
   })
@@ -54,8 +54,8 @@ describe('diagrams', () => {
 
   it('draws every node shape and edge kind', () => {
     const r = dg('flowchart LR\n%% comment\nA[Box] --> B(Round) --- C([Pill]) -.-> D((Circle)) ==> E{"Choice"}\nE -->|yes| A\nE -- no --> F\nstyle A fill:red\nA --> A')
-    expect(r).toMatch(/^<div class="r42-diagram"><svg/)
-    for (const s of ['<rect', 'rx="17"', '<ellipse', '<polygon', '>Choice<', '>yes<', '>no<', 'r42-dg-edge dashed', 'r42-dg-edge bold', 'r42-dg-arrow'])
+    expect(r).toMatch(/^<div class="dn-diagram"><svg/)
+    for (const s of ['<rect', 'rx="17"', '<ellipse', '<polygon', '>Choice<', '>yes<', '>no<', 'dn-dg-edge dashed', 'dn-dg-edge bold', 'dn-dg-arrow'])
       expect(r).toContain(s)
     expect(r).not.toContain('fill:red')
   })
@@ -65,7 +65,7 @@ describe('diagrams', () => {
     const [lr, rl, td, bt] = ['LR', 'RL', 'TD', 'BT'].map(at)
     expect(lr[0]).toBeLessThan(rl[0])
     expect(td[1]).toBeLessThan(bt[1])
-    expect(dg('graph TB\nA;B')).toContain('r42-diagram')
+    expect(dg('graph TB\nA;B')).toContain('dn-diagram')
   })
 
   it('falls back to a code block for what it does not draw', () => {
@@ -75,30 +75,30 @@ describe('diagrams', () => {
   })
 
   it('stops ranking a cycle', () => {
-    expect(dg('graph TD\nA --> B --> C --> A')).toContain('r42-diagram')
+    expect(dg('graph TD\nA --> B --> C --> A')).toContain('dn-diagram')
   })
 })
 
-describe('r42Preview', () => {
+describe('dnPreview', () => {
   it('renders by file name', () => {
-    expect(g.r42Preview('a.MD', '# t')).toBe('<h3>t</h3>')
-    expect(g.r42Preview('a.txt', '<b>')).toBe('<pre>&lt;b&gt;</pre>')
-    expect(g.r42Preview('a.txt', null)).toBe('<pre></pre>')
-    expect(g.r42Preview('a.csv', '')).toBe('')
-    expect(g.r42Preview('a.csv', 'a,"b ""q"""\r\n1,"x,y"\n2')).toBe('<div class="r42-table"><table><thead><tr><th>a</th><th>b &quot;q&quot;</th></tr></thead>'
+    expect(g.dnPreview('a.MD', '# t')).toBe('<h3>t</h3>')
+    expect(g.dnPreview('a.txt', '<b>')).toBe('<pre>&lt;b&gt;</pre>')
+    expect(g.dnPreview('a.txt', null)).toBe('<pre></pre>')
+    expect(g.dnPreview('a.csv', '')).toBe('')
+    expect(g.dnPreview('a.csv', 'a,"b ""q"""\r\n1,"x,y"\n2')).toBe('<div class="dn-table"><table><thead><tr><th>a</th><th>b &quot;q&quot;</th></tr></thead>'
       + '<tbody><tr><td>1</td><td>x,y</td></tr><tr><td>2</td><td></td></tr></tbody></table></div>')
-    expect(g.r42Preview('a.csv', Array.from({ length: 503 }, (_, i) => i).join('\n'))).toContain('<p>… 2 more rows</p>')
+    expect(g.dnPreview('a.csv', Array.from({ length: 503 }, (_, i) => i).join('\n'))).toContain('<p>… 2 more rows</p>')
   })
 })
 
-describe('r42Compare', () => {
+describe('dnCompare', () => {
   it('joins a before / after pair into one slider that moves', () => {
     const root = document.body.appendChild(document.createElement('div'))
-    root.innerHTML = '<p><img alt="Before: old" data-r42-src="/files/p/x.png"> <br><img alt="" data-r42-src="/files/p/shot-after.png"></p>'
+    root.innerHTML = '<p><img alt="Before: old" data-dn-src="/files/p/x.png"> <br><img alt="" data-dn-src="/files/p/shot-after.png"></p>'
       + '<p><img alt="solo"><img alt="before"> text <img alt="after"></p>'
-    g.r42Compare(root)
-    g.r42Compare(root) // twice is harmless
-    const boxes = root.querySelectorAll('.r42-compare')
+    g.dnCompare(root)
+    g.dnCompare(root) // twice is harmless
+    const boxes = root.querySelectorAll('.dn-compare')
     expect(boxes).toHaveLength(1)
     expect([...boxes[0].querySelectorAll('img')].map((i) => i.alt)).toEqual(['Before: old', ''])
     const range = boxes[0].querySelector('input')!
@@ -106,5 +106,27 @@ describe('r42Compare', () => {
     range.dispatchEvent(new Event('input', { bubbles: true }))
     expect((boxes[0] as HTMLElement).style.getPropertyValue('--x')).toBe('20%')
     document.body.dispatchEvent(new Event('input', { bubbles: true })) // other inputs are ignored
+
+    // ⤢ opens a large copy; a click on it keeps it, a click beside it or Esc closes it
+    const open = () => { boxes[0].querySelector<HTMLElement>('.dn-cmp-open')!.click(); return document.querySelector<HTMLElement>('.dn-cmp-big')! }
+    let big = open()
+    expect(big.querySelectorAll('img')).toHaveLength(2)
+    expect(big.querySelector('.dn-cmp-open')).toBeNull()
+    big.querySelector('img')!.click()
+    expect(document.querySelector('.dn-cmp-big')).not.toBeNull()
+    big.click()
+    expect(document.querySelector('.dn-cmp-big')).toBeNull()
+    big = open()
+    expect(document.activeElement).toBe(big.querySelector('input')) // off the ⤢ underneath, which Enter would press again
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(document.querySelector('.dn-cmp-big')).not.toBeNull()
+    // Esc closes only the large copy: later handlers (content.js closing the preview under it) don't see it
+    const later: string[] = [], log = (e: KeyboardEvent) => later.push(e.key)
+    document.addEventListener('keydown', log, true)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(document.querySelector('.dn-cmp-big')).toBeNull()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    document.removeEventListener('keydown', log, true)
+    expect(later).toEqual(['Escape']) // the second one, with nothing large open
   })
 })

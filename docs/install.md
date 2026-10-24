@@ -2,17 +2,17 @@
 
 ← [README](../README.md)
 
-Reviews42 is one Node 24 process with a SQLite database and an uploads folder, shipped as one Docker image.
+DiffNotes is one Node 24 process with a SQLite database and an uploads folder, shipped as one Docker image.
 
 ## Docker
 
 ```bash
-git clone https://github.com/igorkasyanchuk/reviews42 && cd reviews42
-docker build -t reviews42 .
-docker run -d --name reviews42 -p 3000:3000 -v reviews42:/data \
+git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
+docker build -t diffnotes .
+docker run -d --name diffnotes -p 3000:3000 -v diffnotes:/data \
   -e ADMIN_EMAIL=you@company.com \
   -e PUBLIC_URL=https://reviews.company.com \
-  reviews42
+  diffnotes
 ```
 
 - Keep `/data` on a persistent volume: it holds the database, uploads (when stored on disk) and the generated secrets.
@@ -32,7 +32,7 @@ On the first start (no users yet) the server creates `ADMIN_EMAIL` with `ADMIN_P
 and a random one is printed once:
 
 ```bash
-docker logs reviews42 | grep "first admin"
+docker logs diffnotes | grep "first admin"
 ```
 
 Copy it right away: every redeploy starts a new container, so the line is gone after the next one. That user owns the
@@ -42,8 +42,8 @@ account “My team” and is a **super admin** (server page at `/admin`). Everyo
 Lost password:
 
 ```bash
-docker exec -it reviews42 npm run reset-password                 # the first admin
-docker exec -it reviews42 npm run reset-password -- dev@company.com
+docker exec -it diffnotes npm run reset-password                 # the first admin
+docker exec -it diffnotes npm run reset-password -- dev@company.com
 ```
 
 It prints a new random password and signs that user out everywhere; their agent tokens keep working.
@@ -64,6 +64,7 @@ It prints a new random password and signs that user out everywhere; their agent 
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |
 | `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing). Not with Cloudflare Tunnel, which already hides it |
 | `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
+| `UMAMI_SCRIPT` / `UMAMI_WEBSITE_ID` | unset | Umami analytics on the landing page only (e.g. `https://umami.example.com/script.js` and the website id): one page view, never the app's pages |
 
 File storage (disk or an S3-compatible bucket) is not an environment variable: a super admin sets it on `/admin`, see
 [storage](storage.md).
@@ -74,8 +75,8 @@ File storage (disk or an S3-compatible bucket) is not an environment variable: a
 - Back up the whole `/data` volume (Coolify: the app's Backups → add the volume, daily, enable S3). With S3 storage,
   uploads live in the bucket; the volume still holds the database and the encryption key that unlocks the S3 secret.
   Archives taken while the app runs can catch the live database mid-write, so the app also writes a consistent copy
-  every hour to `/data/backup/reviews42.db`: restore from that one (app stopped: copy it over `/data/reviews42.db` and
-  delete `reviews42.db-wal` and `reviews42.db-shm`, or SQLite replays the archive's stale log into it).
+  every hour to `/data/backup/diffnotes.db`: restore from that one (app stopped: copy it over `/data/diffnotes.db` and
+  delete `diffnotes.db-wal` and `diffnotes.db-shm`, or SQLite replays the archive's stale log into it).
 - An hourly job deletes expired PRs, their files, old sessions and expired invitations.
 
 ## Local development

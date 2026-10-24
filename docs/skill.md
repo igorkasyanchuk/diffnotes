@@ -2,9 +2,9 @@
 
 ← [README](../README.md)
 
-The skill teaches a coding agent to explain a pull request to its reviewers and upload that explanation to Reviews42.
+The skill teaches a coding agent to explain a pull request to its reviewers and upload that explanation to DiffNotes.
 It works with **Claude Code**, **Codex**, **Cursor** and other tools that read Agent Skills. The full text the agent
-reads is [`skill/reviews42/SKILL.md`](../skill/reviews42/SKILL.md), also served by your server at `/skill/SKILL.md`.
+reads is [`skill/diffnotes/SKILL.md`](../skill/diffnotes/SKILL.md), also served by your server at `/skill/SKILL.md`.
 
 ## Install
 
@@ -12,20 +12,21 @@ reads is [`skill/reviews42/SKILL.md`](../skill/reviews42/SKILL.md), also served 
 curl -fsSL https://reviews.company.com/install.sh | sh
 ```
 
-It writes the skill to `~/.claude/skills/reviews42`, `~/.agents/skills/reviews42` and, when Cursor is installed,
-`~/.cursor/skills/reviews42`. Then make a token on **Settings** (the app shows a bar until you have one) and add it to
+It writes the skill to `~/.claude/skills/diffnotes`, `~/.agents/skills/diffnotes` and, when Cursor is installed,
+`~/.cursor/skills/diffnotes`. Then make a token on **Settings** (the app shows a bar until you have one) and add it to
 your shell profile:
 
 ```bash
-export REVIEWS42_URL=https://reviews.company.com
-export REVIEWS42_TOKEN=r42_…
+export DIFFNOTES_URL=https://reviews.company.com
+export DIFFNOTES_TOKEN=dn_…
 ```
 
-Run the install again to update the skill.
+Run the install again to update the skill. It also removes a copy installed under the old name, `reviews42`; that one read
+`REVIEWS42_URL` / `REVIEWS42_TOKEN`, so rename them to `DIFFNOTES_URL` / `DIFFNOTES_TOKEN` (old `r42_…` tokens keep working).
 
 ## Use
 
-Open the PR's branch in your agent and ask: **“annotate this PR with reviews42”**. The agent:
+Open the PR's branch in your agent and ask: **“annotate this PR with diffnotes”**. The agent:
 
 1. finds the PR (`gh pr view`) and reads the change **from git**, not from memory;
 2. writes one short note per changed block, a card per new/renamed/deleted file, and a summary; tests and generated files are skipped;
@@ -62,8 +63,8 @@ another site shows as a link). Long notes are cut with
 *show more*, so the point goes first.
 
 ```bash
-curl -fsS -X PUT "$REVIEWS42_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $REVIEWS42_TOKEN" \
-  -F payload=@reviews42.json -F file=@mobile.png -F file=@desktop.png -F file=@report.md
+curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+  -F payload=@diffnotes.json -F file=@mobile.png -F file=@desktop.png -F file=@report.md
 ```
 
 ## Files

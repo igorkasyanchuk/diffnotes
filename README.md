@@ -1,23 +1,23 @@
 <p align="center"><img src="public/icon.svg" width="56" alt=""></p>
 
-<h1 align="center">reviews42</h1>
+<h1 align="center">diffnotes</h1>
 
 <p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
 Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
-<p align="center"><img src="docs/images/github-note.png" alt="A Reviews42 note on a GitHub pull request diff" width="860"></p>
+<p align="center"><img src="docs/images/github-note.png" alt="A DiffNotes note on a GitHub pull request diff" width="860"></p>
 
 ## TL;DR
 
 - Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
   screenshots, Markdown reports, CSVs and small interactive HTML demos.
-- The notes go to **your own Reviews42 server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
+- The notes go to **your own DiffNotes server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
 - Reviewers with the **browser extension** see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
   changed lines, image galleries, file previews, one switch to hide everything.
 - Notes **expire on their own** (30 days by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
 - Up and running in **about 3 minutes**: one container, one `curl | sh`, one extension.
 
-<p align="center"><img src="docs/images/flow.svg" alt="agent → reviews42 server ← browser extension → github.com PR" width="860"></p>
+<p align="center"><img src="docs/images/flow.svg" alt="agent → diffnotes server ← browser extension → github.com PR" width="860"></p>
 
 ## Why
 
@@ -50,20 +50,20 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
 ```bash
 # 1. the server (any Docker host: a VPS, Coolify, Dokku…)
-git clone https://github.com/igorkasyanchuk/reviews42 && cd reviews42
-docker build -t reviews42 . && docker run -d -p 3000:3000 -v reviews42:/data \
-  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.company.com reviews42
+git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
+docker build -t diffnotes . && docker run -d -p 3000:3000 -v diffnotes:/data \
+  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.company.com diffnotes
 docker logs <container> | grep "first admin"        # the generated password
 
 # 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
 curl -fsSL https://reviews.company.com/install.sh | sh
-export REVIEWS42_URL=https://reviews.company.com REVIEWS42_TOKEN=r42_…   # token from /settings
+export DIFFNOTES_URL=https://reviews.company.com DIFFNOTES_TOKEN=dn_…   # token from /settings
 
 # 3. the extension: chrome://extensions → Developer mode → Load unpacked → extension/
 #    then its popup: server + token → Connect
 ```
 
-Then ask your agent: **“annotate this PR with reviews42”** and open the PR's *Files changed* tab.
+Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab.
 
 ## Docs
 

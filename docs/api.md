@@ -2,7 +2,7 @@
 
 ← [README](../README.md)
 
-Authenticate with a token from Settings: `authorization: Bearer r42_…`. The web app uses the same routes with its
+Authenticate with a token from Settings: `authorization: Bearer dn_…`. The web app uses the same routes with its
 session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make tokens, change passwords or reach `/admin`.
 
 | Method | Path | |
@@ -53,6 +53,6 @@ Response: `{"id", "url", "annotations", "files"}`. Errors: `400` bad payload, `4
 connected and you're only a member, `413` too many / too big / account full, `415` file type not allowed (see [security](security.md)).
 
 ```bash
-curl -fsS -X PUT "$REVIEWS42_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $REVIEWS42_TOKEN" \
-  -F payload=@reviews42.json -F file=@after.png
+curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+  -F payload=@diffnotes.json -F file=@after.png
 ```

@@ -11,7 +11,7 @@
   </g>
   <g fill="#d8dbe1" font-weight="700">
     <text x="40" y="86">coding agent</text>
-    <text x="288" y="86" fill="#ff8a3d">reviews42 server</text>
+    <text x="288" y="86" fill="#ff8a3d">diffnotes server</text>
     <text x="536" y="86">browser extension</text>
     <text x="774" y="86">github.com PR</text>
   </g>

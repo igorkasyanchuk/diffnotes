@@ -1,4 +1,4 @@
-# Reviews42
+# DiffNotes
 
 See README.md for what it is. Same stack and habits as specdrop.
 
@@ -19,7 +19,7 @@ server/index.ts   start, hourly purge, SIGTERM
 docs/             user docs linked from README (install, skill, extension, accounts, storage, security, api) + images
 web/main.tsx      routing, public + app (sidebar) layouts, login, invite, dashboard, account, pull preview, settings
 web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
-skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
+skill/diffnotes/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
 extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on GitHub, GitLab and Bitbucket diffs:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
 ```
@@ -33,14 +33,14 @@ extension/        manifest, demo.html (sandbox for .html demos), background (hol
   `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes the notes it uploaded). `users.admin` = super
   admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
   The first user (bootstrap) is a super admin.
-- Annotation Markdown is untrusted: render it only through `r42Markdown` (escapes everything, keeps http(s) and relative URLs).
+- Annotation Markdown is untrusted: render it only through `dnMarkdown` (escapes everything, keeps http(s) and relative URLs).
 - `/files/*` is served with `CSP: sandbox` + `nosniff`; text uploads as `text/plain`. `.html` demos are the exception:
   `text/html` with `DEMO_CSP` (app.ts; opaque sandbox, no network). The extension runs them only in its sandboxed
   `extension/demo.html` (manifest `sandbox` + the same CSP), never in github.com's page. Keep the two policies equal.
 - Uploads: allow-list in `EXT_TYPES` (db.ts), checked by content in `fileType()` (app.ts). Every file has a `files` row
   (size, type, backend `disk|s3`); stats and quotas read the rows, never the disk or the bucket.
 - Deleting PRs goes through `dropPulls()` so their files are removed from whichever backend holds them.
-- Keep docs/ in sync when routes, limits or features change (and the skill, `skill/reviews42/SKILL.md`).
+- Keep docs/ in sync when routes, limits or features change (and the skill, `skill/diffnotes/SKILL.md`).
 - Repositories: `owner/name` = GitHub, `host/path` = GitLab (any host but bitbucket.org) or Bitbucket; `repoName()`
   (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back. Unique per account (not
   server-wide): always look names up within the caller's accounts.

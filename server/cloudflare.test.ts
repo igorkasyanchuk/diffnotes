@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server'
 import { afterAll, expect, it } from 'vitest'
 
 // CLOUDFLARE_ONLY over a real socket: loopback is a local proxy, so the last X-Forwarded-For entry is the peer
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-cf-'))
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-cf-'))
 process.env.CLOUDFLARE_ONLY = '1'
 const { app } = await import('./app.ts')
 const server = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' })

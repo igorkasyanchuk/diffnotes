@@ -11,5 +11,5 @@ const run = () => {
 }
 run()
 const timer = setInterval(run, 3600_000)
-const server = serve({ fetch: app.fetch, port }, () => console.log(`reviews42 on :${port}, error reporting ${URL.parse(process.env.BUGSINK_DSN ?? '') ? 'on' : 'off'}`))
+const server = serve({ fetch: app.fetch, port }, () => console.log(`diffnotes on :${port}, error reporting ${URL.parse(process.env.BUGSINK_DSN ?? '') ? 'on' : 'off'}`))
 process.on('SIGTERM', () => { clearInterval(timer); server.close(() => { db.close(); process.exit(0) }) })

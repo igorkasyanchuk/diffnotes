@@ -1,4 +1,4 @@
-// Draws Reviews42 annotations on a pull request's diff: GitHub, GitLab (merge requests) and Bitbucket. Idempotent:
+// Draws DiffNotes annotations on a pull request's diff: GitHub, GitLab (merge requests) and Bitbucket. Idempotent:
 // apply() runs again whenever the page renders more of the diff (they all render lazily) and only adds what is missing.
 ;(() => {
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
@@ -30,20 +30,20 @@
   const where = (a) => a.line ? `${a.side === 'LEFT' ? 'old ' : ''}line ${a.line}${a.end_line && a.end_line !== a.line ? `–${a.end_line}` : ''}` : 'file'
 
   function note(a, i) {
-    const box = el('div', 'r42-note')
-    box.dataset.r42 = i
-    const head = el('button', 'r42-head')
+    const box = el('div', 'dn-note')
+    box.dataset.dn = i
+    const head = el('button', 'dn-head')
     head.type = 'button'
-    head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)))
-    if (RISKS.includes(a.risk)) head.append(el('span', `r42-risk r42-risk-${a.risk}`, `${a.risk} risk`))
-    head.append(el('span', 'r42-where', where(a)))
-    const body = el('div', 'r42-body r42-md')
+    head.append(el('span', 'dn-badge', 'DN'), el('span', 'dn-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)))
+    if (RISKS.includes(a.risk)) head.append(el('span', `dn-risk dn-risk-${a.risk}`, `${a.risk} risk`))
+    head.append(el('span', 'dn-where', where(a)))
+    const body = el('div', 'dn-body dn-md')
     body.append(md(a.body, a.server))
-    box.classList.toggle('r42-collapsed', !!folded[a.fold])
-    head.addEventListener('click', () => { fold([a], box.classList.toggle('r42-collapsed')); clampAll() })
+    box.classList.toggle('dn-collapsed', !!folded[a.fold])
+    head.addEventListener('click', () => { fold([a], box.classList.toggle('dn-collapsed')); clampAll() })
     box.append(head, body)
     if (a.canDelete && a.id) {
-      const actions = el('div', 'r42-actions'), remove = el('button', 'r42-link r42-remove', 'remove note')
+      const actions = el('div', 'dn-actions'), remove = el('button', 'dn-link dn-remove', 'remove note')
       remove.type = 'button'
       remove.addEventListener('click', confirming('Remove this note for everyone?', () => removeNotes(a.server, `/api/v1/annotations/${a.id}`)))
       actions.append(remove)
@@ -57,14 +57,14 @@
   const RISKS = ['high', 'medium', 'low']
   const confirming = (question, action) => (e) => {
     if (!e.isTrusted) return
-    const button = e.currentTarget, ask = el('span', 'r42-confirm')
-    const yes = el('button', 'r42-danger', 'Remove'), no = el('button', 'r42-link', 'Cancel')
+    const button = e.currentTarget, ask = el('span', 'dn-confirm')
+    const yes = el('button', 'dn-danger', 'Remove'), no = el('button', 'dn-link', 'Cancel')
     yes.type = no.type = 'button'
     // a failed removal keeps Cancel, which brings the button back for another try
-    yes.addEventListener('click', (ev) => { if (!ev.isTrusted) return; yes.disabled = true; yes.textContent = 'Removing…'; action().then((err) => { if (err) ask.replaceChildren(el('span', 'r42-hint', err), no) }) })
+    yes.addEventListener('click', (ev) => { if (!ev.isTrusted) return; yes.disabled = true; yes.textContent = 'Removing…'; action().then((err) => { if (err) ask.replaceChildren(el('span', 'dn-hint', err), no) }) })
     no.addEventListener('click', () => { ask.remove(); button.style.display = ''; button.focus() })
     ask.append(el('span', '', question), yes, no)
-    button.style.display = 'none' // .r42-link's all: unset beats the hidden attribute
+    button.style.display = 'none' // .dn-link's all: unset beats the hidden attribute
     button.after(ask)
     yes.focus()
   }
@@ -75,38 +75,38 @@
     check()
   }
 
-  // Markdown as nodes, escaped by r42Markdown (only http(s) and relative URLs survive). Parsed in an inert <template>, so
+  // Markdown as nodes, escaped by dnMarkdown (only http(s) and relative URLs survive). Parsed in an inert <template>, so
   // no image starts loading before loadImages() points /files/… at the right server (else github.com would get them)
-  function md(text, server) { return nodes(r42Markdown(text), server) }
+  function md(text, server) { return nodes(dnMarkdown(text), server) }
   function nodes(html, server) {
     const t = document.createElement('template')
     t.innerHTML = html
     loadImages(t.content, server)
-    r42Compare(t.content) // before / after image pairs get a drag handle
+    dnCompare(t.content) // before / after image pairs get a drag handle
     return t.content
   }
-  // server: the Reviews42 server the Markdown came from; its /files/… are fetched by the background with its token
+  // server: the DiffNotes server the Markdown came from; its /files/… are fetched by the background with its token
   function loadImages(root, server) {
-    root.querySelectorAll('img[data-r42-src]').forEach((img) => {
-      const src = img.dataset.r42Src
+    root.querySelectorAll('img[data-dn-src]').forEach((img) => {
+      const src = img.dataset.dnSrc
       img.removeAttribute('src')
       if (!src.startsWith('/files/')) return // only the note's server's files load: another path would hit this site
       file(server, src).then((u) => { if (u) img.src = u })
     })
     // links to attached files open a preview here instead of navigating the page to /files/…
     root.querySelectorAll('a[href^="/files/"]').forEach((a) => {
-      a.dataset.r42File = a.getAttribute('href')
-      a.dataset.r42Server = server
+      a.dataset.dnFile = a.getAttribute('href')
+      a.dataset.dnServer = server
       a.removeAttribute('href')
       a.removeAttribute('target')
-      a.classList.add('r42-file-link')
-      if (/\.html$/i.test(a.dataset.r42File)) inlineDemo(a, server)
+      a.classList.add('dn-file-link')
+      if (/\.html$/i.test(a.dataset.dnFile)) inlineDemo(a, server)
     })
-    root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clamp(img.closest('.r42-note > .r42-body, .r42-summary')), { once: true }))
+    root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clamp(img.closest('.dn-note > .dn-body, .dn-summary')), { once: true }))
   }
 
-  // One adapter per host. pr(): the repository (as Reviews42 names it) and number when this is a diff page.
-  // files(): every rendered file as {path, box, top, rowFor(a)}: box is the file's container (the Reviews42 box goes
+  // One adapter per host. pr(): the repository (as DiffNotes names it) and number when this is a diff page.
+  // files(): every rendered file as {path, box, top, rowFor(a)}: box is the file's container (the DiffNotes box goes
   // above the first one), file notes go before top, a line note before rowFor(a) (a <tr> or a grid row).
   const lineRow = (cell) => cell?.closest('tr, [role=row]')
   const SITES = {
@@ -170,17 +170,17 @@
     for (const f of list) {
       pull.annotations.forEach((a, i) => {
         if (a.path !== f.path) return
-        if (f.box.querySelector(`[data-r42="${i}"]`)) return placed.add(i)
+        if (f.box.querySelector(`[data-dn="${i}"]`)) return placed.add(i)
         if (!a.line) {
           const card = note(a, i)
-          card.classList.add('r42-file')
+          card.classList.add('dn-file')
           f.top.before(card)
           return placed.add(i)
         }
         const row = f.rowFor(a)
         if (!row) return
         if (row.tagName === 'TR') {
-          const tr = el('tr', 'r42-row'), td = el('td')
+          const tr = el('tr', 'dn-row'), td = el('td')
           td.colSpan = [...row.children].reduce((n, c) => n + (c.colSpan || 1), 0)
           td.append(note(a, i))
           tr.append(td)
@@ -188,7 +188,7 @@
           if (getComputedStyle(row).display !== 'table-row') tr.style.display = td.style.display = 'block'
           row.before(tr)
         } else {
-          const div = el('div', 'r42-row r42-grid-row') // a div grid (Bitbucket): stays in view when the code scrolls sideways
+          const div = el('div', 'dn-row dn-grid-row') // a div grid (Bitbucket): stays in view when the code scrolls sideways
           div.append(note(a, i))
           row.before(div)
         }
@@ -199,14 +199,14 @@
     clampAll() // after renderBox, so the summary and the not-placed notes it builds are measured too
   }
 
-  // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when the page re-renders.
+  // The DiffNotes box sits above the first file of the diff (never over the code), re-attached when the page re-renders.
   function place(box, first) {
     if (first && box.nextElementSibling !== first) first.before(box)
   }
 
   function renderBox(placed, list) {
-    let box = document.getElementById('r42-box')
-    if (!box) { box = el('div'); box.id = 'r42-box' }
+    let box = document.getElementById('dn-box')
+    if (!box) { box = el('div'); box.id = 'dn-box' }
     const missing = error ? [] : pull.annotations.map((a, i) => [a, i]).filter(([, i]) => !placed.has(i))
     const key = error ?? `${pull.pulls.map((p) => p.id)}:${pull.annotations.length}:${missing.map(([, i]) => i).join(',')}`
     if (box.dataset.key !== key) {
@@ -222,17 +222,17 @@
   chrome.storage.local.get('hideNotes').then((s) => setHidden(!!s.hideNotes, false))
   function setHidden(v, save = true) {
     hidden = v
-    document.documentElement.classList.toggle('r42-hide-notes', v)
-    document.querySelectorAll('.r42-switch').forEach((b) => b.setAttribute('aria-checked', String(!v)))
+    document.documentElement.classList.toggle('dn-hide-notes', v)
+    document.querySelectorAll('.dn-switch').forEach((b) => b.setAttribute('aria-checked', String(!v)))
     if (save) chrome.storage.local.set({ hideNotes: v })
     clampAll() // notes that were hidden get measured now that they show
   }
   function notesSwitch() {
-    const b = el('button', 'r42-switch')
+    const b = el('button', 'dn-switch')
     b.type = 'button'
     b.setAttribute('role', 'switch')
     b.setAttribute('aria-checked', String(!hidden))
-    b.title = 'Show or hide Reviews42 notes in the diff'
+    b.title = 'Show or hide DiffNotes notes in the diff'
     b.append(el('i'), el('span', '', 'notes'))
     b.addEventListener('click', () => setHidden(!hidden))
     return b
@@ -240,35 +240,35 @@
 
   // Once the box scrolls away, a floating dock at the bottom keeps the count, the notes switch and the summary at hand.
   function dock(box) {
-    let d = document.getElementById('r42-dock')
+    let d = document.getElementById('dn-dock')
     if (!d) {
-      d = el('div', 'r42-float')
-      d.id = 'r42-dock'
+      d = el('div', 'dn-float')
+      d.id = 'dn-dock'
       document.body.append(d)
     }
     if (d.dataset.key !== box.dataset.key) {
       d.dataset.key = box.dataset.key
-      const summary = el('button', 'r42-pill-btn', 'summary'), top = el('button', 'r42-pill-btn', '↑')
-      top.title = 'Back to the Reviews42 box'
+      const summary = el('button', 'dn-pill-btn', 'summary'), top = el('button', 'dn-pill-btn', '↑')
+      top.title = 'Back to the DiffNotes box'
       summary.addEventListener('click', () => {
-        const open = document.getElementById('r42-pop')
+        const open = document.getElementById('dn-pop')
         if (open) return open.remove()
-        const pop = el('div', 'r42-float r42-pop')
-        pop.id = 'r42-pop'
-        const body = box.querySelector('.r42-box-body'), copy = body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.')
+        const pop = el('div', 'dn-float dn-pop')
+        pop.id = 'dn-pop'
+        const body = box.querySelector('.dn-box-body'), copy = body ? body.cloneNode(true) : el('div', 'dn-hint', 'No summary for this pull request.')
         // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo.
         // remove note needs its listener: that stays in the box
-        copy.querySelectorAll('.r42-demo, .r42-actions').forEach((d) => d.remove())
+        copy.querySelectorAll('.dn-demo, .dn-actions').forEach((d) => d.remove())
         pop.append(copy)
         // a clone has no listeners: note headers toggle (and are remembered) through the pop
         pop.addEventListener('click', (e) => {
-          const n = e.target.closest('.r42-head')?.parentElement
-          if (n) fold([pull.annotations[n.dataset.r42]], n.classList.toggle('r42-collapsed'))
+          const n = e.target.closest('.dn-head')?.parentElement
+          if (n) fold([pull.annotations[n.dataset.dn]], n.classList.toggle('dn-collapsed'))
         })
         document.body.append(pop)
       })
-      top.addEventListener('click', () => { document.getElementById('r42-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
-      d.replaceChildren(el('span', 'r42-badge', 'R42'), el('b', '', `${pull.annotations.length} notes`), notesSwitch(), summary, top)
+      top.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
+      d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), notesSwitch(), summary, top)
     }
     // watch the box's header bar: once it is above the viewport the dock takes over, even if the tall summary still shows
     const bar = box.firstElementChild
@@ -276,72 +276,72 @@
     seen?.disconnect()
     seen = new IntersectionObserver(([e]) => {
       const away = !e.isIntersecting && e.boundingClientRect.top < 0
-      d.classList.toggle('r42-show', away)
-      if (!away) document.getElementById('r42-pop')?.remove()
+      d.classList.toggle('dn-show', away)
+      if (!away) document.getElementById('dn-pop')?.remove()
     })
     seen.target = bar
     seen.observe(bar)
   }
 
   const errorBar = () => {
-    const bar = el('div', 'r42-bar')
-    bar.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-hint', error))
+    const bar = el('div', 'dn-bar')
+    bar.append(el('span', 'dn-badge', 'DN'), el('span', 'dn-hint', error))
     return bar
   }
 
   function boxContent(box, missing) {
-    const bar = el('div', 'r42-bar')
-    const title = el('button', 'r42-head r42-box-title')
+    const bar = el('div', 'dn-bar')
+    const title = el('button', 'dn-head dn-box-title')
     title.type = 'button'
-    title.append(el('span', 'r42-badge', 'R42'), el('b', '', `Reviews42 · ${pull.annotations.length} notes`))
-    title.addEventListener('click', () => { box.classList.toggle('r42-collapsed'); clampAll() })
-    const all = (c) => () => { fold(pull.annotations, c); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)); clampAll() }
-    const expand = el('button', 'r42-link', 'expand all'), collapse = el('button', 'r42-link', 'collapse all')
+    title.append(el('span', 'dn-badge', 'DN'), el('b', '', `DiffNotes · ${pull.annotations.length} notes`))
+    title.addEventListener('click', () => { box.classList.toggle('dn-collapsed'); clampAll() })
+    const all = (c) => () => { fold(pull.annotations, c); document.querySelectorAll('.dn-note').forEach((n) => n.classList.toggle('dn-collapsed', c)); clampAll() }
+    const expand = el('button', 'dn-link', 'expand all'), collapse = el('button', 'dn-link', 'collapse all')
     expand.addEventListener('click', all(false))
     collapse.addEventListener('click', all(true))
     const many = pull.pulls.length > 1
     const opens = pull.pulls.map((p) => {
-      const open = el('a', 'r42-link', many ? `open on ${new URL(p.server).host}` : 'open in Reviews42')
+      const open = el('a', 'dn-link', many ? `open on ${new URL(p.server).host}` : 'open in DiffNotes')
       open.href = `${p.server}/pulls/${p.id}`
       open.target = '_blank'
       return open
     })
     const removes = pull.pulls.filter((p) => p.can_delete).map((p) => {
-      const b = el('button', 'r42-link r42-remove', many ? `remove notes on ${new URL(p.server).host}` : 'remove all notes')
+      const b = el('button', 'dn-link dn-remove', many ? `remove notes on ${new URL(p.server).host}` : 'remove all notes')
       b.type = 'button'
       b.addEventListener('click', confirming(`Remove all ${p.annotations.length} notes and files of this PR for everyone?`,
         () => removeNotes(p.server, `/api/v1/pulls/${p.repo}/${p.number}?id=${p.id}`)))
       return b
     })
     bar.append(title, notesSwitch(), expand, collapse, ...opens, ...removes)
-    const body = el('div', 'r42-box-body')
+    const body = el('div', 'dn-box-body')
     // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
     const risky = pull.annotations.map((a, i) => [a, i]).filter(([a]) => RISKS.includes(a.risk))
       .sort(([a], [b]) => RISKS.indexOf(a.risk) - RISKS.indexOf(b.risk))
     if (risky.length) {
-      const map = el('div', 'r42-risks')
-      map.append(el('div', 'r42-risks-title', 'Where to look hardest'))
+      const map = el('div', 'dn-risks')
+      map.append(el('div', 'dn-risks-title', 'Where to look hardest'))
       for (const [a, i] of risky) {
-        const row = el('button', 'r42-risk-row')
+        const row = el('button', 'dn-risk-row')
         row.type = 'button'
-        row.dataset.r42Jump = i // the click is delegated (below), so it also works in the dock's summary pop
-        row.append(el('span', `r42-risk r42-risk-${a.risk}`, a.risk), el('code', '', `${a.path}${a.line ? `:${a.line}` : ''}`), el('span', 'r42-hint', a.title || ''))
+        row.dataset.dnJump = i // the click is delegated (below), so it also works in the dock's summary pop
+        row.append(el('span', `dn-risk dn-risk-${a.risk}`, a.risk), el('code', '', `${a.path}${a.line ? `:${a.line}` : ''}`), el('span', 'dn-hint', a.title || ''))
         map.append(row)
       }
       body.append(map)
     }
     for (const p of pull.pulls.filter((x) => x.summary)) {
-      const s = el('div', 'r42-md r42-summary')
+      const s = el('div', 'dn-md dn-summary')
       if (many) s.append(el('h6', '', new URL(p.server).host))
       s.append(md(p.summary, p.server))
       body.append(s)
     }
-    for (const e of pull.errors) body.append(el('div', 'r42-hint', e))
+    for (const e of pull.errors) body.append(el('div', 'dn-hint', e))
     if (missing.length) {
-      body.append(el('div', 'r42-hint', `${missing.length} not shown in the diff yet (file collapsed, not loaded, or the line changed since):`))
+      body.append(el('div', 'dn-hint', `${missing.length} not shown in the diff yet (file collapsed, not loaded, or the line changed since):`))
       for (const [a, i] of missing) {
         const n = note(a, i)
-        n.querySelector('.r42-where').textContent = `${a.path} · ${where(a)}`
+        n.querySelector('.dn-where').textContent = `${a.path} · ${where(a)}`
         body.append(n)
       }
     }
@@ -352,19 +352,19 @@
   // collapsed or notes switched off, measure 0 high and wait for clampAll() after they open) and again when one of its
   // images loads; apply() runs on every re-render of the diff, so already measured notes cost no layout.
   function clampAll() {
-    document.querySelectorAll('.r42-note > .r42-body:not([data-r42-measured]), .r42-summary:not([data-r42-measured])').forEach(clamp)
+    document.querySelectorAll('.dn-note > .dn-body:not([data-dn-measured]), .dn-summary:not([data-dn-measured])').forEach(clamp)
   }
   function clamp(b) {
-    if (!b || b.classList.contains('r42-open')) return
-    if (!b.offsetParent) return void delete b.dataset.r42Measured
-    b.dataset.r42Measured = ''
-    let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
+    if (!b || b.classList.contains('dn-open')) return
+    if (!b.offsetParent) return void delete b.dataset.dnMeasured
+    b.dataset.dnMeasured = ''
+    let more = b.nextElementSibling?.classList.contains('dn-more') ? b.nextElementSibling : null
     // live demos sit right under their text (and its toggle), outside the clamp, so "show more" never cuts one in half
-    ;(more ?? b).after(...b.querySelectorAll('.r42-demo'))
+    ;(more ?? b).after(...b.querySelectorAll('.dn-demo'))
     const long = b.scrollHeight > 240
-    b.classList.toggle('r42-clamped', long)
+    b.classList.toggle('dn-clamped', long)
     if (long && !more) {
-      more = el('button', 'r42-link r42-more', 'show more ↓')
+      more = el('button', 'dn-link dn-more', 'show more ↓')
       more.type = 'button'
       b.after(more)
     }
@@ -372,25 +372,25 @@
   }
   // risk map: jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
   document.addEventListener('click', (e) => {
-    const i = e.target.closest?.('.r42-risk-row')?.dataset.r42Jump
+    const i = e.target.closest?.('.dn-risk-row')?.dataset.dnJump
     if (i == null) return
     if (hidden) setHidden(false)
-    document.getElementById('r42-pop')?.remove()
-    const n = document.querySelector(`.r42-row [data-r42="${i}"], .r42-file[data-r42="${i}"], #r42-box [data-r42="${i}"]`)
+    document.getElementById('dn-pop')?.remove()
+    const n = document.querySelector(`.dn-row [data-dn="${i}"], .dn-file[data-dn="${i}"], #dn-box [data-dn="${i}"]`)
     // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
-    if (n?.closest('#r42-box.r42-collapsed')) { document.getElementById('r42-box').classList.remove('r42-collapsed'); clampAll() }
+    if (n?.closest('#dn-box.dn-collapsed')) { document.getElementById('dn-box').classList.remove('dn-collapsed'); clampAll() }
     // a folded note opens: the jump is to read it
-    if (n?.classList.contains('r42-collapsed')) { n.classList.remove('r42-collapsed'); fold([pull.annotations[n.dataset.r42]], false); clampAll() }
+    if (n?.classList.contains('dn-collapsed')) { n.classList.remove('dn-collapsed'); fold([pull.annotations[n.dataset.dn]], false); clampAll() }
     n?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    n?.classList.add('r42-flash')
-    setTimeout(() => n?.classList.remove('r42-flash'), 1200)
+    n?.classList.add('dn-flash')
+    setTimeout(() => n?.classList.remove('dn-flash'), 1200)
   })
   // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
   document.addEventListener('click', (e) => {
-    const more = e.target.closest?.('.r42-more'), b = more?.previousElementSibling
+    const more = e.target.closest?.('.dn-more'), b = more?.previousElementSibling
     if (!b) return
-    const open = b.classList.toggle('r42-open')
-    b.classList.toggle('r42-clamped', !open)
+    const open = b.classList.toggle('dn-open')
+    b.classList.toggle('dn-clamped', !open)
     more.textContent = open ? 'show less ↑' : 'show more ↓'
   })
 
@@ -399,52 +399,52 @@
   // An uploaded HTML demo runs in the extension's sandboxed demo.html: an opaque origin with no access to github.com,
   // its cookies or the extension, and a CSP (manifest.json) that blocks every network request. The HTML is posted in once.
   function demoFrame(html) {
-    const f = el('iframe', 'r42-demo-frame')
+    const f = el('iframe', 'dn-demo-frame')
     f.setAttribute('sandbox', 'allow-scripts')
     f.setAttribute('referrerpolicy', 'no-referrer')
     // every load: moving an iframe in the DOM reloads it
-    f.addEventListener('load', () => f.contentWindow.postMessage({ r42Demo: html }, '*'))
+    f.addEventListener('load', () => f.contentWindow.postMessage({ dnDemo: html }, '*'))
     f.src = chrome.runtime.getURL('demo.html')
     return f
   }
   // a link to an .html attachment in a note gets a live preview under it; "expand" opens it large
   function inlineDemo(link, server) {
-    const wrap = el('div', 'r42-demo'), bar = el('div', 'r42-demo-bar'), open = el('button', 'r42-demo-open', 'expand ⤢')
+    const wrap = el('div', 'dn-demo'), bar = el('div', 'dn-demo-bar'), open = el('button', 'dn-demo-open', 'expand ⤢')
     open.type = 'button'
     open.addEventListener('click', () => preview(link))
-    bar.append(el('span', 'r42-demo-tag', 'live demo · sandboxed'), open)
+    bar.append(el('span', 'dn-demo-tag', 'live demo · sandboxed'), open)
     wrap.append(bar)
     // after the paragraph, and after the demos of earlier links in it, so they keep the text's order
     let at = link.closest('p, li') ?? link
-    while (at.nextElementSibling?.classList.contains('r42-demo')) at = at.nextElementSibling
+    while (at.nextElementSibling?.classList.contains('dn-demo')) at = at.nextElementSibling
     at.after(wrap)
-    fetchText(server, link.dataset.r42File).then((html) => { if (html) wrap.append(demoFrame(html)) })
+    fetchText(server, link.dataset.dnFile).then((html) => { if (html) wrap.append(demoFrame(html)) })
   }
 
   // an attached md / csv / txt file in a modal, an html demo in a sandboxed frame; images open in the lightbox
   async function preview(link) {
-    const url = link.dataset.r42File, name = decodeURIComponent(url.split('/').pop())
-    const r = await chrome.runtime.sendMessage({ type: 'file', server: link.dataset.r42Server, url }).catch(() => null)
+    const url = link.dataset.dnFile, name = decodeURIComponent(url.split('/').pop())
+    const r = await chrome.runtime.sendMessage({ type: 'file', server: link.dataset.dnServer, url }).catch(() => null)
     if (!r?.url) return
-    const box = el('div', 'r42-lightbox')
+    const box = el('div', 'dn-lightbox')
     if (/^data:image\//.test(r.url)) { const big = el('img'); big.src = r.url; box.append(big) }
     else {
       const text = decode(r.url)
       const demo = /\.html$/i.test(name)
-      const doc = el('div', `r42-doc r42-md${demo ? ' r42-demo-doc' : ''}`), head = el('div', 'r42-bar')
-      head.append(el('span', 'r42-badge', 'R42'), el('b', '', name))
-      const body = el('div', 'r42-doc-body')
+      const doc = el('div', `dn-doc dn-md${demo ? ' dn-demo-doc' : ''}`), head = el('div', 'dn-bar')
+      head.append(el('span', 'dn-badge', 'DN'), el('b', '', name))
+      const body = el('div', 'dn-doc-body')
       if (demo) {
         const frame = demoFrame(text)
         for (const [label, w] of [['mobile', '390px'], ['tablet', '768px'], ['desktop', '100%']]) {
-          const b = el('button', `r42-demo-w${w === '100%' ? ' on' : ''}`, label)
+          const b = el('button', `dn-demo-w${w === '100%' ? ' on' : ''}`, label)
           b.type = 'button'
-          b.addEventListener('click', () => { frame.style.width = w; head.querySelectorAll('.r42-demo-w').forEach((x) => x.classList.toggle('on', x === b)) })
+          b.addEventListener('click', () => { frame.style.width = w; head.querySelectorAll('.dn-demo-w').forEach((x) => x.classList.toggle('on', x === b)) })
           head.append(b)
         }
         body.append(frame)
       } else {
-        body.append(nodes(r42Preview(name, text), link.dataset.r42Server)) // escaped by r42Preview, inert until loadImages
+        body.append(nodes(dnPreview(name, text), link.dataset.dnServer)) // escaped by dnPreview, inert until loadImages
       }
       doc.append(head, body)
       doc.addEventListener('click', (e) => e.stopPropagation())
@@ -454,17 +454,17 @@
     document.body.append(box)
   }
   document.addEventListener('click', (e) => {
-    const link = e.target.closest?.('.r42-file-link')
+    const link = e.target.closest?.('.dn-file-link')
     if (link) { e.preventDefault(); preview(link) }
   })
 
   // Gallery: a click on an image opens every image of the same note (or summary); ← → move, Esc closes.
   // A note can carry several shots, e.g. one component at mobile and desktop width.
   function gallery(imgs, start) {
-    document.querySelector('.r42-lightbox')?.remove()
+    document.querySelector('.dn-lightbox')?.remove()
     let i = start
-    const box = el('div', 'r42-lightbox r42-gallery'), big = el('img'), cap = el('div', 'r42-cap')
-    const prev = el('button', 'r42-nav r42-prev', '‹'), next = el('button', 'r42-nav r42-next', '›')
+    const box = el('div', 'dn-lightbox dn-gallery'), big = el('img'), cap = el('div', 'dn-cap')
+    const prev = el('button', 'dn-nav dn-prev', '‹'), next = el('button', 'dn-nav dn-next', '›')
     prev.setAttribute('aria-label', 'Previous image'); next.setAttribute('aria-label', 'Next image')
     const show = (n) => {
       i = (n + imgs.length) % imgs.length
@@ -478,20 +478,20 @@
     box.append(big, cap)
     if (imgs.length > 1) box.append(prev, next)
     box.addEventListener('click', () => box.remove())
-    box.r42Show = (d) => show(i + d)
+    box.dnShow = (d) => show(i + d)
     document.body.append(box)
     show(i)
   }
   document.addEventListener('click', (e) => {
-    const img = e.target.closest?.('.r42-md img')
-    if (!img?.src || img.closest('.r42-lightbox')) return
-    const group = [...(img.closest('.r42-note, .r42-summary, .r42-doc-body') ?? img.parentElement).querySelectorAll('.r42-md img, img')].filter((x) => x.src)
+    const img = e.target.closest?.('.dn-md img')
+    if (!img?.src || img.closest('.dn-lightbox')) return
+    const group = [...(img.closest('.dn-note, .dn-summary, .dn-doc-body') ?? img.parentElement).querySelectorAll('.dn-md img, img')].filter((x) => x.src)
     gallery(group, Math.max(0, group.indexOf(img)))
   })
   document.addEventListener('keydown', (e) => {
-    const g = document.querySelector('.r42-gallery')
-    if (g && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); e.stopPropagation(); g.r42Show(e.key === 'ArrowRight' ? 1 : -1) }
-    if (e.key === 'Escape') document.querySelectorAll('.r42-lightbox, #r42-pop').forEach((n) => n.remove())
+    const g = document.querySelector('.dn-gallery')
+    if (g && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); e.stopPropagation(); g.dnShow(e.key === 'ArrowRight' ? 1 : -1) }
+    if (e.key === 'Escape') document.querySelectorAll('.dn-lightbox, #dn-pop').forEach((n) => n.remove())
   }, true)
 
   function clear() {
@@ -499,7 +499,7 @@
     observer = null
     seen?.disconnect()
     pull = error = seen = null
-    document.querySelectorAll('.r42-row, .r42-file, #r42-box, #r42-dock, #r42-pop').forEach((n) => n.remove())
+    document.querySelectorAll('.dn-row, .dn-file, #dn-box, #dn-dock, #dn-pop, .dn-cmp-big').forEach((n) => n.remove())
   }
 
   // dark fallbacks when the page itself is dark, whatever the OS says (content.css)
@@ -508,7 +508,7 @@
     const opaque = (c) => c.length === 3 || c[3] > 0
     const c = [rgb(document.body), rgb(document.documentElement)].find(opaque) ?? [255, 255, 255] // transparent: browser white
     const [r, g, b] = c
-    document.documentElement.classList.toggle('r42-dark', 0.299 * r + 0.587 * g + 0.114 * b < 128)
+    document.documentElement.classList.toggle('dn-dark', 0.299 * r + 0.587 * g + 0.114 * b < 128)
   }
 
   async function check() {

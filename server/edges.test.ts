@@ -5,18 +5,20 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { client, png } from './testkit.ts'
 
 // the edges app.test.ts's story doesn't walk through: limits, quotas, refusals, server errors, the static pages
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-edges-'))
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-edges-'))
 process.env.ADMIN_EMAIL = 'admin@example.com'
 process.env.ADMIN_PASSWORD = 'admin-pass'
-process.env.PUBLIC_URL = 'https://r42.example/'
+process.env.PUBLIC_URL = 'https://dn.example/'
 process.env.MAX_BODY_KB = '1'
 process.env.MAX_PULL_MB = '0.05'
 process.env.MAX_ACCOUNT_MB = '0.01'
 process.env.MAX_PULLS = '2'
 process.env.BUGSINK_DSN = 'https://key@bugs.example/9'
+process.env.UMAMI_SCRIPT = 'https://stats.example/script.js'
+process.env.UMAMI_WEBSITE_ID = 'site-1'
 // the web app's page comes from the build; a stand-in when the tests run before `npm run build`
 // (one left behind by an interrupted run is a stand-in too, not a build: it is replaced and removed)
-const index = path.resolve(import.meta.dirname, '../dist/index.html'), STAND_IN = '<link rel="canonical" href="__ORIGIN__/">'
+const index = path.resolve(import.meta.dirname, '../dist/index.html'), STAND_IN = '<link rel="canonical" href="__ORIGIN__/"></head>'
 const built = fs.existsSync(index) && fs.readFileSync(index, 'utf8') !== STAND_IN
 if (!built) { fs.mkdirSync(path.dirname(index), { recursive: true }); fs.writeFileSync(index, STAND_IN) }
 afterAll(() => { if (!built) fs.rmSync(index) })
@@ -50,17 +52,24 @@ beforeAll(async () => {
 describe('pages', () => {
   it('serves the page, crawler files and the skill under PUBLIC_URL', async () => {
     const home = await call('/')
-    expect(home.data).toContain('https://r42.example/')
+    expect(home.data).toContain('https://dn.example/')
     expect(home.res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
     expect(home.res.headers.get('x-robots-tag')).toBeNull()
-    expect((await call('/dashboard')).res.headers.get('x-robots-tag')).toBe('noindex')
+    // analytics on the landing page only
+    expect(home.data).toContain('<script defer src="https://stats.example/script.js" data-website-id="site-1" data-auto-track="false"></script>')
+    expect(home.res.headers.get('content-security-policy')).toContain("script-src 'self' https://stats.example;")
+    expect(home.res.headers.get('content-security-policy')).toContain("connect-src 'self' https://stats.example;")
+    const dash = await call('/dashboard')
+    expect(dash.res.headers.get('x-robots-tag')).toBe('noindex')
+    expect(dash.data).not.toContain('stats.example')
+    expect(dash.res.headers.get('content-security-policy')).not.toContain('stats.example')
     expect((await call('/index.html')).status).toBe(200)
     expect((await call('/missing.js')).status).toBe(404)
     expect((await call('/files/nope')).status).toBe(404)
     expect((await call('/healthz')).data).toBe('ok')
-    expect((await call('/robots.txt')).data).toContain('Sitemap: https://r42.example/sitemap.xml')
-    expect((await call('/sitemap.xml')).data).toContain('<loc>https://r42.example/</loc>')
-    expect((await call('/install.sh')).data).toContain('https://r42.example/skill/SKILL.md')
+    expect((await call('/robots.txt')).data).toContain('Sitemap: https://dn.example/sitemap.xml')
+    expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/</loc>')
+    expect((await call('/install.sh')).data).toContain('https://dn.example/skill/SKILL.md')
     expect((await call('/skill/SKILL.md')).data).not.toContain('{{HOST}}')
   })
 })

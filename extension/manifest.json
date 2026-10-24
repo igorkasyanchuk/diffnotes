@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Reviews42",
-  "version": "0.3.1",
-  "description": "Shows your team's Reviews42 annotations on GitHub, GitLab and Bitbucket pull requests.",
+  "name": "DiffNotes",
+  "version": "0.3.2",
+  "description": "Shows your team's DiffNotes annotations on GitHub, GitLab and Bitbucket pull requests.",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Reviews42",
+    "default_title": "DiffNotes",
     "default_icon": {
       "16": "icon16.png",
       "32": "icon32.png",

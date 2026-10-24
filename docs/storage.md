@@ -34,5 +34,5 @@ Files expire with their PR, `RETENTION_DAYS` (30) after its last upload:
    Re-uploading a PR replaces its files right away.
 2. **A bucket rule as a safety net**: **set the expiry rule on the bucket** adds a lifecycle rule that deletes everything
    under the prefix after `RETENTION_DAYS + 1` days (each re-upload writes new objects, so their age restarts). It
-   replaces the bucket's existing lifecycle rules: use a bucket only for Reviews42. Where the provider doesn't accept
+   replaces the bucket's existing lifecycle rules: use a bucket only for DiffNotes. Where the provider doesn't accept
    rules over the S3 API (Backblaze B2), set it in the provider's console instead.

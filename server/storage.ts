@@ -84,7 +84,7 @@ const need = (cfg: S3Config | null) => cfg ?? (() => { throw new Error('S3 stora
 // after the retention period (every re-upload writes new objects, so their age restarts). Replaces the bucket's rules.
 export async function applyLifecycle(cfg: S3Config, days: number) {
   const prefix = `${cfg.prefix}pulls/`
-  const xml = `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>reviews42-expire</ID><Filter><Prefix>${prefix}</Prefix></Filter>` +
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>diffnotes-expire</ID><Filter><Prefix>${prefix}</Prefix></Filter>` +
     `<Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration></Rule></LifecycleConfiguration>`
   const body = Buffer.from(xml)
   await s3(cfg, 'PUT', '', body, { 'content-md5': createHash('md5').update(body).digest('base64'), 'content-type': 'application/xml' }, 'lifecycle=')
@@ -92,7 +92,7 @@ export async function applyLifecycle(cfg: S3Config, days: number) {
 
 // put, read back and delete one object: proves the endpoint, bucket and keys work before saving them
 export async function checkS3(cfg: S3Config) {
-  const key = `${cfg.prefix}reviews42-check-${Date.now()}.txt`
+  const key = `${cfg.prefix}diffnotes-check-${Date.now()}.txt`
   await s3(cfg, 'PUT', key, Buffer.from('ok'), { 'content-type': 'text/plain' })
   const back = await (await s3(cfg, 'GET', key)).text()
   await s3(cfg, 'DELETE', key)

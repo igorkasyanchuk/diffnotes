@@ -39,7 +39,7 @@
 .dm tr.del td { background: rgba(248, 81, 73, .12); }
 .dm tr.del td.n { background: rgba(248, 81, 73, .25); }
 
-/* Reviews42 on the page */
+/* DiffNotes on the page */
 .dm-badge { flex: none; display: inline-block; padding: 0 7px; border-radius: 999px; background: #e8622a; color: #fff; font: 700 10px/1.75 -apple-system, sans-serif; letter-spacing: .04em; }
 .dm-box { overflow: hidden; margin-bottom: 16px; border-radius: 10px; border: 1px solid #30363d; border-top: 2px solid #e8622a; }
 .dm-bar { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: linear-gradient(90deg, rgba(232, 98, 42, .16), #151b23 60%); font-size: 13px; }

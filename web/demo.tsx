@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import './demo.css'
 
-// A full-width, auto-playing tour of Reviews42 on a GitHub pull request: the plain review page first, then an arrow with a
+// A full-width, auto-playing tour of DiffNotes on a GitHub pull request: the plain review page first, then an arrow with a
 // label walks through the bar, a note, screenshots, a live demo, the sticky dock and its switch. Positions are measured
 // from the real elements so it lands right at any width. Scene actions are CSS animations keyed on `.dm-x-<name>`.
 
 type Target = 'box' | 'noteA' | 'thumbs' | 'live' | 'dock'
 const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' | 'express' | 'switch'; label?: string; caption: ReactNode }[] = [
   { name: 'page', ms: 2600, caption: <>A pull request on GitHub, like any other day.</> },
-  { name: 'bar', ms: 4200, at: 'box', label: 'Reviews42 adds one bar on top', caption: <>Your agent's <b>summary</b> of the PR, with links to its reports.</> },
+  { name: 'bar', ms: 4200, at: 'box', label: 'DiffNotes adds one bar on top', caption: <>Your agent's <b>summary</b> of the PR, with links to its reports.</> },
   { name: 'note', ms: 4200, at: 'noteA', label: 'The why, next to the change', caption: <>Every changed block gets <b>a plain-language note</b> on its own lines.</> },
   { name: 'shots', ms: 8600, at: 'thumbs', click: 'thumb', label: 'Screenshots, three widths', caption: <>Click one: a gallery opens, <b>← →</b> to flip.</> },
   { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
@@ -42,7 +42,7 @@ const FILE_C: Row[] = [
   ['+', '', 10, '<Line label="Total" value={subtotal + fee} strong />'],
 ]
 
-const Badge = () => <span className="dm-badge">R42</span>
+const Badge = () => <span className="dm-badge">DN</span>
 
 function Diff({ rows, notes }: { rows: Row[]; notes: Record<number, ReactNode> }) {
   return <table><tbody>{rows.map(([k, a, b, code], i) => <Rows key={i} before={notes[i]}>
@@ -125,7 +125,7 @@ export function Demo() {
 
   const s = scene, end = s === SCENES.length - 1, hl = view.hl
   const callX = hl ? Math.max(12, Math.min(hl.x + Math.min(hl.w / 2, 140) - 24, (screen.current?.clientWidth ?? 800) - 300)) : 0
-  return <section className={`dm dm-x-${SCENES[s].name}${view.docked ? ' dm-docked' : ''}${reduce ? ' dm-still' : ''}${moving ? ' dm-moving' : ''}`} aria-label="How Reviews42 looks on a GitHub pull request">
+  return <section className={`dm dm-x-${SCENES[s].name}${view.docked ? ' dm-docked' : ''}${reduce ? ' dm-still' : ''}${moving ? ' dm-moving' : ''}`} aria-label="How DiffNotes looks on a GitHub pull request">
     <div className="dm-screen" ref={screen} key={round}>
       <div className="dm-page">
         <div className="dm-gh-top"><span className="dm-cat">◉</span><span>acme / <b>shop</b></span><span className="dm-gh-pr">Pull requests</span></div>
@@ -138,8 +138,8 @@ export function Demo() {
           </div>
           <div className="dm-scroll">
             <div className="dm-box" ref={ref('box')}>
-              <div className="dm-bar"><Badge /><b>Reviews42 · 3 notes</b>
-                <span className="dm-sw"><i />notes</span><span className="dm-link">expand all</span><span className="dm-link">open in Reviews42</span></div>
+              <div className="dm-bar"><Badge /><b>DiffNotes · 3 notes</b>
+                <span className="dm-sw"><i />notes</span><span className="dm-link">expand all</span><span className="dm-link">open in DiffNotes</span></div>
               <div className="dm-sum">Adds an <b>express</b> shipping option. Empty carts now stop before the payment call. Tested on mobile and desktop.
                 {' '}<span className="dm-a">test report</span> · <span className="dm-a">timings.csv</span></div>
             </div>
@@ -199,7 +199,7 @@ export function Demo() {
 
       <div className="dm-end">
         <h3>Review the why, not just the diff.</h3>
-        <p className="dm-slogan">Your agent knows why every line changed. Ask it to <b>“annotate this PR with reviews42”</b>, and your team reviews faster.</p>
+        <p className="dm-slogan">Your agent knows why every line changed. Ask it to <b>“annotate this PR with diffnotes”</b>, and your team reviews faster.</p>
         <div className="dm-end-tags"><span>free</span><span>self-hosted</span><span>any agent</span><span>nothing posted to the PR</span></div>
         <ol>
           <li><b>docker run</b> the server</li>

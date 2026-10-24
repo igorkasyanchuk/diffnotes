@@ -68,6 +68,8 @@ h2::before { content: '// '; color: var(--soft); }
 .brand img { width: 22px; height: 22px; }
 .cursor { color: var(--accent); animation: blink 1.1s steps(1) infinite; }
 .top nav { display: flex; gap: 2px; margin-left: auto; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.top .gh { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
+@media (max-width: 480px) { .top .gh span { display: none; } }
 main { width: 100%; max-width: 1000px; margin: 0 auto; padding: 32px 24px 64px; flex: 1; }
 .narrow { max-width: 420px; }
 
@@ -164,8 +166,8 @@ table.grid tr:hover td { background: var(--panel-2); }
 .md code { background: var(--panel-2); padding: 1px 4px; border-radius: 3px; }
 .md.clamped { max-height: 280px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 button.more { margin-top: 4px; font-size: 12px; }
-.md table, .r42-table table { border-collapse: collapse; font-size: 12px; margin: 6px 0; }
-.r42-table { overflow-x: auto; }
+.md table, .dn-table table { border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.dn-table { overflow-x: auto; }
 .md th, .md td { border: 1px solid var(--line-2); padding: 4px 8px; text-align: left; }
 .md th { background: var(--panel-2); }
 .md blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line-2); color: var(--muted); }
@@ -235,22 +237,29 @@ button.more { margin-top: 4px; font-size: 12px; }
 .risk-row .risk { margin: 0; }
 .risk-row .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* before / after: one image with a drag handle (r42Compare in markdown.js) */
-.r42-compare { position: relative; display: inline-block; vertical-align: top; margin: 6px 8px 2px 0; line-height: 0; --x: 50%; }
-.md .r42-compare img { margin: 0; max-width: min(100%, 480px); max-height: 240px; cursor: ew-resize; }
-.r42-compare .r42-cmp-before { position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 calc(100% - var(--x)) 0 0); }
-.r42-compare::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--x); width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
-.r42-cmp-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
-.r42-cmp-l, .r42-cmp-r { position: absolute; top: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, .62); color: #fff; font: 600 10.5px/1.6 var(--mono); pointer-events: none; }
-.r42-cmp-l { left: 6px; } .r42-cmp-r { right: 6px; }
+/* before / after: one image with a drag handle (dnCompare in markdown.js) */
+.dn-compare { position: relative; display: inline-block; vertical-align: top; margin: 6px 8px 2px 0; line-height: 0; --x: 50%; }
+.md .dn-compare { width: min(100%, 480px); }
+.md .dn-compare img { display: block; margin: 0; width: 100%; height: auto; max-width: none; max-height: 240px; object-fit: cover; object-position: top left; cursor: ew-resize; }
+.dn-compare::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--x); width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.dn-cmp-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.dn-cmp-l, .dn-cmp-r { position: absolute; top: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, .62); color: #fff; font: 600 10.5px/1.6 var(--mono); pointer-events: none; }
+.dn-cmp-l { left: 6px; } .dn-cmp-r { right: 6px; }
+.dn-cmp-open { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: rgba(0, 0, 0, .62); color: #fff; font: 14px/24px -apple-system, sans-serif; cursor: zoom-in; }
+.dn-cmp-big { position: fixed; inset: 0; z-index: 1001; background: rgba(0, 0, 0, .82); display: grid; place-items: center; cursor: zoom-out; }
+.dn-cmp-big .dn-compare { margin: 0; width: min(94vw, 1600px); }
+.dn-cmp-big .dn-compare::after { width: 3px; margin-left: -1.5px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+.dn-cmp-big .dn-compare img { display: block; margin: 0; width: 100%; height: auto; max-width: none; max-height: 90vh; object-fit: contain; border-radius: 6px; }
+/* last, and as specific as the img rules above: its height is the box's (the after image's), whatever its own size */
+.dn-compare img.dn-cmp-before { position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 calc(100% - var(--x)) 0 0); }
 
 /* ```mermaid flowcharts, drawn as SVG by markdown.js */
-.r42-diagram { overflow-x: auto; margin: 6px 0; }
-.r42-diagram svg { display: block; max-width: none; font: 12px var(--mono); }
-.r42-dg-node rect, .r42-dg-node polygon, .r42-dg-node ellipse { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1.2; }
-.r42-dg-node text { fill: var(--ink); }
-.r42-dg-edge { stroke: var(--muted); stroke-width: 1.4; }
-.r42-dg-edge.dashed { stroke-dasharray: 5 4; }
-.r42-dg-edge.bold { stroke-width: 2.6; }
-.r42-dg-arrow { fill: var(--muted); }
-.r42-dg-elabel { fill: var(--muted); font-size: 11px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }
+.dn-diagram { overflow-x: auto; margin: 6px 0; }
+.dn-diagram svg { display: block; max-width: none; font: 12px var(--mono); }
+.dn-dg-node rect, .dn-dg-node polygon, .dn-dg-node ellipse { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1.2; }
+.dn-dg-node text { fill: var(--ink); }
+.dn-dg-edge { stroke: var(--muted); stroke-width: 1.4; }
+.dn-dg-edge.dashed { stroke-dasharray: 5 4; }
+.dn-dg-edge.bold { stroke-width: 2.6; }
+.dn-dg-arrow { fill: var(--muted); }
+.dn-dg-elabel { fill: var(--muted); font-size: 11px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }

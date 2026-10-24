@@ -10,7 +10,7 @@ import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import {
-  DATA_DIR, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
+  DATA_DIR, DB_FILE, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
   seal, sessionSecret, setSetting, sha256, unseal, verifyPassword,
 } from './db.ts'
 import { applyLifecycle, checkS3, storage } from './storage.ts'
@@ -558,7 +558,7 @@ function repositoryFor(fullName: string, number: number, user: User): { id: stri
   if (repo) return repo
   const acc = db.prepare(`select account_id from memberships where user_id = ? and role in ('owner', 'admin') order by role = 'owner' desc limit 1`)
     .get(user.id) as { account_id: string } | undefined
-  return { id: null, account_id: acc?.account_id ?? fail(403, `${fullName} is not connected to your account yet: ask an account admin to connect it in Reviews42`) }
+  return { id: null, account_id: acc?.account_id ?? fail(403, `${fullName} is not connected to your account yet: ask an account admin to connect it in DiffNotes`) }
 }
 
 // Replaces the pull request's annotations and files: re-running the skill after a push is idempotent.
@@ -687,7 +687,6 @@ app.get('/api/admin/stats', (c) => {
   const n = (sql: string, ...args: string[]) => (db.prepare(sql).get(...args) as { n: number }).n
   const day = new Date(Date.now() - 86400_000).toISOString(), week = new Date(Date.now() - 7 * 86400_000).toISOString()
   const disk = fs.statfsSync(DATA_DIR)
-  const dbFile = path.join(DATA_DIR, 'reviews42.db')
   const accounts = (db.prepare(`select a.id, a.name, a.created_at,
       (select count(*) from memberships m where m.account_id = a.id) as members,
       (select count(*) from repositories r where r.account_id = a.id) as repositories,
@@ -709,7 +708,7 @@ app.get('/api/admin/stats', (c) => {
       invites: n('select count(*) as n from invites'),
       uploads_24h: n('select count(*) as n from pulls where updated_at > ?', day), uploads_7d: n('select count(*) as n from pulls where updated_at > ?', week),
       files: accounts.reduce((n, a) => n + a.files, 0),
-      upload_bytes: accounts.reduce((n, a) => n + a.bytes, 0), db_bytes: fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0,
+      upload_bytes: accounts.reduce((n, a) => n + a.bytes, 0), db_bytes: fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : 0,
       disk_free_bytes: disk.bavail * disk.bsize, disk_total_bytes: disk.blocks * disk.bsize,
     },
     retention_days: RETENTION_DAYS, accounts, users,
@@ -743,7 +742,7 @@ app.put('/api/admin/storage', async (c) => {
   }
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(cfg.bucket)) fail(400, 'Bucket name: 3-63 lowercase letters, digits, dots and dashes')
   // the prefix goes into URLs and the lifecycle XML: `#`, `?` or `..` would point every key somewhere else
-  if (!/^([\w-][\w.-]*\/)*$/.test(cfg.prefix)) fail(400, 'Prefix: folders of letters, digits, dots, dashes and underscores, e.g. reviews42/')
+  if (!/^([\w-][\w.-]*\/)*$/.test(cfg.prefix)) fail(400, 'Prefix: folders of letters, digits, dots, dashes and underscores, e.g. diffnotes/')
   if (!cfg.key_id || !cfg.secret) fail(400, 'Key ID and secret key are required')
   // file rows know only "s3", not which bucket: moving while files live in the old one would make them unreachable
   const moved = prev?.bucket && (prev.endpoint !== cfg.endpoint || prev.bucket !== cfg.bucket || prev.prefix !== cfg.prefix)
@@ -762,16 +761,18 @@ app.post('/api/admin/storage/lifecycle', async (c) => {
 
 // --- skill install, health, static web app
 
-const skill = (c: Context) => fs.readFileSync(path.join(ROOT, 'skill/reviews42/SKILL.md'), 'utf8')
+const skill = (c: Context) => fs.readFileSync(path.join(ROOT, 'skill/diffnotes/SKILL.md'), 'utf8')
   .replaceAll('{{HOST}}', host(c))
 app.get('/skill/SKILL.md', (c) => c.text(skill(c), 200, { 'content-type': 'text/markdown; charset=utf-8' }))
 app.get('/install.sh', (c) => c.text(`#!/bin/sh
-# Installs the Reviews42 skill for Claude Code (~/.claude/skills), Codex and other Agent Skills tools (~/.agents/skills) and Cursor.
+# Installs the DiffNotes skill for Claude Code (~/.claude/skills), Codex and other Agent Skills tools (~/.agents/skills) and Cursor.
 set -e
 for d in "$HOME/.claude/skills" "$HOME/.agents/skills" $( [ -d "$HOME/.cursor" ] && echo "$HOME/.cursor/skills" ); do
-  mkdir -p "$d/reviews42" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/reviews42/SKILL.md" && echo "installed: $d/reviews42"
+  # rm: the same skill under its name before the rename (reviews42), which would stay installed beside it, never updated
+  mkdir -p "$d/diffnotes" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/diffnotes/SKILL.md" && echo "installed: $d/diffnotes" && rm -rf "$d/reviews42"
 done
-echo "Now set REVIEWS42_TOKEN (make one at ${host(c)}/settings) in your shell profile."
+[ -z "$REVIEWS42_TOKEN" ] || echo "Rename REVIEWS42_URL / REVIEWS42_TOKEN to DIFFNOTES_URL / DIFFNOTES_TOKEN in your shell profile: the skill reads only the new names."
+echo "Now set DIFFNOTES_TOKEN (make one at ${host(c)}/settings) in your shell profile."
 `))
 app.get('/healthz', (c) => c.text(db.prepare('select 1 as ok').get() ? 'ok' : 'down'))
 
@@ -798,13 +799,22 @@ app.get('/sitemap.xml', (c) => c.body(`<?xml version="1.0" encoding="UTF-8"?>
 const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
   "font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
   "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+// Optional Umami analytics, on the landing page only (the app's URLs name private PRs): UMAMI_SCRIPT + UMAMI_WEBSITE_ID.
+// It counts the one page view itself (web/landing.tsx), so moving on into the app is never tracked.
+const umami = URL.parse(process.env.UMAMI_SCRIPT ?? ''), UMAMI_ID = process.env.UMAMI_WEBSITE_ID ?? ''
+const analytics = umami?.protocol === 'https:' && /^[\w-]+$/.test(UMAMI_ID)
+  ? { csp: PAGE_CSP.replace("script-src 'self'", `script-src 'self' ${umami.origin}`).replace("connect-src 'self'", `connect-src 'self' ${umami.origin}`),
+      tag: `<script defer src="${umami.href.replace(/"/g, '%22')}" data-website-id="${UMAMI_ID}" data-auto-track="false"></script>` }
+  : undefined
 let indexHtml: string | undefined
 const page = (c: Context) => {
   indexHtml ??= fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
-  c.header('content-security-policy', PAGE_CSP)
+  const landing = c.req.path === '/' && analytics
+  c.header('content-security-policy', landing ? analytics.csp : PAGE_CSP)
   c.header('cache-control', 'no-cache')
   if (c.req.path !== '/') c.header('x-robots-tag', 'noindex')
-  return c.html(indexHtml.replaceAll('__ORIGIN__', host(c)))
+  const html = indexHtml.replaceAll('__ORIGIN__', host(c))
+  return c.html(landing ? html.replace('</head>', `${analytics.tag}\n</head>`) : html)
 }
 app.get('/', page)
 app.get('/index.html', page)

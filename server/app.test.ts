@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import '../extension/markdown.js'
 import { client, png } from './testkit.ts'
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-'))
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-'))
 process.env.ADMIN_EMAIL = 'admin@example.com'
 process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
@@ -16,7 +16,7 @@ const { call, login } = client(app)
 // one sequential story: later tests reuse what earlier ones created
 let admin = '', token = '', accountId = '', member = '', pullId = ''
 
-describe('reviews42', () => {
+describe('diffnotes', () => {
   beforeAll(async () => { admin = await login('admin@example.com', 'admin-pass') })
 
   it('rejects a wrong password and anonymous API calls', async () => {
@@ -49,7 +49,7 @@ describe('reviews42', () => {
 
   it('issues tokens shown once', async () => {
     token = (await call('/api/tokens', { cookie: admin, body: { name: 'laptop' } })).data.token
-    expect(token).toMatch(/^r42_/)
+    expect(token).toMatch(/^dn_/)
     const list = (await call('/api/tokens', { cookie: admin })).data
     expect(list).toHaveLength(1)
     expect(JSON.stringify(list)).not.toContain(token)
@@ -57,7 +57,7 @@ describe('reviews42', () => {
     const me = (await call('/api/me', { cookie: admin })).data
     expect(me).toMatchObject({ tokens: 1, accounts: [{ role: 'owner' }] })
     expect((await call('/api/me', { cookie: member })).data.tokens).toBe(0)
-    expect((await call('/api/v1/me', { token: 'r42_wrong' })).status).toBe(401)
+    expect((await call('/api/v1/me', { token: 'dn_wrong' })).status).toBe(401)
   })
 
   it('uploads annotations with files and links attachment: references', async () => {
@@ -280,13 +280,13 @@ describe('reviews42', () => {
   })
 
   it('serves the skill with the host filled in', async () => {
-    const r = await call('http://r42.test/skill/SKILL.md')
-    expect(r.data).toContain('http://r42.test')
-    expect((await call('http://r42.test/install.sh')).data).toContain('http://r42.test/skill/SKILL.md')
+    const r = await call('http://dn.test/skill/SKILL.md')
+    expect(r.data).toContain('http://dn.test')
+    expect((await call('http://dn.test/install.sh')).data).toContain('http://dn.test/skill/SKILL.md')
   })
 
   it('renders Markdown without letting a later pass rewrite inside generated tags', async () => {
-    const md = (globalThis as unknown as { r42Markdown: (s: string) => string }).r42Markdown
+    const md = (globalThis as unknown as { dnMarkdown: (s: string) => string }).dnMarkdown
     expect(md('![x](/a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
     expect(md('![x](http://a/[y](/x/onerror=alert``//))').match(/<a href/g)).toHaveLength(1) // the remote image's link, untouched
     expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
@@ -387,12 +387,12 @@ describe('reviews42', () => {
       })
     }).listen(0)
     const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-    const cfg = { kind: 's3', endpoint, region: 'us-west-004', bucket: 'r42-files', key_id: 'KEY', secret: 'SECRET', prefix: 'prod' }
+    const cfg = { kind: 's3', endpoint, region: 'us-west-004', bucket: 'dn-files', key_id: 'KEY', secret: 'SECRET', prefix: 'prod' }
     expect((await call('/api/admin/storage', { cookie: member, method: 'PUT', body: cfg })).status).toBe(404)
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'Bad_Bucket' } })).status).toBe(400)
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: cfg })).status).toBe(200)
     const st = (await call('/api/admin/storage', { cookie: admin })).data.storage
-    expect(st).toMatchObject({ kind: 's3', bucket: 'r42-files', prefix: 'prod/', has_secret: true })
+    expect(st).toMatchObject({ kind: 's3', bucket: 'dn-files', prefix: 'prod/', has_secret: true })
     expect(JSON.stringify(st)).not.toContain('SECRET')
     expect(JSON.stringify(db.prepare(`select value from settings where key = 'storage'`).get())).not.toContain('SECRET')
 
@@ -401,7 +401,7 @@ describe('reviews42', () => {
     form.append('file', new File([png(32)], 's3.png'))
     const up = await call('/api/v1/pulls/acme/web/44', { token, form, method: 'PUT' })
     expect(up.status).toBe(200)
-    const key = `/r42-files/prod/pulls/${up.data.id}/s3.png`
+    const key = `/dn-files/prod/pulls/${up.data.id}/s3.png`
     expect(objects.get(key)?.length).toBe(32)
     expect(fs.existsSync(path.join(process.env.DATA_DIR!, 'uploads', up.data.id))).toBe(false)
     const img = await call(`/files/${up.data.id}/s3.png`, { token })
@@ -411,7 +411,7 @@ describe('reviews42', () => {
     // blank secret keeps the stored one; the lifecycle rule is a signed bucket-level PUT
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, secret: '' } })).status).toBe(200)
     expect((await call('/api/admin/storage/lifecycle', { cookie: admin, body: {} })).data).toMatchObject({ ok: true, days: 31 })
-    expect(seen).toContain('PUT /r42-files/?lifecycle=')
+    expect(seen).toContain('PUT /dn-files/?lifecycle=')
     // a prefix that would leave the key path, and moving the bucket while files live in it, are refused
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, prefix: 'a#b' } })).status).toBe(400)
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'other-bucket' } })).status).toBe(409)

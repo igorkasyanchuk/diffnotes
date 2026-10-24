@@ -1,6 +1,6 @@
 {
-  "name": "Reviews42",
-  "short_name": "Reviews42",
+  "name": "DiffNotes",
+  "short_name": "DiffNotes",
   "description": "Your coding agent explains its pull request; your team reads the notes in the diff.",
   "start_url": "/dashboard",
   "display": "standalone",

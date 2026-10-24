@@ -2,7 +2,7 @@
 
 ← [README](../README.md)
 
-The extension shows Reviews42 notes inside the pull request diff on **GitHub** (`/pull/<n>/changes`), **GitLab**
+The extension shows DiffNotes notes inside the pull request diff on **GitHub** (`/pull/<n>/changes`), **GitLab**
 (`/-/merge_requests/<n>/diffs`, gitlab.com) and **Bitbucket Cloud** (`/pull-requests/<n>/diff`). It runs on
 `github.com`, `gitlab.com` and `bitbucket.org` only and talks to the servers you connect; none of those sites ever see
 the notes. Self-hosted GitLab: the server takes `gitlab.acme.dev/team/app` repositories already; the extension doesn't
@@ -14,7 +14,7 @@ Until it is in the Chrome Web Store, load it from this repository:
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
-3. Pin **Reviews42**, open its popup, enter your server (`https://reviews.company.com`) and a token from the server's
+3. Pin **DiffNotes**, open its popup, enter your server (`https://reviews.company.com`) and a token from the server's
    **Settings**, press **Connect** and allow access to that server. The token goes with every request, so the server
    must be `https://` (plain `http://` only for `localhost`).
 
@@ -32,7 +32,7 @@ Open a PR's **Files changed** tab:
 
 | | |
 |---|---|
-| **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, open in Reviews42 |
+| **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, open in DiffNotes |
 | **File cards** under file headers | notes about a whole file (new, renamed, deleted) |
 | **Line notes** above changed blocks | the “why” for that block; click the header to collapse it; it stays collapsed after a reload until the note changes |
 | **Show more / less** | long notes are cut to a few lines |
@@ -41,7 +41,7 @@ Open a PR's **Files changed** tab:
 | **Live demos** | an attached `.html` runs in a sandboxed frame under its note (no network, no access to GitHub); *expand* opens it at phone, tablet or desktop width |
 | **Floating dock** | appears when the box scrolls away: note count, notes switch, summary popover, back to top |
 | **Where to look hardest** | notes the agent marked `high` / `medium` / `low` risk, listed first in the box; click one to jump to it |
-| **Before / after** | a `-before` / `-after` image pair is one image with a drag handle |
+| **Before / after** | a `-before` / `-after` image pair is one image with a drag handle; ⤢ opens it large (Esc closes) |
 | **Diagrams** | ` ```mermaid ` flowcharts in a note are drawn in place |
 | **Remove** | the PR's uploader and account admins see *remove note* under each note and *remove all notes* in the box; both ask first |
 
@@ -52,7 +52,7 @@ a line that changed since) are listed in the summary box instead of being lost.
 
 | GitLab merge request | Bitbucket pull request |
 |---|---|
-| <img src="images/gitlab.png" alt="Reviews42 notes on a GitLab merge request diff" width="420"> | <img src="images/bitbucket.png" alt="Reviews42 notes on a Bitbucket pull request diff" width="320"> |
+| <img src="images/gitlab.png" alt="DiffNotes notes on a GitLab merge request diff" width="420"> | <img src="images/bitbucket.png" alt="DiffNotes notes on a Bitbucket pull request diff" width="320"> |
 
 ## Troubleshooting
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Demo } from './demo.tsx'
 import './landing.css'
 
@@ -28,6 +28,13 @@ const BENEFITS: [string, string][] = [
 
 export function Landing({ signedIn }: { signedIn: boolean }) {
   const origin = location.origin
+  // the server adds Umami to this page only when it is configured (UMAMI_SCRIPT); one page view, nothing after.
+  // The script is deferred and from another host: it can still be loading when this runs, so wait for it then.
+  useEffect(() => {
+    const w = window as { umami?: { track: () => void } }
+    if (w.umami) w.umami.track()
+    else document.querySelector('script[data-website-id]')?.addEventListener('load', () => w.umami?.track(), { once: true })
+  }, [])
   const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">sign in →</a>
   return <>
     <section className="lp-hero">
@@ -51,7 +58,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>run the server</b></div>
         <p className="hint">One container with a volume. Free and open source (MIT), also for commercial use.</p>
-        <Code prompt text={'git clone https://github.com/igorkasyanchuk/reviews42 && cd reviews42 && docker build -t reviews42 . \\\n  && docker run -d -p 3000:3000 -v reviews42:/data -e ADMIN_EMAIL=you@company.com reviews42'} />
+        <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com diffnotes'} />
         <p className="hint">Or any Docker host (Coolify, Dokku, a VPS) from the Dockerfile. The first admin password is printed in the logs.</p>
       </li>
       <li>
