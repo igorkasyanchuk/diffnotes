@@ -1,7 +1,6 @@
-// Draws Reviews42 annotations on a GitHub pull request's changes view. Idempotent: apply() runs again whenever
-// GitHub renders more of the diff (it renders lazily) and only adds what is missing.
+// Draws Reviews42 annotations on a pull request's diff: GitHub, GitLab (merge requests) and Bitbucket. Idempotent:
+// apply() runs again whenever the page renders more of the diff (they all render lazily) and only adds what is missing.
 ;(() => {
-  const PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/(changes|files)/
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
   const collapsed = new Map() // annotation index → collapsed; survives re-renders
   const fetched = new Map() // server + /files/… → a promise of its data: URL (images and html demos), fetched once
@@ -40,7 +39,7 @@
       if (!src.startsWith('/files/')) { img.src = src; return }
       file(server, src).then((u) => { if (u) img.src = u })
     })
-    // links to attached files open a preview here instead of navigating github.com to /files/…
+    // links to attached files open a preview here instead of navigating the page to /files/…
     root.querySelectorAll('a[href^="/files/"]').forEach((a) => {
       a.dataset.r42File = a.getAttribute('href')
       a.dataset.r42Server = server
@@ -52,32 +51,62 @@
     root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clamp(img.closest('.r42-note > .r42-body, .r42-summary')), { once: true }))
   }
 
-  // Two GitHub diff UIs: the React "changes" view (h3 file-name__*, cells with data-diff-side) and the classic one
-  // (still served to signed-out visitors: .file-header[data-path], td.blob-num). Each gives {path, box, table, top}.
-  function files() {
-    const react = [...document.querySelectorAll('h3[class*="file-name"]')].map((h3) => {
-      let box = h3.parentElement
-      while (box && !box.querySelector('table')) box = box.parentElement
-      // a file whose diff isn't rendered yet walks up past its own container: skip it rather than borrow a neighbour's table
-      if (!box || box.querySelectorAll('h3[class*="file-name"]').length > 1) return null
-      const table = box.querySelector('table')
-      return table && { path: norm(h3.textContent), box, table, top: table.parentElement }
-    })
-    const classic = [...document.querySelectorAll('.file-header[data-path]')].map((h) => {
-      const box = h.closest('.file'), table = box?.querySelector('table')
-      return table && { path: h.dataset.path, box, table, top: box.querySelector('.js-file-content') ?? table }
-    })
-    return [...react, ...classic].filter(Boolean)
+  // One adapter per host. pr(): the repository (as Reviews42 names it) and number when this is a diff page.
+  // files(): every rendered file as {path, box, top, rowFor(a)}: box is the file's container (the Reviews42 box goes
+  // above the first one), file notes go before top, a line note before rowFor(a) (a <tr> or a grid row).
+  const lineRow = (cell) => cell?.closest('tr, [role=row]')
+  const SITES = {
+    // Two GitHub diff UIs: the React "changes" view (h3 file-name__*, cells with data-diff-side) and the classic one
+    // (still served to signed-out visitors: .file-header[data-path], td.blob-num).
+    'github.com': {
+      pr: (p) => { const m = p.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/(changes|files)/); return m && { repo: `${m[1]}/${m[2]}`, number: m[3] } },
+      files() {
+        const rowFor = (table) => (a) => {
+          const side = a.side === 'LEFT' ? 'left' : 'right'
+          for (const cell of table.querySelectorAll(`td[data-line-number="${a.line}"]`)) {
+            const row = cell.closest('tr')
+            const s = cell.dataset.diffSide ?? (row.querySelector('td.blob-num') === cell ? 'left' : 'right')
+            if (s === side) return row
+          }
+        }
+        const react = [...document.querySelectorAll('h3[class*="file-name"]')].map((h3) => {
+          let box = h3.parentElement
+          while (box && !box.querySelector('table')) box = box.parentElement
+          // a file whose diff isn't rendered yet walks up past its own container: skip it rather than borrow a neighbour's table
+          if (!box || box.querySelectorAll('h3[class*="file-name"]').length > 1) return null
+          const table = box.querySelector('table')
+          return table && { path: norm(h3.textContent), box, top: table.parentElement, rowFor: rowFor(table) }
+        })
+        const classic = [...document.querySelectorAll('.file-header[data-path]')].map((h) => {
+          const box = h.closest('.file'), table = box?.querySelector('table')
+          return table && { path: h.dataset.path, box, top: box.querySelector('.js-file-content') ?? table, rowFor: rowFor(table) }
+        })
+        return [...react, ...classic].filter(Boolean)
+      },
+    },
+    // GitLab's merge request diffs ("rapid diffs"): <diff-file>, the path in its copy button, line links per side.
+    // Repositories are host/path (gitlab.com/group/sub/project), so nested groups and self-hosted GitLab both work.
+    'gitlab.com': {
+      pr: (p) => { const m = p.match(/^\/(.+?)\/-\/merge_requests\/(\d+)\/diffs/); return m && { repo: `${location.host}/${m[1]}`, number: m[2] } },
+      files: () => [...document.querySelectorAll('diff-file')].map((box) => {
+        let path = ''
+        try { path = JSON.parse(box.querySelector('[data-testid="rd-diff-file-copy-clipboard"]')?.dataset.clipboardText ?? '{}').text ?? '' } catch {}
+        const top = box.querySelector('[data-testid="rd-diff-file-body"]')
+        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`td.rd-line-number[data-position="${a.side === 'LEFT' ? 'old' : 'new'}"] a[data-line-number="${a.line}"]`)) }
+      }).filter(Boolean),
+    },
+    // Bitbucket Cloud: <article data-qa=branch-diff-file>, a div grid whose gutter cells carry both line numbers
+    'bitbucket.org': {
+      pr: (p) => { const m = p.match(/^\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)/); return m && { repo: `bitbucket.org/${m[1]}/${m[2]}`, number: m[3] } },
+      files: () => [...document.querySelectorAll('[data-qa="branch-diff-file"]')].map((box) => {
+        const path = norm(box.querySelector('[data-qa="bk-filepath"]')?.textContent ?? '').replace(/\s*\/\s*/g, '/')
+        const top = box.querySelector('[data-qa="bk-file__content"]')
+        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`[data-${a.side === 'LEFT' ? 'old' : 'new'}-line-number="${a.line}"]`)) }
+      }).filter(Boolean),
+    },
   }
-
-  function rowFor(table, a) {
-    const side = a.side === 'LEFT' ? 'left' : 'right'
-    for (const cell of table.querySelectorAll(`td[data-line-number="${a.line}"]`)) {
-      const row = cell.closest('tr')
-      const s = cell.dataset.diffSide ?? (row.querySelector('td.blob-num') === cell ? 'left' : 'right')
-      if (s === side) return row
-    }
-  }
+  const site = SITES[location.host] ?? SITES['gitlab.com'] // any other host the extension runs on is a self-hosted GitLab
+  const files = () => site.files()
 
   function apply() {
     if (!pull && !error) return
@@ -94,13 +123,21 @@
           f.top.before(card)
           return placed.add(i)
         }
-        const row = rowFor(f.table, a)
+        const row = f.rowFor(a)
         if (!row) return
-        const tr = el('tr', 'r42-row'), td = el('td')
-        td.colSpan = [...row.children].reduce((n, c) => n + (c.colSpan || 1), 0)
-        td.append(note(a, i))
-        tr.append(td)
-        row.before(tr)
+        if (row.tagName === 'TR') {
+          const tr = el('tr', 'r42-row'), td = el('td')
+          td.colSpan = [...row.children].reduce((n, c) => n + (c.colSpan || 1), 0)
+          td.append(note(a, i))
+          tr.append(td)
+          // GitLab styles its rows as grids inside a block tbody: a table-row there would shrink to its content
+          if (getComputedStyle(row).display !== 'table-row') tr.style.display = td.style.display = 'block'
+          row.before(tr)
+        } else {
+          const div = el('div', 'r42-row r42-grid-row') // a div grid (Bitbucket): stays in view when the code scrolls sideways
+          div.append(note(a, i))
+          row.before(div)
+        }
         placed.add(i)
       })
     }
@@ -108,7 +145,7 @@
     clampAll() // after renderBox, so the summary and the not-placed notes it builds are measured too
   }
 
-  // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when GitHub re-renders.
+  // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when the page re-renders.
   function place(box, first) {
     if (first && box.nextElementSibling !== first) first.before(box)
   }
@@ -233,7 +270,7 @@
 
   // Long notes are cut to a few lines with a show more / less toggle. Each is measured once it shows (hidden ones,
   // collapsed or notes switched off, measure 0 high and wait for clampAll() after they open) and again when one of its
-  // images loads; apply() runs on every GitHub re-render, so already measured notes cost no layout.
+  // images loads; apply() runs on every re-render of the diff, so already measured notes cost no layout.
   function clampAll() {
     document.querySelectorAll('.r42-note > .r42-body:not([data-r42-measured]), .r42-summary:not([data-r42-measured])').forEach(clamp)
   }
@@ -371,13 +408,23 @@
     document.querySelectorAll('.r42-row, .r42-file, #r42-box, #r42-dock, #r42-pop').forEach((n) => n.remove())
   }
 
+  // dark fallbacks when the page itself is dark, whatever the OS says (content.css)
+  const darkPage = () => {
+    const rgb = (n) => getComputedStyle(n).backgroundColor.match(/[\d.]+/g)?.map(Number) ?? []
+    const opaque = (c) => c.length === 3 || c[3] > 0
+    const c = [rgb(document.body), rgb(document.documentElement)].find(opaque) ?? [255, 255, 255] // transparent: browser white
+    const [r, g, b] = c
+    document.documentElement.classList.toggle('r42-dark', 0.299 * r + 0.587 * g + 0.114 * b < 128)
+  }
+
   async function check() {
-    const m = location.pathname.match(PR), key = m ? `${m[1]}/${m[2]}#${m[3]}` : ''
+    darkPage()
+    const m = site.pr(location.pathname), key = m ? `${m.repo}#${m.number}` : ''
     if (key === current) return
     current = key
     clear()
     if (!m) return void chrome.runtime.sendMessage({ type: 'clear' }).catch(() => {})
-    const res = await chrome.runtime.sendMessage({ type: 'pull', repo: `${m[1]}/${m[2]}`, number: m[3] }).catch(() => null)
+    const res = await chrome.runtime.sendMessage({ type: 'pull', repo: m.repo, number: m.number }).catch(() => null)
     if (current !== key) return
     if (res?.pulls?.length) {
       pull = { pulls: res.pulls, errors: res.errors, annotations: res.pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server }))) }
@@ -389,7 +436,7 @@
     observer.observe(document.body, { childList: true, subtree: true })
   }
 
-  // GitHub navigates without page loads
+  // all three navigate without page loads
   check()
   setInterval(check, 1000)
 })()

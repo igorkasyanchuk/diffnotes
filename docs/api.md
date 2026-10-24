@@ -7,13 +7,17 @@ session cookie.
 
 | Method | Path | |
 |---|---|---|
-| `PUT` | `/api/v1/pulls/:owner/:repo/:number` | replace a PR's notes and files (see below) |
-| `GET` | `/api/v1/pulls/:owner/:repo/:number` | the PR's notes, summary and files; `404` when none or not your account's |
-| `DELETE` | `/api/v1/pulls/:owner/:repo/:number` | delete the notes and files now |
+| `PUT` | `/api/v1/pulls/<repository>/<number>` | replace a PR's notes and files (see below) |
+| `GET` | `/api/v1/pulls/<repository>/<number>` | the PR's notes, summary and files; `404` when none or not your account's |
+| `DELETE` | `/api/v1/pulls/<repository>/<number>` | delete the notes and files now |
 | `GET` | `/api/v1/me` | who the token belongs to |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
 | `GET` | `/healthz` | `ok` when the database answers |
+
+`<repository>` is `owner/name` on GitHub (`rails/rails`) and `host/path` on GitLab and Bitbucket:
+`gitlab.com/group/sub/project`, `gitlab.acme.dev/team/app` (self-hosted), `bitbucket.org/team/app`. `<number>` is the
+PR number, the merge request's `!iid` on GitLab.
 
 ## Upload
 

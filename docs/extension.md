@@ -2,8 +2,11 @@
 
 ← [README](../README.md)
 
-The extension shows Reviews42 notes inside GitHub's pull request diff. It runs on `github.com` only and talks to the
-servers you connect; GitHub never sees the notes.
+The extension shows Reviews42 notes inside the pull request diff on **GitHub** (`/pull/<n>/changes`), **GitLab**
+(`/-/merge_requests/<n>/diffs`, gitlab.com) and **Bitbucket Cloud** (`/pull-requests/<n>/diff`). It runs on
+`github.com`, `gitlab.com` and `bitbucket.org` only and talks to the servers you connect; none of those sites ever see
+the notes. Self-hosted GitLab: the server takes `gitlab.acme.dev/team/app` repositories already; the extension doesn't
+run on your GitLab's host yet.
 
 ## Install (Chrome, Edge, Brave, Arc)
 
@@ -22,7 +25,7 @@ The popup lists every connected server with your email on it; add more with the 
 self-hosted and a colleague's server…). On a PR, all of them are asked: their notes show together, the toolbar badge
 counts them all, and the summary box shows each server's summary under its name. Remove a server with **Remove**.
 
-## What you see on GitHub
+## What you see in the diff
 
 Open a PR's **Files changed** tab:
 
@@ -37,10 +40,14 @@ Open a PR's **Files changed** tab:
 | **Live demos** | an attached `.html` runs in a sandboxed frame under its note (no network, no access to GitHub); *expand* opens it at phone, tablet or desktop width |
 | **Floating dock** | appears when the box scrolls away: note count, notes switch, summary popover, back to top |
 
-Colors follow GitHub's light or dark theme. Notes whose line is not in the diff (a collapsed or not yet loaded file, or
+Colors follow the site's light or dark theme. Notes whose line is not in the diff (a collapsed or not yet loaded file, or
 a line that changed since) are listed in the summary box instead of being lost.
 
 <img src="images/github-summary.png" alt="Summary box" width="700">
+
+| GitLab merge request | Bitbucket pull request |
+|---|---|
+| <img src="images/gitlab.png" alt="Reviews42 notes on a GitLab merge request diff" width="420"> | <img src="images/bitbucket.png" alt="Reviews42 notes on a Bitbucket pull request diff" width="320"> |
 
 ## Troubleshooting
 
@@ -49,4 +56,4 @@ a line that changed since) are listed in the summary box instead of being lost.
 | nothing at all | the PR has no notes on your servers, or you're not in the account that owns the repository |
 | “can't reach …” in the box | open the popup and connect that server again (Chrome's permission for it is missing) |
 | “… rejected the token” | the token was deleted: make a new one in Settings and reconnect |
-| notes in the box, not in the diff | expand the file on GitHub, or the code moved since the notes were written: re-run the skill |
+| notes in the box, not in the diff | expand the file on the site, or the code moved since the notes were written: re-run the skill |

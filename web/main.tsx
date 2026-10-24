@@ -28,6 +28,12 @@ async function api<T = any>(url: string, body?: unknown, method = body === undef
 }
 const go = (to: string) => { history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate')) }
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—')
+// owner/name is GitHub; host/path is Bitbucket on bitbucket.org, GitLab anywhere else (gitlab.com or self-hosted)
+const host = (repo: string) => repo.split('/')[0].includes('.') ? repo.split('/')[0] : 'github.com'
+const forge = (repo: string) => ({ 'github.com': 'github', 'bitbucket.org': 'bitbucket' })[host(repo)] ?? 'gitlab'
+const repoUrl = (repo: string) => `https://${host(repo) === 'github.com' ? `github.com/${repo}` : repo}`
+const prUrl = (repo: string, n: number) => `${repoUrl(repo)}${{ github: `/pull/${n}/changes`, bitbucket: `/pull-requests/${n}/diff`, gitlab: `/-/merge_requests/${n}/diffs` }[forge(repo)]}`
+
 const bytes = (n: number) => {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
   let i = 0
@@ -244,7 +250,7 @@ const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: 
       <span className="grow"><Link to={`/pulls/${p.id}`}>{p.title || 'untitled'}</Link></span>
       <span className="chip hot">{p.annotations} notes</span>
       <span className="hint">{fmt(p.updated_at)}</span>
-      <a href={`https://github.com/${p.repository}/pull/${p.number}/changes`} target="_blank" rel="noreferrer">github ↗</a>
+      <a href={prUrl(p.repository, p.number)} target="_blank" rel="noreferrer">{forge(p.repository)} ↗</a>
     </div>) : <div className="empty">nothing yet. install the skill (settings) and ask your agent to annotate a pull request.</div>}
   </div>
 
@@ -391,14 +397,14 @@ function Repositories({ id, data, admin, reload }: TabProps) {
   return <>
     <div className="list">
       {data.repositories.length ? data.repositories.map((r) => <div key={r.id}>
-        <a className="grow" href={`https://github.com/${r.full_name}`} target="_blank" rel="noreferrer">{r.full_name}</a>
+        <a className="grow" href={repoUrl(r.full_name)} target="_blank" rel="noreferrer">{r.full_name}</a>
         <span className="chip">{r.pulls} PRs</span>
         {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Remove ${r.full_name} and all its notes?`)}>remove</button>}
       </div>) : <div className="empty">no repositories yet. they are added on the first upload{admin && ', or here'}.</div>}
     </div>
     {admin && <>
       <form className="row" onSubmit={add.submit}>
-        <input placeholder="owner/name" value={repo} onChange={(e) => setRepo(e.target.value)} /><button>add</button>
+        <input placeholder="owner/name, gitlab.com/group/project or a repository URL" value={repo} onChange={(e) => setRepo(e.target.value)} /><button>add</button>
       </form>
       {add.error && <div className="error">{add.error}</div>}
     </>}
@@ -433,11 +439,10 @@ function PullPage({ id }: { id: string }) {
   if (error) return <p className="error">{error}</p>
   if (!data) return null
   const byFile = Map.groupBy(data.annotations, (a) => a.path)
-  const gh = `https://github.com/${data.repository}/pull/${data.number}/changes`
   return <>
     <p className="hint">{data.repository}#{data.number} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
     <h1>{data.title || 'untitled pull request'}</h1>
-    <p><a className="btn primary" href={gh} target="_blank" rel="noreferrer">open on github ↗</a></p>
+    <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a></p>
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
     {[...byFile].map(([file, notes]) => <div className="file" key={file}>
       <h3>{file}</h3>

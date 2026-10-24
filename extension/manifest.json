@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Reviews42",
   "version": "0.1.0",
-  "description": "Shows your team's Reviews42 annotations on GitHub pull requests.",
+  "description": "Shows your team's Reviews42 annotations on GitHub, GitLab and Bitbucket pull requests.",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
@@ -25,7 +25,9 @@
     "storage"
   ],
   "host_permissions": [
-    "https://github.com/*"
+    "https://github.com/*",
+    "https://gitlab.com/*",
+    "https://bitbucket.org/*"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -34,7 +36,9 @@
   "content_scripts": [
     {
       "matches": [
-        "https://github.com/*"
+        "https://github.com/*",
+        "https://gitlab.com/*",
+        "https://bitbucket.org/*"
       ],
       "js": [
         "markdown.js",
@@ -60,7 +64,9 @@
         "demo.html"
       ],
       "matches": [
-        "https://github.com/*"
+        "https://github.com/*",
+        "https://gitlab.com/*",
+        "https://bitbucket.org/*"
       ]
     }
   ]

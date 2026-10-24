@@ -1,13 +1,13 @@
 ---
 name: reviews42
-description: Annotate a GitHub pull request for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots and files to Reviews42; teammates then see them inside GitHub's changes view through the Reviews42 browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR, or to upload annotations to Reviews42. Nothing is posted to GitHub itself.
+description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to Reviews42; teammates then see them inside the diff through the Reviews42 browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, or to upload annotations to Reviews42. Nothing is posted to GitHub, GitLab or Bitbucket itself.
 ---
 
 # Reviews42: annotate a pull request
 
 You explain a pull request to the people who will review it. You upload the notes to the Reviews42 server
-(`{{HOST}}`); the Reviews42 browser extension draws them next to the diff on GitHub for everyone in the
-account that owns the repository. Notes expire on their own after the server's retention period.
+(`{{HOST}}`); the Reviews42 browser extension draws them next to the diff on GitHub, GitLab (merge requests) or
+Bitbucket for everyone in the account that owns the repository. Notes expire on their own after the server's retention period.
 
 ## Setup (once per machine)
 
@@ -52,11 +52,20 @@ never write it into files or commits.
 
 ## Workflow
 
-1. **Find the PR.** In the PR's worktree:
+1. **Find the PR and name the repository** the way Reviews42 does: `owner/name` on GitHub, `host/path` on GitLab and
+   Bitbucket (`gitlab.com/group/sub/project`, `gitlab.acme.dev/team/app` for self-hosted GitLab, `bitbucket.org/team/app`).
    ```bash
-   gh pr view --json number,title,headRefOid,url,baseRefName   # or ask the user for the PR URL
-   REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)  # owner/name
+   git remote get-url origin   # tells you the host
+   # GitHub
+   gh pr view --json number,title,headRefOid,url,baseRefName
+   REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)                        # owner/name
+   # GitLab (glab, or ask for the MR URL: …/-/merge_requests/<number>); the number is the MR's !iid
+   glab mr view --output json   # iid, title, sha, target_branch
+   # Bitbucket: ask for the PR URL (bitbucket.org/<team>/<repo>/pull-requests/<number>)
+   # GitLab and Bitbucket: host/path from the remote (ssh or https, any port of an ssh remote dropped)
+   REPO=$(git remote get-url origin | sed -E 's#^git@([^:]+):#\1/#; s#^ssh://([^@/]+@)?([^:/]+)(:[0-9]+)?/#\2/#; s#^https?://([^@/]+@)?##; s#\.git$##')
    ```
+   A full URL also works as `$REPO` once its `https://` is dropped. Ask the user for the number if no CLI tells you.
 2. **Read the change from git, not from memory.**
    ```bash
    BASE=$(git merge-base origin/<baseRefName> HEAD)
@@ -100,5 +109,6 @@ never write it into files or commits.
 ## Report back
 
 Say how many file notes and line notes you uploaded (and that test files were skipped), list the attached files,
-and give the `url` from the upload response plus `https://github.com/<REPO>/pull/<number>/changes`, where teammates
-with the extension see the notes.
+and give the `url` from the upload response plus the diff page where teammates with the extension see the notes:
+`https://github.com/<REPO>/pull/<number>/changes`, `https://<REPO>/-/merge_requests/<number>/diffs` (GitLab) or
+`https://<REPO>/pull-requests/<number>/diff` (Bitbucket).

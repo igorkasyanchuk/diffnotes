@@ -1,4 +1,5 @@
-/* Follows GitHub's own theme: its CSS variables (new and classic names) with light fallbacks, dark ones below. */
+/* Follows the site's theme: GitHub's CSS variables (new and classic names) where they exist, else light fallbacks, or
+   the dark ones below when content.js finds the page dark (html.r42-dark; GitLab and Bitbucket have no shared variables). */
 .r42-note, #r42-box, .r42-float, .r42-doc {
   --r42: #e8622a;
   --r42-bg: var(--bgColor-default, var(--color-canvas-default, #ffffff));
@@ -12,7 +13,7 @@
   text-align: left;
   white-space: normal;
 }
-@media (prefers-color-scheme: dark) {
+html.r42-dark {
   .r42-note, #r42-box, .r42-float, .r42-doc { --r42-bg: var(--bgColor-default, var(--color-canvas-default, #0d1117)); --r42-muted-bg: var(--bgColor-muted, var(--color-canvas-subtle, #151b23));
     --r42-fg: var(--fgColor-default, var(--color-fg-default, #f0f6fc)); --r42-soft: var(--fgColor-muted, var(--color-fg-muted, #9198a1));
     --r42-line: var(--borderColor-default, var(--color-border-default, #3d444d)); --r42-link: var(--fgColor-accent, var(--color-accent-fg, #4493f8)); }
@@ -131,3 +132,4 @@ html.r42-hide-notes .r42-row, html.r42-hide-notes .r42-file { display: none !imp
 .r42-demo-doc .r42-doc-body { padding: 0; background: #e9ecef; flex: 1; }
 .r42-demo-doc .r42-demo-frame { height: 82vh; max-width: 100%; }
 .r42-note > .r42-demo, .r42-box-body .r42-demo { margin: 8px 12px 12px; }
+.r42-grid-row { position: sticky; left: 0; box-sizing: border-box; padding: 4px 8px; max-width: 100vw; }

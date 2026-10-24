@@ -369,11 +369,20 @@ app.delete('/api/accounts/:id/members/:user', (c) => {
   return c.json({ ok: true })
 })
 
-const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
+// GitHub repositories are owner/name. GitLab (gitlab.com or self-hosted) and Bitbucket ones are host/path, e.g.
+// gitlab.com/group/sub/project or bitbucket.org/team/app: a host has a dot and a GitHub owner can't, so they never clash.
+const REPO = /^(?:[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?(?:\/[A-Za-z0-9._-]{1,100}){2,20})$/
+const validRepo = (n: string) => REPO.test(n) && !/(^|\/)\.+(\/|$)/.test(n)
+// a pasted URL or clone address works too: https://gitlab.com/group/project.git → gitlab.com/group/project
+export function repoName(s: string) {
+  const [first, ...rest] = s.trim().replace(/^[a-z+]+:\/\/|^git@/i, '').replace(/^([^/:]+):(?!\d)/, '$1/').replace(/(\.git)?\/*$/, '').split('/')
+  const host = first.includes('.') ? first.toLowerCase() : first
+  return (host === 'github.com' || host === 'www.github.com' ? rest : [host, ...rest]).join('/')
+}
 app.post('/api/accounts/:id/repositories', async (c) => {
-  const id = c.req.param('id'), name = str((await json(c)).full_name).replace(/^https:\/\/github\.com\//, '').replace(/\/$/, '')
+  const id = c.req.param('id'), name = repoName(str((await json(c)).full_name))
   requireAdmin(id, c.get('user'))
-  if (!REPO.test(name)) fail(400, 'Use owner/name, e.g. rails/rails')
+  if (!validRepo(name)) fail(400, 'Use owner/name for GitHub (rails/rails), host/path for GitLab or Bitbucket (gitlab.com/group/project)')
   if (db.prepare('select 1 from repositories where full_name = ?').get(name)) fail(409, 'This repository is already connected')
   const repo = randomUUID()
   db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repo, id, name, now())
@@ -406,8 +415,10 @@ function pullOut(p: Pull) {
   }
 }
 
+// /api/v1/pulls/<repository>/<number>, where the repository is owner/name or host/path (several segments)
+const PULL_PATH = '/api/v1/pulls/:repo{.+}/:number{[0-9]+}'
 const findPull = (c: Context<Env>) => {
-  const full = `${c.req.param('owner')}/${c.req.param('repo')}`
+  const full = repoName(c.req.param('repo') ?? '')
   const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ?`).get(full, Number(c.req.param('number'))) as Pull | undefined
   if (!p) fail(404, 'No annotations for this pull request')
   role(p!.account_id, c.get('user'))
@@ -415,14 +426,14 @@ const findPull = (c: Context<Env>) => {
 }
 
 app.get('/api/v1/me', (c) => c.json({ user: c.get('user') }))
-app.get('/api/v1/pulls/:owner/:repo/:number', (c) => c.json(pullOut(findPull(c))))
+app.get(PULL_PATH, (c) => c.json(pullOut(findPull(c))))
 app.get('/api/pulls/:id', (c) => {
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('id')) as Pull | undefined
   if (!p) fail(404, 'Not found')
   role(p!.account_id, c.get('user'))
   return c.json(pullOut(p!))
 })
-app.delete('/api/v1/pulls/:owner/:repo/:number', async (c) => {
+app.delete(PULL_PATH, async (c) => {
   const p = findPull(c)
   await dropPulls([p.id])
   return c.json({ ok: true })
@@ -454,7 +465,7 @@ export function fileType(name: string, data: Buffer) {
 
 // The repository must be connected to an account you're in; an unknown one is connected to your first owned account.
 function repositoryFor(fullName: string, user: User) {
-  if (!REPO.test(fullName)) fail(400, 'Bad repository name')
+  if (!validRepo(fullName)) fail(400, 'Bad repository name: owner/name for GitHub, host/path for GitLab or Bitbucket')
   const repo = db.prepare('select id, account_id from repositories where full_name = ?').get(fullName) as { id: string; account_id: string } | undefined
   if (repo) return role(repo.account_id, user) && repo.id
   const acc = db.prepare(`select account_id from memberships where user_id = ? order by role in ('owner', 'admin') desc limit 1`).get(user.id) as { account_id: string } | undefined
@@ -466,7 +477,7 @@ function repositoryFor(fullName: string, user: User) {
 
 // Replaces the pull request's annotations and files: re-running the skill after a push is idempotent.
 // Body: JSON, or multipart with a `payload` JSON field plus `file` fields; `attachment:<name>` in Markdown becomes the file's URL.
-app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
+app.put(PULL_PATH, async (c) => {
   const user = c.get('user'), number = Number(c.req.param('number'))
   if (!Number.isInteger(number) || number < 1) fail(400, 'Bad pull request number')
   let payload: Record<string, unknown>, files: File[] = []
@@ -486,7 +497,7 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
   const types = files.map((f, i) => fileType(f.name, datas[i]))
 
-  const repoId = repositoryFor(`${c.req.param('owner')}/${c.req.param('repo')}`, user)
+  const repoId = repositoryFor(repoName(c.req.param('repo')), user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoId, number) as { id: string } | undefined
   const id = existing?.id ?? randomUUID()
   // stored[i] is files[i]'s stored name (unique, <= 100 chars like safeName, so /files/ finds it); names maps attachment: refs

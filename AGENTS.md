@@ -20,7 +20,7 @@ docs/             user docs linked from README (install, skill, extension, accou
 web/main.tsx      routing, public + app (sidebar) layouts, login, invite, dashboard, account, pull preview, settings
 web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
 skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
-extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on github.com:
+extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on GitHub, GitLab and Bitbucket diffs:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
 ```
 
@@ -41,8 +41,12 @@ extension/        manifest, demo.html (sandbox for .html demos), background (hol
   (size, type, backend `disk|s3`); stats and quotas read the rows, never the disk or the bucket.
 - Deleting PRs goes through `dropPulls()` so their files are removed from whichever backend holds them.
 - Keep docs/ in sync when routes, limits or features change (and the skill, `skill/reviews42/SKILL.md`).
-- GitHub's diff DOM: `extension/content.js` supports the React changes view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`)
-  and the classic one (`.file-header[data-path]`, `td.blob-num`). If notes stop appearing, re-check those selectors first.
+- Repositories: `owner/name` = GitHub, `host/path` = GitLab (any host but bitbucket.org) or Bitbucket; `repoName()`
+  (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back.
+- Diff DOM, one adapter per host in `SITES` (`extension/content.js`); if notes stop appearing, re-check these first:
+  GitHub React view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`) and classic (`.file-header[data-path]`,
+  `td.blob-num`); GitLab rapid diffs (`diff-file`, `rd-diff-file-copy-clipboard`, `td.rd-line-number[data-position] a[data-line-number]`);
+  Bitbucket (`[data-qa=branch-diff-file]`, `[data-qa=bk-filepath]`, `[data-old-line-number]`/`[data-new-line-number]`, rows `[role=row]`).
 
 ## Commands
 

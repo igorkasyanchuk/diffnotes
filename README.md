@@ -2,8 +2,8 @@
 
 <h1 align="center">reviews42</h1>
 
-<p align="center"><b>Your coding agent explains the pull request. Your team reads it on GitHub.</b><br>
-Free · self-hosted · source-available · no seats, no SaaS</p>
+<p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
+Free · self-hosted · source-available · GitHub, GitLab, Bitbucket</p>
 
 <p align="center"><img src="docs/images/github-note.png" alt="A Reviews42 note on a GitHub pull request diff" width="860"></p>
 
@@ -11,8 +11,8 @@ Free · self-hosted · source-available · no seats, no SaaS</p>
 
 - Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
   screenshots, Markdown reports, CSVs and small interactive HTML demos.
-- The notes go to **your own Reviews42 server**, never to GitHub: no bot comments, no notification noise.
-- Reviewers with the **browser extension** see them **inside GitHub's diff**: a summary box on top, notes on the
+- The notes go to **your own Reviews42 server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
+- Reviewers with the **browser extension** see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
   changed lines, image galleries, file previews, one switch to hide everything.
 - Notes **expire on their own** (30 days by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
 - Up and running in **about 3 minutes**: one container, one `curl | sh`, one extension.
@@ -71,7 +71,7 @@ Then ask your agent: **“annotate this PR with reviews42”** and open the PR's
 |---|---|
 | [Install & configure](docs/install.md) | Docker, environment variables, first admin, password reset, upgrades, backups |
 | [Agent skill](docs/skill.md) | Install, token, how the agent writes notes, payload format, allowed files |
-| [Browser extension](docs/extension.md) | Install, several servers, what you see on GitHub, troubleshooting |
+| [Browser extension](docs/extension.md) | Install, several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
 | [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, super admin, overview pages |
 | [File storage](docs/storage.md) | Disk or S3-compatible (Backblaze B2, Cloudflare R2, AWS S3, MinIO), expiry |
 | [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets |

@@ -9,7 +9,7 @@ process.env.ADMIN_EMAIL = 'admin@example.com'
 process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
 const { db } = await import('./db.ts')
-const { purge } = await import('./app.ts')
+const { purge, repoName } = await import('./app.ts')
 // a real PNG signature plus padding up to n bytes
 const png = (n = 16) => { const b = new Uint8Array(n); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b }
 
@@ -184,6 +184,29 @@ describe('reviews42', () => {
     expect((await up(new File([png(1024 * 1024 + 1)], 'big.png'))).status).toBe(413)
     expect((await call('/api/v1/pulls/acme/web/43', { token })).data.files).toHaveLength(5)
     expect((await call('/api/v1/pulls/acme/web/43', { token, method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('takes GitLab (nested groups, self-hosted) and Bitbucket repositories as host/path', async () => {
+    expect(repoName('https://gitlab.com/Acme/Platform/API.git')).toBe('gitlab.com/Acme/Platform/API')
+    expect(repoName('git@bitbucket.org:team/app.git')).toBe('bitbucket.org/team/app')
+    expect(repoName('https://GitLab.Acme.dev:8443/a/b/')).toBe('gitlab.acme.dev:8443/a/b')
+    expect(repoName('https://github.com/rails/rails')).toBe('rails/rails')
+    const body = { annotations: [{ path: 'a.ts', line: 1, body: 'why' }] }
+    for (const repo of ['gitlab.com/acme/platform/api', 'bitbucket.org/team/app', 'gitlab.acme.dev:8443/a/b']) {
+      expect((await call(`/api/v1/pulls/${repo}/7`, { token, body, method: 'PUT' })).status).toBe(200)
+      const got = await call(`/api/v1/pulls/${repo}/7`, { token })
+      expect(got.data.repository).toBe(repo)
+      expect(got.data.annotations[0].body).toBe('why')
+    }
+    // GitHub's owner/name route is unchanged; nothing leaks across hosts with the same path
+    expect((await call('/api/v1/pulls/acme/platform/7', { token })).status).toBe(404)
+    for (const bad of ['gitlab.com/onlyone', 'gitlab.com/%2E%2E/x', 'bad host.com/a/b', 'gitlab.com/a/b c'])
+      expect((await call(`/api/v1/pulls/${bad}/7`, { token, body, method: 'PUT' })).status).toBeGreaterThanOrEqual(400)
+    expect((await call(`/api/accounts/${accountId}/repositories`, { cookie: admin, body: { full_name: 'https://bitbucket.org/team/web' } })).status).toBe(200)
+    const repos = (await call(`/api/accounts/${accountId}`, { cookie: admin })).data.repositories.map((r: { full_name: string }) => r.full_name)
+    expect(repos).toContain('bitbucket.org/team/web')
+    for (const r of (await call(`/api/accounts/${accountId}`, { cookie: admin })).data.repositories as { id: string; full_name: string }[])
+      if (r.full_name.includes('.')) expect((await call(`/api/repositories/${r.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
   })
 
   it('purges expired pull requests with their files', async () => {

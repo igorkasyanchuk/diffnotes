@@ -22,7 +22,7 @@ async function call({ server, token }, path) {
   return res
 }
 
-// files come back as data: URLs because <img> on github.com can't send the token
+// files come back as data: URLs because <img> on github.com, gitlab.com or bitbucket.org can't send the token
 async function dataUrl(blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer())
   let bin = ''

@@ -18,7 +18,7 @@ const BENEFITS: [string, string][] = [
   ['review faster', 'Reviewers read why each block changed before reading how. Less back-and-forth, fewer “what does this do?” comments.'],
   ['context from the author', 'The agent that wrote the code explains it while it still remembers why: decisions, trade-offs, what was left out.'],
   ['screenshots and live demos', 'Before/after images next to the lines that caused them, and small HTML demos you can click, locked in a sandbox.'],
-  ['zero noise on GitHub', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
+  ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
   ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools. Connect several servers in one browser for different teams or clients.'],
 ]
@@ -28,13 +28,13 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
   const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">sign in →</a>
   return <>
     <section className="lp-hero">
-      <div className="lp-tags"><span>free</span><span>self-hosted</span><span>source-available</span><span>no seats, no SaaS</span></div>
-      <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it on GitHub.</em></h1>
+      <div className="lp-tags"><span>free</span><span>self-hosted</span><span>source-available</span><span>GitHub · GitLab · Bitbucket</span></div>
+      <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
     </section>
     <Demo />
     <section className="lp-after">
       <p className="lp-lead">A coding agent attaches plain-language notes, screenshots and live demos to the lines it changed. Reviewers see them
-        right inside GitHub's diff, through a small browser extension. Nothing is posted to the PR.</p>
+        right inside the diff on GitHub, GitLab or Bitbucket, through a small browser extension. Nothing is posted to the PR.</p>
       <p>{cta} <a href="#install" className="btn">install in 3 minutes</a></p>
     </section>
 
