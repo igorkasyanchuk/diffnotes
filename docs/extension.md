@@ -40,6 +40,10 @@ Open a PR's **Files changed** tab:
 | **Previews** | links to attached `.md` / `.csv` / `.txt` open rendered in place |
 | **Live demos** | an attached `.html` runs in a sandboxed frame under its note (no network, no access to GitHub); *expand* opens it at phone, tablet or desktop width |
 | **Floating dock** | appears when the box scrolls away: note count, notes switch, summary popover, back to top |
+| **Where to look hardest** | notes the agent marked `high` / `medium` / `low` risk, listed first in the box; click one to jump to it |
+| **Before / after** | a `-before` / `-after` image pair is one image with a drag handle |
+| **Diagrams** | ` ```mermaid ` flowcharts in a note are drawn in place |
+| **Remove** | the PR's uploader and account admins see *remove note* under each note and *remove all notes* in the box; both ask first |
 
 Colors follow the site's light or dark theme. Notes whose line is not in the diff (a collapsed or not yet loaded file, or
 a line that changed since) are listed in the summary box instead of being lost.

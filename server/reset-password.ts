@@ -20,6 +20,7 @@ export function resetPassword(email?: string) {
 }
 
 // realpath: the module URL is symlink-resolved, argv[1] is not
+/* v8 ignore start: CLI glue, resetPassword() above is what the tests cover */
 const isMain = (() => { try { return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url) } catch { return false } })()
 if (isMain) {
   try {
@@ -30,3 +31,4 @@ if (isMain) {
     process.exitCode = 1
   }
 }
+/* v8 ignore stop */

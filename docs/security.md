@@ -26,6 +26,10 @@
   `cf-connecting-ip` when the peer is Cloudflare, else the peer.
 - **No third parties**: the page loads nothing from elsewhere (self-hosted font, CSP `'self'`), and note images load
   only from the note's server, so no outside service learns who opens the app or reads a note.
+- **Removing notes** (one, or a whole PR) is for the PR's uploader and the account's owner and admins; the server
+  checks it on every request, the extension only offers it to them and asks for a confirmation, and ignores clicks that
+  a page script fakes (`isTrusted`). Any member may still replace a PR's notes by uploading a new set (that's how a
+  teammate's agent refreshes them after pushing to the same PR); the upload then counts as theirs.
 - **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk.
 
 ## Uploads

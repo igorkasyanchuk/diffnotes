@@ -30,7 +30,7 @@ extension/        manifest, demo.html (sandbox for .html demos), background (hol
 - Access: everything about a PR is visible only to members of the account that owns its repository; other
   accounts' rows answer 404. Tokens are stored as sha256 only.
 - Roles per account (`memberships.role`): `owner` (made it; can't be removed or demoted; deletes the account),
-  `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads). `users.admin` = super
+  `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes the notes it uploaded). `users.admin` = super
   admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
   The first user (bootstrap) is a super admin.
 - Annotation Markdown is untrusted: render it only through `r42Markdown` (escapes everything, keeps http(s) and relative URLs).
@@ -54,7 +54,8 @@ extension/        manifest, demo.html (sandbox for .html demos), background (hol
 ## Commands
 
 ```bash
-npm test          # vitest, server/app.test.ts is one sequential story
+npm test          # vitest, server/app.test.ts is one sequential story; edges.test.ts the limits and errors
+npm run coverage  # server + extension/markdown.js, fails under 95% lines/statements/functions, 90% branches
 npm run typecheck
 npm run build
 ```

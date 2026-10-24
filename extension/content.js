@@ -20,14 +20,46 @@
     box.dataset.r42 = i
     const head = el('button', 'r42-head')
     head.type = 'button'
-    head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)), el('span', 'r42-where', where(a)))
+    head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)))
+    if (RISKS.includes(a.risk)) head.append(el('span', `r42-risk r42-risk-${a.risk}`, `${a.risk} risk`))
+    head.append(el('span', 'r42-where', where(a)))
     const body = el('div', 'r42-body r42-md')
     body.append(md(a.body, a.server))
     const set = (c) => { collapsed.set(i, c); box.classList.toggle('r42-collapsed', c) }
     set(collapsed.get(i) ?? false)
     head.addEventListener('click', () => { set(!box.classList.contains('r42-collapsed')); clampAll() })
     box.append(head, body)
+    if (a.canDelete && a.id) {
+      const actions = el('div', 'r42-actions'), remove = el('button', 'r42-link r42-remove', 'remove note')
+      remove.type = 'button'
+      remove.addEventListener('click', confirming('Remove this note for everyone?', () => removeNotes(a.server, `/api/v1/annotations/${a.id}`)))
+      actions.append(remove)
+      box.append(actions)
+    }
     return box
+  }
+
+  // Removing notes: the uploader and account admins see "remove" (the server says so with can_delete and checks again).
+  // A click asks inline first; only real clicks count, so a script on the page can't press them.
+  const RISKS = ['high', 'medium', 'low']
+  const confirming = (question, action) => (e) => {
+    if (!e.isTrusted) return
+    const button = e.currentTarget, ask = el('span', 'r42-confirm')
+    const yes = el('button', 'r42-danger', 'Remove'), no = el('button', 'r42-link', 'Cancel')
+    yes.type = no.type = 'button'
+    // a failed removal keeps Cancel, which brings the button back for another try
+    yes.addEventListener('click', (ev) => { if (!ev.isTrusted) return; yes.disabled = true; yes.textContent = 'Removing…'; action().then((err) => { if (err) ask.replaceChildren(el('span', 'r42-hint', err), no) }) })
+    no.addEventListener('click', () => { ask.remove(); button.style.display = ''; button.focus() })
+    ask.append(el('span', '', question), yes, no)
+    button.style.display = 'none' // .r42-link's all: unset beats the hidden attribute
+    button.after(ask)
+    yes.focus()
+  }
+  async function removeNotes(server, url) {
+    const r = await chrome.runtime.sendMessage({ type: 'delete', server, url }).catch(() => null)
+    if (!r?.ok) return r?.error ?? 'Could not remove: reload the page and try again'
+    current = '' // fetch again and redraw what is left
+    check()
   }
 
   // Markdown as nodes, escaped by r42Markdown (only http(s) and relative URLs survive). Parsed in an inert <template>, so
@@ -37,6 +69,7 @@
     const t = document.createElement('template')
     t.innerHTML = html
     loadImages(t.content, server)
+    r42Compare(t.content) // before / after image pairs get a drag handle
     return t.content
   }
   // server: the Reviews42 server the Markdown came from; its /files/… are fetched by the background with its token
@@ -210,8 +243,9 @@
         const pop = el('div', 'r42-float r42-pop')
         pop.id = 'r42-pop'
         const body = box.querySelector('.r42-box-body'), copy = body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.')
-        // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo
-        copy.querySelectorAll('.r42-demo').forEach((d) => d.remove())
+        // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo.
+        // remove note needs its listener: that stays in the box
+        copy.querySelectorAll('.r42-demo, .r42-actions').forEach((d) => d.remove())
         pop.append(copy)
         // a clone has no listeners: note headers toggle through the pop
         pop.addEventListener('click', (e) => e.target.closest('.r42-head')?.parentElement.classList.toggle('r42-collapsed'))
@@ -256,8 +290,30 @@
       open.target = '_blank'
       return open
     })
-    bar.append(title, notesSwitch(), expand, collapse, ...opens)
+    const removes = pull.pulls.filter((p) => p.can_delete).map((p) => {
+      const b = el('button', 'r42-link r42-remove', many ? `remove notes on ${new URL(p.server).host}` : 'remove all notes')
+      b.type = 'button'
+      b.addEventListener('click', confirming(`Remove all ${p.annotations.length} notes and files of this PR for everyone?`,
+        () => removeNotes(p.server, `/api/v1/pulls/${p.repo}/${p.number}?id=${p.id}`)))
+      return b
+    })
+    bar.append(title, notesSwitch(), expand, collapse, ...opens, ...removes)
     const body = el('div', 'r42-box-body')
+    // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
+    const risky = pull.annotations.map((a, i) => [a, i]).filter(([a]) => RISKS.includes(a.risk))
+      .sort(([a], [b]) => RISKS.indexOf(a.risk) - RISKS.indexOf(b.risk))
+    if (risky.length) {
+      const map = el('div', 'r42-risks')
+      map.append(el('div', 'r42-risks-title', 'Where to look hardest'))
+      for (const [a, i] of risky) {
+        const row = el('button', 'r42-risk-row')
+        row.type = 'button'
+        row.dataset.r42Jump = i // the click is delegated (below), so it also works in the dock's summary pop
+        row.append(el('span', `r42-risk r42-risk-${a.risk}`, a.risk), el('code', '', `${a.path}${a.line ? `:${a.line}` : ''}`), el('span', 'r42-hint', a.title || ''))
+        map.append(row)
+      }
+      body.append(map)
+    }
     for (const p of pull.pulls.filter((x) => x.summary)) {
       const s = el('div', 'r42-md r42-summary')
       if (many) s.append(el('h6', '', new URL(p.server).host))
@@ -298,6 +354,19 @@
     }
     if (!long && more) more.remove()
   }
+  // risk map: jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
+  document.addEventListener('click', (e) => {
+    const i = e.target.closest?.('.r42-risk-row')?.dataset.r42Jump
+    if (i == null) return
+    if (hidden) setHidden(false)
+    document.getElementById('r42-pop')?.remove()
+    const n = document.querySelector(`.r42-row [data-r42="${i}"], .r42-file[data-r42="${i}"], #r42-box [data-r42="${i}"]`)
+    // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
+    if (n?.closest('#r42-box.r42-collapsed')) { document.getElementById('r42-box').classList.remove('r42-collapsed'); clampAll() }
+    n?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    n?.classList.add('r42-flash')
+    setTimeout(() => n?.classList.remove('r42-flash'), 1200)
+  })
   // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
   document.addEventListener('click', (e) => {
     const more = e.target.closest?.('.r42-more'), b = more?.previousElementSibling
@@ -434,7 +503,8 @@
     const res = await chrome.runtime.sendMessage({ type: 'pull', repo: m.repo, number: m.number }).catch(() => null)
     if (current !== key) return
     if (res?.pulls?.length) {
-      pull = { pulls: res.pulls, errors: res.errors, annotations: res.pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server }))) }
+      const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
+      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: p.can_delete }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')
     else return
     collapsed.clear()

@@ -29,7 +29,7 @@ html.r42-dark {
 .r42-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .r42-where { flex: none; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--r42-soft); }
 .r42-body { padding: 0 12px 8px; }
-.r42-collapsed > .r42-body, .r42-collapsed > .r42-box-body, .r42-collapsed > .r42-demo, .r42-collapsed > .r42-more { display: none; }
+.r42-collapsed > .r42-body, .r42-collapsed > .r42-box-body, .r42-collapsed > .r42-demo, .r42-collapsed > .r42-more, .r42-collapsed > .r42-actions { display: none; }
 
 /* Markdown; images are small previews, a click opens them full size */
 .r42-md p { margin: 4px 0; }
@@ -133,3 +133,48 @@ html.r42-hide-notes .r42-row, html.r42-hide-notes .r42-file { display: none !imp
 .r42-demo-doc .r42-demo-frame { height: 82vh; max-width: 100%; }
 .r42-note > .r42-demo, .r42-box-body .r42-demo { margin: 8px 12px 12px; }
 .r42-grid-row { position: sticky; left: 0; box-sizing: border-box; padding: 4px 8px; max-width: 100vw; }
+
+/* removing notes (uploader and account admins): a quiet link, then an inline question */
+.r42-actions { display: flex; justify-content: flex-end; padding: 0 10px 6px; }
+.r42-remove { color: var(--r42-soft); }
+.r42-remove:hover { color: #cf222e; }
+.r42-confirm { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+.r42-danger { all: unset; cursor: pointer; padding: 1px 9px; border-radius: 6px; background: #cf222e; color: #fff; font: 600 12px/1.6 -apple-system, sans-serif; }
+.r42-danger:disabled { opacity: .6; cursor: default; }
+.r42-danger:focus-visible { outline: 2px solid var(--r42-link); outline-offset: 2px; }
+
+/* risk: a pill on the note and the map in the box */
+.r42-risk { flex: none; padding: 0 7px; border-radius: 999px; font: 600 10.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.r42-risk-high { background: #ffebe9; color: #cf222e; }
+.r42-risk-medium { background: #fff8c5; color: #9a6700; }
+.r42-risk-low { background: #dafbe1; color: #1a7f37; }
+html.r42-dark .r42-risk-high { background: rgba(248, 81, 73, .16); color: #ff7b72; }
+html.r42-dark .r42-risk-medium { background: rgba(210, 153, 34, .16); color: #e3b341; }
+html.r42-dark .r42-risk-low { background: rgba(46, 160, 67, .16); color: #3fb950; }
+.r42-risks { display: grid; gap: 3px; margin: 4px 0 10px; }
+.r42-risks-title { font-weight: 600; font-size: 12.5px; }
+.r42-risk-row { all: unset; box-sizing: border-box; display: flex; gap: 8px; align-items: center; min-width: 0; padding: 2px 4px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.r42-risk-row:hover, .r42-risk-row:focus-visible { background: var(--r42-muted-bg); }
+.r42-risk-row code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.r42-risk-row .r42-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r42-flash { box-shadow: 0 0 0 3px var(--r42); transition: box-shadow .3s; }
+
+/* before / after: one image with a drag handle (r42Compare in markdown.js) */
+.r42-compare { position: relative; display: inline-block; vertical-align: top; margin: 6px 8px 2px 0; line-height: 0; --x: 50%; }
+.r42-md .r42-compare img { margin: 0; max-width: min(100%, 440px); max-height: 210px; cursor: ew-resize; }
+.r42-compare .r42-cmp-before { position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 calc(100% - var(--x)) 0 0); }
+.r42-compare::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--x); width: 2px; margin-left: -1px; background: var(--r42); pointer-events: none; }
+.r42-cmp-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.r42-cmp-l, .r42-cmp-r { position: absolute; top: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, .62); color: #fff; font: 600 10.5px/1.6 -apple-system, sans-serif; pointer-events: none; }
+.r42-cmp-l { left: 6px; } .r42-cmp-r { right: 6px; }
+
+/* ```mermaid flowcharts, drawn as SVG by markdown.js */
+.r42-diagram { overflow-x: auto; margin: 6px 0; }
+.r42-diagram svg { display: block; max-width: none; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.r42-dg-node rect, .r42-dg-node polygon, .r42-dg-node ellipse { fill: var(--r42-muted-bg); stroke: var(--r42-line); stroke-width: 1.2; }
+.r42-dg-node text { fill: var(--r42-fg); }
+.r42-dg-edge { stroke: var(--r42-soft); stroke-width: 1.4; }
+.r42-dg-edge.dashed { stroke-dasharray: 5 4; }
+.r42-dg-edge.bold { stroke-width: 2.6; }
+.r42-dg-arrow { fill: var(--r42-soft); }
+.r42-dg-elabel { fill: var(--r42-soft); font-size: 11px; paint-order: stroke; stroke: var(--r42-bg); stroke-width: 4px; }

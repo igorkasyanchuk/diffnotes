@@ -39,12 +39,22 @@ never write it into files or commits.
     with the arrow keys. The alt text is the caption, so make it say what the image shows.
   - reports and data: `[test report](attachment:report.md)`, `[timings](attachment:bench.csv)`, `[log](attachment:out.txt)`;
     they open as a rendered preview (Markdown, a CSV table, plain text).
+  - before / after: two images next to each other in one note, named `…-before.png` / `…-after.png` (or alt text
+    starting with "Before" / "After"), become one image with a drag handle: `![Before: grey button](attachment:login-before.png) ![After: orange button](attachment:login-after.png)`.
+    Same size and crop for both, so the handle lines them up.
   - interactive demos: `[try the picker](attachment:picker-demo.html)` when clicking beats a screenshot (a component's
     states, an animation, a form's validation). Reviewers get a live preview under the note and can expand it at phone,
     tablet or desktop width. Write **one self-contained file**: CSS in `<style>`, JS in `<script>`, images as `data:`
     URIs, fake data inline. It runs in a locked sandbox: **no network at all** (no CDN scripts, fonts, `fetch`, external
     images), no cookies or storage, no popups or `alert()`, and `<form>` submission is blocked (use click
     handlers). Keep it small and focused on the change.
+- **Diagrams**: a fenced ` ```mermaid ` block with a `flowchart LR` or `flowchart TD` (also `graph`) is drawn as a
+  diagram: nodes `A[box]`, `A(round)`, `A{decision}`, `A((circle))`, edges `-->`, `---`, `-.->`, `==>`, labels
+  `-->|yes|`. Use it for a flow or a state change that words make hard to follow; keep it under ~15 nodes. Other
+  Mermaid types (sequence, class…) show as code.
+- **Risk**: give `"risk": "high" | "medium" | "low"` to the notes where reviewers should look hardest or can relax
+  (money, auth, data loss, migrations, concurrency are high; copy and renames low). Reviewers get a "where to look
+  hardest" list at the top. Use it sparingly and say why in the note's text; leave it out when there is nothing to flag.
 - **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.md .csv .txt .html` (UTF-8 text).
   Up to **1 MB each**, 30 files and 20 MB per PR. Anything else (svg, pdf, zip, video) is refused with `415`:
   convert it first (a PNG screenshot instead of an SVG, a Markdown summary instead of a PDF). Keep screenshots small:
@@ -88,8 +98,8 @@ never write it into files or commits.
      "summary": "Two or three sentences: what this PR does and why. ![after](attachment:after.png)",
      "annotations": [
        { "path": "app/models/invite.rb", "body": "New: an invitation a teammate opens to join the team." },
-       { "path": "app/controllers/sessions_controller.rb", "line": 14, "end_line": 22,
-         "title": "Login by invitation", "body": "Only people with an invitation can sign up now." },
+       { "path": "app/controllers/sessions_controller.rb", "line": 14, "end_line": 22, "risk": "high",
+         "title": "Login by invitation", "body": "Only people with an invitation can sign up now; this is the sign-up gate." },
        { "path": "config/routes.rb", "line": 8, "side": "LEFT", "body": "The old public sign-up page, removed." }
      ]
    }
@@ -138,7 +148,11 @@ without merging, or when the user asks:
 curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"   # → {"ok":true}
 ```
 
-Teammates can also press **delete notes** on the PR's page in Reviews42.
+`403` = a teammate uploaded these notes and you are only a member: ask them or an account admin to remove them.
+
+The PR's uploader and account admins can also remove single notes or all of them right in the diff (**remove note**,
+**remove all notes**) or with **delete notes** on the PR's page in Reviews42; a re-run must not bring removed notes
+back unless they are true again.
 
 ## Check script
 

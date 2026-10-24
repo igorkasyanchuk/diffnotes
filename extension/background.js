@@ -56,6 +56,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const res = await call(s, msg.url)
       return res instanceof Response ? { url: await dataUrl(await res.blob()) } : res
     }
+    // removing notes: a connected server's own token, and only one note or one PR's notes (content.js asks first)
+    if (msg.type === 'delete' && !msg.url.includes('..') && /^\/api\/v1\/(annotations\/\d+|pulls\/[\w.:/-]+\/\d+\?id=[0-9a-f-]{36})$/.test(msg.url)) {
+      const s = (await servers()).find((x) => x.server === msg.server)
+      if (!s) return { error: 'not connected' }
+      const res = await fetch(s.server + msg.url, { method: 'DELETE', headers: { authorization: `Bearer ${s.token}` } }).catch(() => null)
+      if (!res) return { error: `can't reach ${new URL(s.server).host}` }
+      return res.ok ? { ok: true } : { error: (await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}` }
+    }
     return { error: 'unknown message' }
   })().then(reply, (e) => reply({ error: String(e.message ?? e) }))
   return true

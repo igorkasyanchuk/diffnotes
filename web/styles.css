@@ -222,3 +222,35 @@ button.more { margin-top: 4px; font-size: 12px; }
 .demo-bar button, .demo-head button { padding: 3px 9px; font-size: 12px; }
 .demo-stage { flex: 1; display: flex; justify-content: center; background: #e9ecef; min-height: 0; }
 .demo-big { height: 100%; max-width: 100%; border: 0; background: #fff; transition: width .2s; }
+
+/* risk levels from the agent: pills on notes and the map on a PR's page */
+.risk { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; font: 600 11px/1.7 var(--mono); }
+.risk-high { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.risk-medium { background: color-mix(in srgb, #d29922 18%, transparent); color: #b7791f; }
+.risk-low { background: color-mix(in srgb, var(--prompt) 16%, transparent); color: var(--prompt); }
+.risks { display: grid; gap: 4px; }
+.risks h3 { margin: 0 0 4px; }
+.risk-row { display: flex; gap: 10px; align-items: center; min-width: 0; color: var(--ink); text-decoration: none; padding: 2px 4px; border-radius: 6px; }
+.risk-row:hover { background: var(--panel-2); }
+.risk-row .risk { margin: 0; }
+.risk-row .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* before / after: one image with a drag handle (r42Compare in markdown.js) */
+.r42-compare { position: relative; display: inline-block; vertical-align: top; margin: 6px 8px 2px 0; line-height: 0; --x: 50%; }
+.md .r42-compare img { margin: 0; max-width: min(100%, 480px); max-height: 240px; cursor: ew-resize; }
+.r42-compare .r42-cmp-before { position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 calc(100% - var(--x)) 0 0); }
+.r42-compare::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--x); width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.r42-cmp-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.r42-cmp-l, .r42-cmp-r { position: absolute; top: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, .62); color: #fff; font: 600 10.5px/1.6 var(--mono); pointer-events: none; }
+.r42-cmp-l { left: 6px; } .r42-cmp-r { right: 6px; }
+
+/* ```mermaid flowcharts, drawn as SVG by markdown.js */
+.r42-diagram { overflow-x: auto; margin: 6px 0; }
+.r42-diagram svg { display: block; max-width: none; font: 12px var(--mono); }
+.r42-dg-node rect, .r42-dg-node polygon, .r42-dg-node ellipse { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1.2; }
+.r42-dg-node text { fill: var(--ink); }
+.r42-dg-edge { stroke: var(--muted); stroke-width: 1.4; }
+.r42-dg-edge.dashed { stroke-dasharray: 5 4; }
+.r42-dg-edge.bold { stroke-width: 2.6; }
+.r42-dg-arrow { fill: var(--muted); }
+.r42-dg-elabel { fill: var(--muted); font-size: 11px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }

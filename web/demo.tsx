@@ -52,9 +52,9 @@ function Diff({ rows, notes }: { rows: Row[]; notes: Record<number, ReactNode> }
   </Rows>)}</tbody></table>
 }
 const Rows = ({ before, children }: { before?: ReactNode; children: ReactNode }) => <>{before}{children}</>
-const Note = ({ title, where, children, refEl }: { title: string; where: string; children: ReactNode; refEl?: (e: HTMLDivElement | null) => void }) =>
+const Note = ({ title, where, risk, children, refEl }: { title: string; where: string; risk?: string; children: ReactNode; refEl?: (e: HTMLDivElement | null) => void }) =>
   <tr className="dm-note-row"><td colSpan={3}><div className="dm-note" ref={refEl}>
-    <div className="dm-nh"><Badge /><b>{title}</b><span className="dm-where">{where}</span></div>
+    <div className="dm-nh"><Badge /><b>{title}</b>{risk && <span className={`dm-risk ${risk}`}>{risk} risk</span>}<span className="dm-where">{where}</span></div>
     <div className="dm-nb">{children}</div>
   </div></td></tr>
 
@@ -71,19 +71,27 @@ export function Demo() {
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
   // reduced motion: hold the bar scene, not a gallery mid-animation
   const [scene, setScene] = useState(reduce ? 1 : 0), [playing, setPlaying] = useState(!reduce), [round, setRound] = useState(0), [moving, setMoving] = useState(false)
+  // a 3, 2, 1 teaser before the tour starts, once per page load (not on later rounds); a click skips it
+  const [count, setCount] = useState(reduce ? 0 : 3)
   const [view, setView] = useState({ scroll: 0, hl: null as null | { x: number; y: number; w: number; h: number }, cursor: null as null | { x: number; y: number }, below: true, docked: false })
   const els = useRef<Record<string, HTMLElement | null>>({}), screen = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null)
   const lastScroll = useRef(0)
   const ref = (k: string) => (e: HTMLElement | null) => { els.current[k] = e }
 
   useEffect(() => {
-    if (!playing) return
+    if (!count) return
+    const t = setTimeout(() => setCount(count - 1), 900)
+    return () => clearTimeout(t)
+  }, [count])
+
+  useEffect(() => {
+    if (!playing || count) return
     const t = setTimeout(() => {
       if (scene === SCENES.length - 1) setRound((r) => r + 1)
       setScene((scene + 1) % SCENES.length)
     }, SCENES[scene].ms)
     return () => clearTimeout(t)
-  }, [scene, playing])
+  }, [scene, playing, count])
 
   // where the arrow, the highlight and the cursor go: layout boxes (offsets ignore the running transitions)
   useLayoutEffect(() => {
@@ -138,7 +146,7 @@ export function Demo() {
             <div className="dm-file">
               <div className="dm-fh">⌄ app/checkout.ts <span className="add">+3</span> <span className="del">−1</span></div>
               <Diff rows={FILE_A} notes={{
-                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45">
+                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45" risk="high">
                   An empty cart used to reach the payment provider with $0. It now returns early; express orders pay the fee.
                 </Note>,
               }} />
@@ -201,6 +209,7 @@ export function Demo() {
         <a href="#install" className="btn primary">how to install ↓</a>
       </div>
 
+      {count > 0 && <button type="button" className="dm-count" onClick={() => setCount(0)} aria-label="Skip the countdown"><b key={count}>{count}</b></button>}
       <div className="dm-cursor" aria-hidden="true" style={view.cursor ? { left: view.cursor.x, top: view.cursor.y } : { opacity: 0 }}><i key={s} /></div>
     </div>
 
@@ -208,7 +217,7 @@ export function Demo() {
       <button type="button" className="dm-play" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
       <div className="dm-caption" key={s}>{SCENES[s].caption}</div>
       <div className="dm-dots">{SCENES.map((x, i) => <button key={i} type="button" aria-label={`Scene ${i + 1}`} className={i === s ? 'on' : i < s ? 'done' : ''}
-        onClick={() => { setScene(i); setPlaying(false) }}>{i === s && playing && <i style={{ animationDuration: `${x.ms}ms` }} />}</button>)}</div>
+        onClick={() => { setScene(i); setPlaying(false); setCount(0) }}>{i === s && playing && !count && <i style={{ animationDuration: `${x.ms}ms` }} />}</button>)}</div>
     </div>
   </section>
 }

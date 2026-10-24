@@ -10,8 +10,8 @@ a PR is visible only to members of the account that owns its repository. Anyone 
 | Role | Can |
 |---|---|
 | **owner** | everything an admin can, plus delete the account. One per account (who made it); can't be removed or demoted |
-| **admin** | invite people (as admin or member), change roles, remove members, add and remove repositories, rename the account |
-| **member** | read the account's notes, upload notes with the skill |
+| **admin** | invite people (as admin or member), change roles, remove members, add and remove repositories, rename the account, remove any PR's notes |
+| **member** | read the account's notes, upload notes with the skill, remove the notes they uploaded |
 
 A repository is connected to an account on its first upload by an owner or admin (a member's first upload is refused
 until an admin connects it), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab

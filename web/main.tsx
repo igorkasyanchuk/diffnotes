@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
@@ -8,11 +8,12 @@ import { Code, Landing } from './landing.tsx'
 declare global {
   var r42Markdown: (md: string) => string
   var r42Preview: (name: string, text: string) => string
+  var r42Compare: (root: ParentNode) => void
 }
 
 type User = { id: string; email: string; name: string; admin: number }
-type Annotation = { path: string; line: number | null; end_line: number | null; side: string; title: string; body: string }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
+type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -45,9 +46,12 @@ const Link = ({ to, children, className }: { to: string; children: ReactNode; cl
 // Markdown, cut to a few lines when long with a show more / less toggle (re-measured when images load)
 function Md({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [open, setOpen] = useState(false)
+  // once per text, not on every show more / less: the same string keeps React off the HTML, so what r42Compare added stays
+  const html = useMemo(() => r42Markdown(text), [text])
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    r42Compare(el) // before / after image pairs get a drag handle
     const measure = () => setLong(el.scrollHeight > 280)
     const ro = new ResizeObserver(measure)
     ro.observe(el.firstElementChild ?? el)
@@ -55,7 +59,7 @@ function Md({ text }: { text: string }) {
     return () => ro.disconnect()
   }, [text])
   return <>
-    <div ref={ref} className={`md${long && !open ? ' clamped' : ''}`}><div dangerouslySetInnerHTML={{ __html: r42Markdown(text) }} /></div>
+    <div ref={ref} className={`md${long && !open ? ' clamped' : ''}`}><div dangerouslySetInnerHTML={{ __html: html }} /></div>
     {long && <button type="button" className="link more" onClick={() => setOpen(!open)}>{open ? 'show less ↑' : 'show more ↓'}</button>}
   </>
 }
@@ -349,7 +353,11 @@ function AccountOverview({ id }: { id: string }) {
 }
 
 type TabProps = { id: string; data: Acc; admin: boolean; reload: () => void }
-const del = async (url: string, reload: () => void, what = 'Are you sure?') => { if (confirm(what)) { await api(url, undefined, 'DELETE'); reload() } }
+// a refusal (403 once a role changed, 404 already gone) is said, not dropped as an unhandled rejection
+const del = async (url: string, reload: () => void, what = 'Are you sure?') => {
+  if (!confirm(what)) return
+  try { await api(url, undefined, 'DELETE'); reload() } catch (e) { alert((e as Error).message) }
+}
 
 function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
   const [email, setEmail] = useState(''), [role, setRole] = useState('member'), [err, setErr] = useState('')
@@ -439,17 +447,26 @@ function PullPage({ id }: { id: string }) {
   if (error) return <p className="error">{error}</p>
   if (!data) return null
   const byFile = Map.groupBy(data.annotations, (a) => a.path)
+  const order = ['high', 'medium', 'low']
+  const risky = data.annotations.filter((a) => a.risk).sort((a, b) => order.indexOf(a.risk!) - order.indexOf(b.risk!))
   return <>
     <p className="hint">{data.repository}#{data.number}{data.head_sha && <> · written for commit <code>{data.head_sha.slice(0, 7)}</code></>} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
     <h1>{data.title || 'untitled pull request'}</h1>
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
-      <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
-        'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.')}>delete notes</button></p>
+      {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
+        'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.')}>delete notes</button>}</p>
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
+    {risky.length > 0 && <div className="card risks">
+      <h3>where to look hardest</h3>
+      {risky.map((n) => <a key={n.id} className="risk-row" href={`#note-${n.id}`}>
+        <span className={`risk risk-${n.risk}`}>{n.risk}</span><code>{n.path}{n.line ? `:${n.line}` : ''}</code><span className="hint">{n.title}</span>
+      </a>)}
+    </div>}
     {[...byFile].map(([file, notes]) => <div className="file" key={file}>
       <h3>{file}</h3>
-      {notes.map((n, i) => <div className="note" key={i}>
-        <div className="where">{n.line ? `${n.side === 'LEFT' ? 'old ' : ''}line ${n.line}${n.end_line && n.end_line !== n.line ? `–${n.end_line}` : ''}` : 'whole file'}</div>
+      {notes.map((n, i) => <div className="note" key={i} id={`note-${n.id}`}>
+        <div className="where">{n.line ? `${n.side === 'LEFT' ? 'old ' : ''}line ${n.line}${n.end_line && n.end_line !== n.line ? `–${n.end_line}` : ''}` : 'whole file'}
+          {n.risk && <span className={`risk risk-${n.risk}`}>{n.risk} risk</span>}</div>
         {n.title && <div className="title">{n.title}</div>}
         <Md text={n.body} />
       </div>)}

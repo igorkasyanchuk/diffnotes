@@ -48,7 +48,7 @@ db.exec(`
   create table if not exists annotations (
     id integer primary key autoincrement, pull_id text not null references pulls(id) on delete cascade,
     path text not null, line integer, end_line integer, side text not null default 'RIGHT',
-    title text not null default '', body text not null default '', position integer not null default 0);
+    title text not null default '', body text not null default '', position integer not null default 0, risk text);
   create index if not exists annotations_pull on annotations(pull_id);
   -- uploaded files: bytes live on disk or in S3 (backend), this row is what quotas, stats and /files read
   create table if not exists files (
@@ -75,6 +75,9 @@ if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e } finally { db.exec('pragma foreign_keys = on') }
 }
+
+// risk (low | medium | high) came later: add the column to databases made before it
+try { db.exec('alter table annotations add column risk text') } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 
 export const now = () => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
@@ -180,4 +183,17 @@ if (!getSetting('files_migrated')) {
     }
   }
   setSetting('files_migrated', true)
+}
+
+// A consistent copy of the database for volume backups: they archive DATA_DIR while the app runs, and a live WAL database
+// copied file by file can come out torn. DATA_DIR/backup/reviews42.db, rewritten every hour (written aside, then renamed).
+export function snapshot() {
+  const dir = path.join(DATA_DIR, 'backup'), tmp = path.join(dir, `.${randomUUID()}.db`) // PID is 1 in every container
+  fs.mkdirSync(dir, { recursive: true })
+  fs.rmSync(tmp, { force: true })
+  // ponytail: synchronous, requests wait while it copies (well under a second at this size); a worker thread if it grows
+  try {
+    db.prepare('vacuum into ?').run(tmp)
+    fs.renameSync(tmp, path.join(dir, 'reviews42.db'))
+  } finally { fs.rmSync(tmp, { force: true }) } // a failed copy (disk full) doesn't keep its partial file
 }

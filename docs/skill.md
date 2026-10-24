@@ -36,7 +36,9 @@ Re-running after a push replaces the previous notes and files, so it is safe to 
 checks each note against the current diff (a small script in the skill: the file must be changed in the PR and the
 lines inside one changed block) and only uploads what is true at the PR's head commit. After new commits it reads the
 stored notes, keeps and fixes the ones that still hold and drops the rest; with nothing left to say it deletes them
-(`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**.
+(`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**, and the uploader or an admin can remove single
+notes right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
+after image pairs (shown with a drag handle) and Mermaid flowcharts (drawn as diagrams).
 
 ## What a note looks like
 

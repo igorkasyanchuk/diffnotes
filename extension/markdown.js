@@ -45,8 +45,9 @@
       if (/^\s*```/.test(line)) {
         flush()
         const code = []
+        const lang = line.trim().slice(3).trim().toLowerCase()
         while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i])
-        out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`)
+        out.push((lang === 'mermaid' && diagram(code.join('\n'))) || `<pre><code>${esc(code.join('\n'))}</code></pre>`)
         continue
       }
       if (/^>\s?/.test(line)) { flushPara(); flushList(); quote.push(line.replace(/^>\s?/, '')); continue }
@@ -76,6 +77,127 @@
     }
     flush()
     return out.join('')
+  }
+
+  // ```mermaid flowcharts drawn as SVG here, no library: `flowchart`/`graph` LR|RL|TD|TB|BT, nodes A[box] A(round)
+  // A([pill]) A((circle)) A{decision}, edges --> --- -.-> ==> with -->|label| or -- label -->, chains A --> B --> C.
+  // Anything else (sequence diagrams, subgraph styling…) stays a code block. Labels are escaped like all Markdown.
+  // ponytail: layered layout (rank = longest path), straight edges, no crossing reduction; vendor mermaid into the
+  // demo sandbox if notes ever need more
+  function diagram(src) {
+    const lines = src.split(/\n|;/).map((l) => l.trim()).filter((l) => l && !l.startsWith('%%'))
+    const head = lines.shift()?.match(/^(?:graph|flowchart)\s+(LR|RL|TD|TB|BT)\s*$/i)
+    if (!head) return ''
+    const dir = head[1].toUpperCase(), nodes = new Map(), edges = []
+    const NODE = /^([A-Za-z0-9_]+)\s*(?:\(\((.*?)\)\)|\(\[(.*?)\]\)|\[(.*?)\]|\((.*?)\)|\{(.*?)\})?/
+    // the `-- label -->` label starts and ends with a non-space: `(.+?)\s+-->` backtracks quadratically on long lines
+    const EDGE = /^(-->|---|-\.->|==>|--\s+(\S(?:.*?\S)?)\s+-->)\s*(?:\|([^|]*)\|)?\s*/
+    const node = (t) => {
+      const m = t.match(NODE)
+      if (!m) return null
+      const n = nodes.get(m[1]) ?? { id: m[1], label: m[1], shape: 'box' }, label = m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6]
+      if (label != null) {
+        n.label = label.replace(/^"(.*)"$/, '$1').slice(0, 40)
+        n.shape = m[2] != null ? 'circle' : m[3] != null || m[5] != null ? 'round' : m[6] != null ? 'diamond' : 'box'
+      }
+      nodes.set(n.id, n)
+      return { id: n.id, rest: t.slice(m[0].length).trim() }
+    }
+    for (const l of lines) {
+      if (/^(style|classDef|class|linkStyle|click|subgraph|end|direction)\b/.test(l)) continue
+      let a = node(l)
+      if (!a) return ''
+      while (a.rest) {
+        const e = a.rest.match(EDGE), b = e && node(a.rest.slice(e[0].length))
+        if (!b) return ''
+        edges.push({ from: a.id, to: b.id, label: (e[3] ?? e[2] ?? '').slice(0, 30), kind: e[1].startsWith('-.') ? 'dashed' : e[1] === '==>' ? 'bold' : '', arrow: e[1] !== '---' })
+        a = b
+      }
+      if (nodes.size > 60 || edges.length > 120) return ''
+    }
+    if (!nodes.size) return ''
+    // rank: longest path from the sources; a cycle stops growing once a rank reaches the node count
+    const rank = new Map([...nodes.keys()].map((k) => [k, 0]))
+    for (let pass = 0; pass < nodes.size; pass++)
+      for (const e of edges) if (e.from !== e.to && rank.get(e.from) + 1 > rank.get(e.to) && rank.get(e.from) + 1 < nodes.size) rank.set(e.to, rank.get(e.from) + 1)
+    const ranks = []
+    for (const n of nodes.values()) {
+      n.w = Math.max(64, n.label.length * 7.2 + 26) + (n.shape === 'diamond' ? 24 : 0)
+      n.h = n.shape === 'diamond' ? 46 : n.shape === 'circle' ? Math.max(40, n.w * 0.5) : 34
+      ;(ranks[rank.get(n.id)] ??= []).push(n)
+    }
+    const across = dir === 'LR' || dir === 'RL', GAP = across ? 64 : 48, STEP = across ? 22 : 28
+    let along = 0, span = 0
+    const sizes = ranks.map((r) => {
+      const thick = Math.max(...r.map((n) => (across ? n.w : n.h)))
+      const len = r.reduce((t, n) => t + (across ? n.h : n.w) + STEP, -STEP)
+      span = Math.max(span, len)
+      return { thick, len }
+    })
+    ranks.forEach((r, i) => {
+      let at = (span - sizes[i].len) / 2
+      for (const n of r) {
+        const mid = along + sizes[i].thick / 2, size = across ? n.h : n.w
+        if (across) { n.x = mid; n.y = at + size / 2 } else { n.x = at + size / 2; n.y = mid }
+        at += size + STEP
+      }
+      along += sizes[i].thick + GAP
+    })
+    along -= GAP
+    const P = 12, W = Math.ceil((across ? along : span) + P * 2), H = Math.ceil((across ? span : along) + P * 2)
+    for (const n of nodes.values()) {
+      n.x += P; n.y += P
+      if (dir === 'RL') n.x = W - n.x
+      if (dir === 'BT') n.y = H - n.y
+    }
+    // an edge runs between the two centres, cut where it leaves each node's box
+    const cut = (n, dx, dy) => { const t = Math.min(n.w / 2 / (Math.abs(dx) || 1e-9), n.h / 2 / (Math.abs(dy) || 1e-9)); return [n.x + dx * t, n.y + dy * t] }
+    const f = (v) => Math.round(v * 10) / 10
+    const lines2 = edges.map((e) => {
+      const a = nodes.get(e.from), b = nodes.get(e.to), dx = b.x - a.x, dy = b.y - a.y
+      if (a === b) return ''
+      const [x1, y1] = cut(a, dx, dy), [x2, y2] = cut(b, -dx, -dy)
+      const label = e.label ? `<text class="r42-dg-elabel" x="${f((x1 + x2) / 2)}" y="${f((y1 + y2) / 2 - 6)}" text-anchor="middle">${esc(e.label)}</text>` : ''
+      // the arrowhead is a triangle of its own, not a <marker>: a marker's id would repeat in a copied note (the
+      // extension's summary pop) and point at the original, which draws nothing while its box is collapsed
+      const d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d, bx = x2 - ux * 8, by = y2 - uy * 8
+      const head = e.arrow ? `<polygon class="r42-dg-arrow" points="${f(x2)},${f(y2)} ${f(bx - uy * 4)},${f(by + ux * 4)} ${f(bx + uy * 4)},${f(by - ux * 4)}"/>` : ''
+      return `<line class="r42-dg-edge ${e.kind}" x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}"/>${head}${label}`
+    }).join('')
+    const shapes = [...nodes.values()].map((n) => {
+      const { x, y, w, h } = n
+      const shape = n.shape === 'diamond' ? `<polygon points="${f(x)},${f(y - h / 2)} ${f(x + w / 2)},${f(y)} ${f(x)},${f(y + h / 2)} ${f(x - w / 2)},${f(y)}"/>`
+        : n.shape === 'circle' ? `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(w / 2)}" ry="${f(h / 2)}"/>`
+        : `<rect x="${f(x - w / 2)}" y="${f(y - h / 2)}" width="${f(w)}" height="${f(h)}" rx="${n.shape === 'round' ? 17 : 5}"/>`
+      return `<g class="r42-dg-node">${shape}<text x="${f(x)}" y="${f(y)}" text-anchor="middle" dominant-baseline="central">${esc(n.label)}</text></g>`
+    }).join('')
+    return `<div class="r42-diagram"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="diagram">${lines2}${shapes}</svg></div>`
+  }
+
+  // Two images side by side named or captioned before / after become one image with a drag handle. Runs on rendered
+  // nodes (the web app's notes, the extension's parsed notes) since the handle needs a listener.
+  // alt text starting with the word, or a file named …-before.png / …_after.jpg
+  const named = (img, word) => new RegExp(`^${word}\\b`, 'i').test(img.alt) || new RegExp(`(^|[-_./])${word}\\.\\w+$`, 'i').test(img.dataset.r42Src ?? '')
+  // delegated, so a copied compare (the extension's summary pop is a clone, without listeners) still moves
+  globalThis.document?.addEventListener('input', (e) => {
+    if (e.target.classList?.contains('r42-cmp-range')) e.target.parentElement.style.setProperty('--x', `${e.target.value}%`)
+  })
+  globalThis.r42Compare = (root) => {
+    for (const before of root.querySelectorAll('img')) {
+      let after = before.nextSibling
+      while (after && ((after.nodeType === 3 && !after.textContent.trim()) || after.nodeName === 'BR')) after = after.nextSibling
+      if (after?.nodeName !== 'IMG' || !named(before, 'before') || !named(after, 'after') || before.closest('.r42-compare')) continue
+      const doc = before.ownerDocument, box = doc.createElement('span'), range = doc.createElement('input')
+      box.className = 'r42-compare'
+      box.style.setProperty('--x', '50%')
+      range.type = 'range'; range.min = '0'; range.max = '100'; range.value = '50'; range.className = 'r42-cmp-range'
+      range.setAttribute('aria-label', 'Drag to compare before and after')
+      const tag = (cls, text) => { const t = doc.createElement('span'); t.className = cls; t.textContent = text; return t }
+      before.before(box)
+      before.classList.add('r42-cmp-before'); after.classList.add('r42-cmp-after')
+      // before first, so galleries and screen readers keep the pair's order; positioned, it still paints over after
+      box.append(before, after, range, tag('r42-cmp-l', 'before'), tag('r42-cmp-r', 'after'))
+    }
   }
 
   // CSV (RFC 4180 quotes) → an escaped table; for previews of attached .csv files

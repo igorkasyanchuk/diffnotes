@@ -17,7 +17,10 @@ export const Code = ({ text, prompt }: { text: string; prompt?: boolean }) =>
 const BENEFITS: [string, string][] = [
   ['review faster', 'Reviewers read why each block changed before reading how. Less back-and-forth, fewer “what does this do?” comments.'],
   ['context from the author', 'The agent that wrote the code explains it while it still remembers why: decisions, trade-offs, what was left out.'],
-  ['screenshots and live demos', 'Before/after images next to the lines that caused them, and small HTML demos you can click, locked in a sandbox.'],
+  ['screenshots and live demos', 'Images next to the lines that caused them, a before / after slider for UI changes, and small HTML demos you can click, locked in a sandbox.'],
+  ['where to look hardest', 'The agent flags the risky parts (money, auth, migrations) and the boring ones. Reviewers get a short list at the top and jump straight there.'],
+  ['diagrams in the diff', 'A flow or a state change drawn right above the code that implements it, from a Mermaid flowchart the agent writes. No library, no network.'],
+  ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones. The author removes any note in place.'],
   ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
   ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools. Connect several servers in one browser for different teams or clients.'],

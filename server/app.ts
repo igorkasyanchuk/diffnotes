@@ -24,6 +24,7 @@ const MAX_PULL = Number(process.env.MAX_PULL_MB ?? 20) * MB
 const MAX_FILES = 30 // per pull request
 const MAX_BODY = Number(process.env.MAX_BODY_KB ?? 1024) * 1024
 const MAX_ANNOTATIONS = 500
+const RISKS = ['low', 'medium', 'high'] // an annotation's optional risk: where reviewers should look hardest
 const MAX_ACCOUNT = Number(process.env.MAX_ACCOUNT_MB ?? 1024) * MB // files of all of an account's pull requests
 const MAX_PULLS = Number(process.env.MAX_PULLS ?? 1000) // live pull requests per account
 const INVITE_DAYS = 7
@@ -161,7 +162,7 @@ async function startSession(c: Context, userId: string) {
 // ponytail: in-memory, per process; 1 failure per second per IP+email, 20 per email per 10 minutes.
 // Stale keys are swept once the map passes 10k entries, so sprayed emails can't grow it forever.
 const failures = new Map<string, number[]>()
-function throttle(key: string, limit: number, windowMs: number) {
+export function throttle(key: string, limit: number, windowMs: number) {
   const t = Date.now()
   if (failures.size > 10_000) for (const [k, l] of failures) if (!l.length || t - l[l.length - 1] > 600_000) failures.delete(k)
   const list = (failures.get(key) ?? []).filter((x) => t - x < windowMs)
@@ -169,7 +170,7 @@ function throttle(key: string, limit: number, windowMs: number) {
   return list.length >= limit
 }
 // re-reads the key: a sweep in a later throttle() call may have dropped an entry that was still empty
-const recordFailure = (key: string) => failures.set(key, [...(failures.get(key) ?? []), Date.now()])
+export const recordFailure = (key: string) => failures.set(key, [...(failures.get(key) ?? []), Date.now()])
 // Per IP + email is the tight budget. Per IP stops one client spraying emails; per email (loose) stops many IPs guessing
 // one password, and is high enough that a stranger can't lock a known user out without a lot of addresses.
 const loginKeys = (c: Context, email: string) => { const ip = clientIp(c); return [`ie:${ip}:${email}`, `i:${ip}`, `e:${email}`] }
@@ -272,7 +273,7 @@ app.delete('/api/tokens/:id', (c) => {
 })
 
 // Roles in an account: owner (made it, one per account), admin (invites, manages people and repositories), member
-// (reads and uploads). A super admin (users.admin) runs the server and may open and manage every account.
+// (reads, uploads, removes the notes it uploaded). A super admin (users.admin) runs the server and may open and manage every account.
 // Not a member and not a super admin: 404, other people's accounts don't exist for you.
 const memberRole = (accountId: string, userId: string) =>
   (db.prepare('select role from memberships where account_id = ? and user_id = ?').get(accountId, userId) as { role: string } | undefined)?.role
@@ -456,17 +457,23 @@ app.delete('/api/repositories/:id', async (c) => {
 
 // --- pull request annotations (the skill writes, the extension and the web app read)
 
-type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; updated_at: string; expires_at: string; full_name: string; account_id: string }
-const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.updated_at, p.expires_at, r.full_name, r.account_id
+type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; updated_at: string; expires_at: string; full_name: string; account_id: string; user_id: string | null }
+const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.updated_at, p.expires_at, r.full_name, r.account_id, p.user_id
   from pulls p join repositories r on r.id = p.repository_id`
 
-function pullOut(p: Pull) {
-  const annotations = db.prepare('select path, line, end_line, side, title, body from annotations where pull_id = ? order by position').all(p.id)
+// Removing notes is for whoever uploaded them (the PR's author, through their agent) and the account's owner and admins;
+// other members read. can_delete tells the extension and the web app whether to offer it. role() first, always: an
+// uploader who has left the account gets 404 like anyone else outside it.
+const canRemove = (p: Pull, user: User) => canManage(role(p.account_id, user)) || p.user_id === user.id
+const requireRemove = (p: Pull, user: User) => { if (!canRemove(p, user)) fail(403, 'Only the PR\'s uploader or an account admin can remove its notes') }
+
+function pullOut(p: Pull, user: User) {
+  const annotations = db.prepare('select id, path, line, end_line, side, title, body, risk from annotations where pull_id = ? order by position').all(p.id)
   const files = (db.prepare('select name, type, size from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number }[])
     .map((f) => ({ ...f, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary,
-    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
+    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files, can_delete: canRemove(p, user),
   }
 }
 
@@ -486,23 +493,34 @@ const findPull = (c: Context<Env>) => {
 }
 
 app.get('/api/v1/me', (c) => c.json({ user: c.get('user') }))
-app.get(PULL_PATH, (c) => c.json(pullOut(findPull(c))))
-const pullById = (c: Context<Env>) => {
-  const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('id') ?? '') as Pull | undefined
+app.get(PULL_PATH, (c) => c.json(pullOut(findPull(c), c.get('user'))))
+const pullById = (c: Context<Env>, id = c.req.param('id') ?? '') => {
+  const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(id) as Pull | undefined
   if (!p) fail(404, 'Not found')
   role(p!.account_id, c.get('user'))
   return p!
 }
-app.get('/api/pulls/:id', (c) => c.json(pullOut(pullById(c))))
-// the web app's "delete notes": by id, so it's always the PR on the page even when its name is connected in several accounts
-app.delete('/api/pulls/:id', async (c) => {
-  await dropPulls([pullById(c).id])
-  return c.json({ ok: true })
-})
-app.delete(PULL_PATH, async (c) => {
-  const p = findPull(c)
+app.get('/api/pulls/:id', (c) => c.json(pullOut(pullById(c), c.get('user'))))
+const removeAll = async (c: Context<Env>, p: Pull) => {
+  requireRemove(p, c.get('user'))
   await dropPulls([p.id])
   return c.json({ ok: true })
+}
+// "delete notes" (web app): by id, so it's always the PR on the page even when its name is connected in several accounts
+app.delete('/api/pulls/:id', (c) => removeAll(c, pullById(c)))
+// one note, from the extension's "remove" on GitHub, GitLab or Bitbucket; the PR and its files stay
+app.delete('/api/v1/annotations/:id{[0-9]+}', (c) => {
+  const id = Number(c.req.param('id'))
+  const a = db.prepare('select pull_id from annotations where id = ?').get(id) as { pull_id: string } | undefined
+  requireRemove(pullById(c, a?.pull_id ?? ''), c.get('user'))
+  db.prepare('delete from annotations where id = ?').run(id)
+  return c.json({ ok: true })
+})
+// ?id=<pull id>: the extension's "remove all notes" names the exact PR it showed (the name can be in several accounts)
+app.delete(PULL_PATH, (c) => {
+  const p = findPull(c)
+  if (c.req.query('id') && c.req.query('id') !== p.id) fail(409, 'These notes changed since the page loaded: reload it')
+  return removeAll(c, p)
 })
 
 // cut from the front, so a long name keeps the extension fileType() checked (else `….html.png` would be stored as `….html`)
@@ -559,7 +577,7 @@ app.put(PULL_PATH, async (c) => {
   if (list.length > MAX_ANNOTATIONS) fail(413, `At most ${MAX_ANNOTATIONS} annotations`)
   if (files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request`)
   if (files.some((f) => f.size > MAX_FILE)) fail(413, `Files up to ${MAX_FILE / MB}MB each`)
-  if (files.reduce((n, f) => n + f.size, 0) > MAX_PULL) fail(413, `Up to ${MAX_PULL / MB}MB of files per pull request`)
+  // all files together can't pass MAX_PULL: bodyLimit on /api/* already refuses a bigger request
   // read and check every file before anything changes (not even a new repository is connected for a refused upload);
   // also the last await before the transaction, so two uploads can't both see the pull request as new
   const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
@@ -592,7 +610,8 @@ app.put(PULL_PATH, async (c) => {
     const line = Number.isInteger(a.line) && (a.line as number) > 0 ? a.line as number : null
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
     return [id, str(a.path, 500) || fail(400, `annotations[${i}].path is required`), line, end,
-      a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i] as const
+      a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i,
+      RISKS.includes(a.risk as string) ? a.risk as string : null] as const
   })
   // the previous upload's files go once the new rows are in, then the new files are written under the current backend
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ?').all(id) as { pull: string; name: string; backend: string }[]
@@ -608,7 +627,7 @@ app.put(PULL_PATH, async (c) => {
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload!.title, 300), str(payload!.head_sha, 64),
         link(String(payload!.summary ?? '').slice(0, 20_000)), user.id, now(), now(), daysFromNow(RETENTION_DAYS))
     }
-    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position) values (?, ?, ?, ?, ?, ?, ?, ?)')
+    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r)
     db.prepare('delete from files where pull_id = ?').run(id)
     const add = db.prepare('insert into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, ?)')

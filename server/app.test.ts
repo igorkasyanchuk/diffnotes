@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import '../extension/markdown.js'
+import { client, png } from './testkit.ts'
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-'))
 process.env.ADMIN_EMAIL = 'admin@example.com'
@@ -10,25 +11,9 @@ process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
 const { db } = await import('./db.ts')
 const { fromCloudflare, purge, repoName } = await import('./app.ts')
-// a real PNG signature plus padding up to n bytes
-const png = (n = 16) => { const b = new Uint8Array(n); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b }
+const { call, login } = client(app)
 
 // one sequential story: later tests reuse what earlier ones created
-type Opts = { cookie?: string; token?: string; body?: unknown; form?: FormData; method?: string; headers?: Record<string, string> }
-async function call(url: string, { cookie, token, body, form, method, headers: extra }: Opts = {}) {
-  const headers: Record<string, string> = { ...extra }
-  if (cookie) headers.cookie = cookie
-  if (token) headers.authorization = `Bearer ${token}`
-  if (body !== undefined) headers['content-type'] = 'application/json'
-  const res = await app.request(url, { method: method ?? (body || form ? 'POST' : 'GET'), headers, body: form ?? (body === undefined ? undefined : JSON.stringify(body)) })
-  return { status: res.status, res, data: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() }
-}
-const login = async (email: string, password: string) => {
-  const r = await call('/api/login', { body: { email, password } })
-  expect(r.status).toBe(200)
-  return r.res.headers.get('set-cookie')!.split(';')[0]
-}
-
 let admin = '', token = '', accountId = '', member = '', pullId = ''
 
 describe('reviews42', () => {
@@ -142,6 +127,23 @@ describe('reviews42', () => {
     expect((await call(`/api/accounts/${mine.id}`, { cookie: outsider, method: 'DELETE' })).status).toBe(200)
   })
 
+  it('removes single notes and keeps risk levels', async () => {
+    const put = await call('/api/v1/pulls/acme/web/78', { token, method: 'PUT', body: { annotations: [
+      { path: 'a.ts', body: 'keep', risk: 'high' }, { path: 'b.ts', line: 3, body: 'stale', risk: 'nonsense' }] } })
+    const [keep, stale] = (await call('/api/v1/pulls/acme/web/78', { token })).data.annotations
+    expect([keep.risk, stale.risk]).toEqual(['high', null])
+    expect((await call(`/api/v1/annotations/${stale.id}`, { cookie: member, method: 'DELETE' })).status).toBe(403)
+    expect((await call(`/api/v1/annotations/${stale.id}`, { token, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/v1/annotations/${stale.id}`, { token, method: 'DELETE' })).status).toBe(404)
+    expect((await call('/api/v1/pulls/acme/web/78', { token })).data.annotations.map((a: { body: string }) => a.body)).toEqual(['keep'])
+    // a member who uploads the notes is their uploader, and may remove them
+    expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body: { annotations: [{ path: 'a.ts', body: 'mine' }] } })).status).toBe(200)
+    const mine = (await call('/api/v1/pulls/acme/web/78', { cookie: member })).data
+    expect(mine.can_delete).toBe(true)
+    expect((await call(`/api/v1/annotations/${mine.annotations[0].id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
+  })
+
   it('deletes a pull request\'s notes by id, for members of its account only', async () => {
     const put = await call('/api/v1/pulls/acme/web/77', { token, method: 'PUT', body: { annotations: [{ path: 'a.ts', body: 'stale' }] } })
     expect(put.status).toBe(200)
@@ -149,7 +151,16 @@ describe('reviews42', () => {
     const { token: t } = (await call(`/api/accounts/${other.id}/invites`, { cookie: admin, body: { email: 'else@example.com' } })).data
     const stranger = (await call(`/api/invites/${t}/accept`, { body: { password: 'stranger-pass' } })).res.headers.get('set-cookie')!.split(';')[0]
     expect((await call(`/api/pulls/${put.data.id}`, { cookie: stranger, method: 'DELETE' })).status).toBe(404)
-    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    // an uploader who has left the account is outside it like anyone else
+    const [note] = (await call('/api/v1/pulls/acme/web/77', { token })).data.annotations
+    db.prepare('update pulls set user_id = ? where id = ?').run((await call('/api/me', { cookie: stranger })).data.user.id, put.data.id)
+    expect((await call(`/api/v1/annotations/${note.id}`, { cookie: stranger, method: 'DELETE' })).status).toBe(404)
+    // a member who didn't upload them reads but can't remove; the uploader (or an admin) can
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member })).data.can_delete).toBe(false)
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(403)
+    expect((await call('/api/v1/pulls/acme/web/77', { token })).data.can_delete).toBe(true)
+    expect((await call('/api/v1/pulls/acme/web/77?id=not-this-one', { token, method: 'DELETE' })).status).toBe(409)
+    expect((await call(`/api/v1/pulls/acme/web/77?id=${put.data.id}`, { token, method: 'DELETE' })).status).toBe(200)
     expect((await call('/api/v1/pulls/acme/web/77', { token })).status).toBe(404)
     expect((await call(`/api/accounts/${other.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
     db.prepare('delete from users where email = ?').run('else@example.com')
