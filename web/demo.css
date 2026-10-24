@@ -59,12 +59,12 @@
 .dm-nh b { flex: 1; }
 .dm-where { color: #9198a1; font: 11px ui-monospace, monospace; }
 .dm-nb { padding: 2px 14px 10px; color: #c9d1d9; }
-.dm-thumbs { display: flex; gap: 10px; margin-top: 8px; }
+.dm-thumbs { display: flex; width: fit-content; gap: 10px; margin-top: 8px; }
 .dm-thumb { display: block; height: 96px; border-radius: 6px; border: 1px solid #30363d; overflow: hidden; }
 .dm-thumb .dm-shot { transform: scale(.32); transform-origin: top left; }
 .dm-thumb:has(.mobile) { width: 54px; }
 .dm-thumb:not(:has(.mobile)) { width: 150px; }
-.dm-x-shots .dm-thumb.hit { animation: dm-hit .5s 1.2s both; }
+.dm-x-shots .dm-thumb.hit { animation: dm-hit .5s 2.8s both; }
 @keyframes dm-hit { 50% { box-shadow: 0 0 0 4px rgba(232, 98, 42, .6); } 100% { box-shadow: 0 0 0 2px #e8622a; } }
 
 /* the live demo inside a note: the cursor picks express in scene 3 and the total follows */
@@ -116,25 +116,25 @@
 
 /* the gallery */
 .dm-gallery { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; background: rgba(1, 4, 9, .88); opacity: 0; pointer-events: none; transition: opacity .4s; }
-.dm-x-shots .dm-gallery { opacity: 1; transition-delay: 1.6s; }
+.dm-x-shots .dm-gallery { opacity: 1; transition-delay: 3.2s; }
 .dm-gallery-track { position: relative; width: 640px; height: 400px; }
 .dm-gallery-track .dm-shot { position: absolute; left: 50%; top: 50%; transition: opacity .4s, transform .4s; }
 .dm-gallery-track .dm-shot.mobile { transform: translate(-50%, -50%); }
 .dm-gallery-track .dm-shot:not(.mobile) { transform: translate(-30%, -50%) scale(.96); opacity: 0; }
-.dm-x-shots .dm-gallery-track .dm-shot.mobile { animation: dm-out .4s 3.9s forwards; }
-.dm-x-shots .dm-gallery-track .dm-shot:not(.mobile) { animation: dm-in2 .4s 4s forwards; }
+.dm-x-shots .dm-gallery-track .dm-shot.mobile { animation: dm-out .4s 5.5s forwards; }
+.dm-x-shots .dm-gallery-track .dm-shot:not(.mobile) { animation: dm-in2 .4s 5.6s forwards; }
 @keyframes dm-out { to { opacity: 0; transform: translate(-70%, -50%) scale(.96); } }
 @keyframes dm-in2 { to { opacity: 1; transform: translate(-50%, -50%); } }
 .dm-cap { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); padding: 4px 14px; border-radius: 999px; background: rgba(0, 0, 0, .6); font-size: 12px; }
 .dm-cap-b { display: none; }
-.dm-x-shots .dm-cap-a { animation: dm-gone 0s 4s forwards; }
-.dm-x-shots .dm-cap-b { animation: dm-show 0s 4s forwards; }
+.dm-x-shots .dm-cap-a { animation: dm-gone 0s 5.6s forwards; }
+.dm-x-shots .dm-cap-b { animation: dm-show 0s 5.6s forwards; }
 @keyframes dm-gone { to { display: none; } }
 @keyframes dm-show { to { display: inline; } }
 .dm-key { position: absolute; top: 50%; left: 28px; width: 40px; height: 40px; margin-top: -20px; border-radius: 8px; display: grid; place-items: center;
   border: 1px solid #3d444d; border-bottom-width: 3px; color: #c9d1d9; font-size: 18px; }
 .dm-key.r { left: auto; right: 28px; }
-.dm-x-shots .dm-key.r { animation: dm-press .3s 3.7s; }
+.dm-x-shots .dm-key.r { animation: dm-press .3s 5.3s; }
 @keyframes dm-press { 50% { transform: translateY(2px); border-bottom-width: 1px; background: #e8622a; color: #fff; } }
 
 /* the shot drawn in a note and in the gallery: a tiny checkout */
@@ -190,7 +190,8 @@
   background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 24'%3E%3Cpath d='M1 1v19l5-5 3.5 7 3-1.5L9 13.5h7z' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E");
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
 .dm-cursor i { position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #ff8a3d; opacity: 0; }
-.dm-x-shots .dm-cursor i, .dm-x-live .dm-cursor i, .dm-x-off .dm-cursor i { animation: dm-ripple .5s 1.3s; }
+.dm-x-live .dm-cursor i, .dm-x-off .dm-cursor i { animation: dm-ripple .5s 1.3s; }
+.dm-x-shots .dm-cursor i { animation: dm-ripple .5s 2.9s; } /* the page and the arrow first, then the click */
 @keyframes dm-ripple { 0% { opacity: 1; transform: scale(.3); } 100% { opacity: 0; transform: scale(1.6); } }
 .dm-x-agent .dm-cursor, .dm-x-end .dm-cursor { opacity: 0; }
 

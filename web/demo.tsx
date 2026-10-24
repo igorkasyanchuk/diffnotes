@@ -9,7 +9,7 @@ import './demo.css'
 type Target = 'box' | 'noteA' | 'thumbs' | 'live' | 'switch' | 'term'
 // opens on what words can't show: screenshots and a live demo, then the notes themselves
 const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' | 'express'; label?: string; caption: ReactNode }[] = [
-  { name: 'shots', ms: 5400, at: 'thumbs', click: 'thumb', label: 'Screenshots open in a gallery', caption: <>Mobile and desktop shots right in the diff; <b>← →</b> to flip.</> },
+  { name: 'shots', ms: 7000, at: 'thumbs', click: 'thumb', label: 'Screenshots open in a gallery', caption: <>Mobile and desktop shots right in the diff; <b>← →</b> to flip.</> },
   { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
   { name: 'summary', ms: 4200, at: 'box', label: 'The whole PR in two lines', caption: <>Your agent's <b>summary</b> sits above the diff, with links to its reports.</> },
   { name: 'note', ms: 4200, at: 'noteA', label: 'The why, next to the change', caption: <>Every changed block gets <b>a plain-language note</b> on its own lines.</> },
@@ -89,8 +89,9 @@ export function Demo() {
       const el = s.at && els.current[s.at]
       let scroll = 0
       if (el && body.contains(el)) {
-        const top = box(el, 0)!.y
-        scroll = Math.max(0, Math.min(top - scr.clientHeight * 0.3, body.offsetTop + body.offsetHeight - scr.clientHeight))
+        // stay at the top of the page while the feature and its label fit; else bring it up to a third of the screen
+        const { y, h } = box(el, 0)!
+        if (y + h + 130 > scr.clientHeight) scroll = Math.max(0, Math.min(y - scr.clientHeight * 0.3, body.offsetTop + body.offsetHeight - scr.clientHeight))
       }
       const hl = box(el, scroll), c = s.click && box(els.current[s.click], scroll)
       setView({ scroll, hl, cursor: c ? { x: c.x + c.w * 0.55, y: c.y + c.h * 0.6 } : null, below: !hl || hl.y + hl.h + 110 < scr.clientHeight })
@@ -123,14 +124,6 @@ export function Demo() {
                 {' '}<span className="dm-a">test report</span> · <span className="dm-a">timings.csv</span></div>
             </div>
             <div className="dm-file">
-              <div className="dm-fh">⌄ app/checkout.ts <span className="add">+3</span> <span className="del">−1</span></div>
-              <Diff rows={FILE_A} notes={{
-                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45">
-                  An empty cart used to reach the payment provider with $0. It now returns early; express orders pay the fee.
-                </Note>,
-              }} />
-            </div>
-            <div className="dm-file">
               <div className="dm-fh">⌄ app/ShippingPicker.tsx <span className="add">+3</span></div>
               <Diff rows={FILE_B} notes={{
                 1: <Note title="Shipping picker on checkout" where="line 13–15">
@@ -144,6 +137,14 @@ export function Demo() {
                       <span className="dm-total">Total <b className="t1">$40.00</b><b className="t2">$47.00</b></span>
                     </div>
                   </div>
+                </Note>,
+              }} />
+            </div>
+            <div className="dm-file">
+              <div className="dm-fh">⌄ app/checkout.ts <span className="add">+3</span> <span className="del">−1</span></div>
+              <Diff rows={FILE_A} notes={{
+                2: <Note refEl={ref('noteA')} title="Charge the express fee, stop on empty carts" where="line 43–45">
+                  An empty cart used to reach the payment provider with $0. It now returns early; express orders pay the fee.
                 </Note>,
               }} />
             </div>
