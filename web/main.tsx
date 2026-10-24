@@ -161,7 +161,7 @@ type Me = { user: User; accounts: { id: string; name: string; role: string }[]; 
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />reviews42<span className="cursor">_</span></Link>
 const Footer = () => <footer className="foot">
-  <span>reviews42 · self-hosted PR annotations</span>
+  <span>reviews42 · self-hosted PR annotations · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
   <a href="https://github.com/igorkasyanchuk/reviews42" target="_blank" rel="noreferrer">source</a>
 </footer>

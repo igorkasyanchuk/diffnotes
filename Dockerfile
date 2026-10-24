@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY package.json ./
+COPY package.json LICENSE ./
 COPY server ./server
 COPY skill ./skill
 VOLUME /data
