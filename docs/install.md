@@ -18,7 +18,8 @@ docker run -d --name reviews42 -p 3000:3000 -v reviews42:/data \
 - Keep `/data` on a persistent volume: it holds the database, uploads (when stored on disk) and the generated secrets.
 - Put it behind HTTPS (Caddy, Traefik, Coolify, Cloudflare…) and set `PUBLIC_URL` to that `https://` origin: links for
   agents and the `Secure` cookie flag depend on it.
-- Health check: `GET /healthz` (the image's `HEALTHCHECK` already calls it).
+- Health check: `GET /healthz` (the image's `HEALTHCHECK` already calls it). With `CLOUDFLARE_ONLY=1` it answers only
+  local callers (the container itself, the proxy), so monitor the public URL instead.
 
 ### Coolify
 
@@ -61,7 +62,7 @@ It prints a new random password and signs that user out everywhere; their agent 
 | `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |
-| `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing) and `cf-connecting-ip` is trusted as the client |
+| `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing). Not with Cloudflare Tunnel, which already hides it |
 | `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
 
 File storage (disk or an S3-compatible bucket) is not an environment variable: a super admin sets it on `/admin`, see
@@ -73,7 +74,8 @@ File storage (disk or an S3-compatible bucket) is not an environment variable: a
 - Back up the whole `/data` volume (Coolify: the app's Backups → add the volume, daily, enable S3). With S3 storage,
   uploads live in the bucket; the volume still holds the database and the encryption key that unlocks the S3 secret.
   Archives taken while the app runs can catch the live database mid-write, so the app also writes a consistent copy
-  every hour to `/data/backup/reviews42.db`: restore from that one.
+  every hour to `/data/backup/reviews42.db`: restore from that one (app stopped: copy it over `/data/reviews42.db` and
+  delete `reviews42.db-wal` and `reviews42.db-shm`, or SQLite replays the archive's stale log into it).
 - An hourly job deletes expired PRs, their files, old sessions and expired invitations.
 
 ## Local development

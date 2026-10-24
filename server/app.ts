@@ -49,21 +49,34 @@ type Env = { Variables: { user: User } }
 export const app = new Hono<Env>()
 
 app.use(secureHeaders({ referrerPolicy: 'no-referrer' }))
-// CLOUDFLARE_ONLY=1: only Cloudflare's edge may connect (Cloudflare's published ranges, cloudflare.com/ips), so the
-// server's own address serves nothing and Cloudflare can't be bypassed. /healthz stays open for the container healthcheck.
+// CLOUDFLARE_ONLY=1: only Cloudflare's edge may connect, so the server's own address serves nothing and Cloudflare
+// can't be skipped. /healthz stays open to local peers (the container healthcheck).
 const CLOUDFLARE_ONLY = process.env.CLOUDFLARE_ONLY === '1'
-const CLOUDFLARE = new BlockList()
-for (const r of ('173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 ' +
-  '188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 ' +
-  '2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32').split(' ')) {
-  const [ip, bits] = r.split('/')
-  CLOUDFLARE.addSubnet(ip, Number(bits), isIP(ip) === 6 ? 'ipv6' : 'ipv4')
+const ranges = (list: string) => {
+  const b = new BlockList(), family = (ip: string): 'ipv4' | 'ipv6' => (isIP(ip) === 6 ? 'ipv6' : 'ipv4')
+  for (const r of list.split(' ')) { const [ip, bits] = r.split('/'); b.addSubnet(ip, Number(bits), family(ip)) }
+  return (ip: string) => isIP(ip) > 0 && b.check(ip, family(ip))
 }
-const peerIp = (c: Context) => (c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim() ||
-  (() => { try { return getConnInfo(c).remote.address ?? '' } catch { return '' } })()).replace(/^::ffff:(?=\d+\.)/, '')
-export const fromCloudflare = (ip: string) => isIP(ip) > 0 && CLOUDFLARE.check(ip, isIP(ip) === 6 ? 'ipv6' : 'ipv4')
-app.use('*', async (c, next) => {
-  if (CLOUDFLARE_ONLY && c.req.path !== '/healthz' && !fromCloudflare(peerIp(c))) return c.text('Forbidden', 403)
+// ponytail: Cloudflare's ranges as published at cloudflare.com/ips; a range they add answers 403 until it's added here
+export const fromCloudflare = ranges('173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 ' +
+  '108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 ' +
+  '104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 ' +
+  '2a06:98c0::/29 2c0f:f248::/32')
+// loopback, private, shared (100.64/10: Tailscale, some platforms' edges) and link-local networks: where a proxy in
+// front of us (Traefik, nginx, Caddy, a platform's router) or the healthcheck connects from
+const isLocal = ranges('127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 ::1/128 fc00::/7 fe80::/10')
+// The peer: the socket, or the last X-Forwarded-For entry when the socket is a local proxy (the entry it appended;
+// earlier ones, and the header from anyone else, are whatever the client sent).
+// ponytail: a proxy on a public address isn't trusted; a TRUST_PROXY setting if one shows up
+const peerIp = (c: Context) => {
+  let socket = ''
+  try { socket = getConnInfo(c).remote.address ?? '' } catch {}
+  const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim()
+  return (forwarded && isLocal(socket) ? forwarded : socket).replace(/^::ffff:(?=\d+\.)/, '')
+}
+if (CLOUDFLARE_ONLY) app.use('*', async (c, next) => {
+  const ip = peerIp(c)
+  if (!fromCloudflare(ip) && !(c.req.path === '/healthz' && isLocal(ip))) return c.text('Forbidden', 403)
   await next()
 })
 
@@ -162,10 +175,9 @@ const recordFailure = (key: string) => failures.set(key, [...(failures.get(key) 
 const loginKeys = (c: Context, email: string) => { const ip = clientIp(c); return [`ie:${ip}:${email}`, `i:${ip}`, `e:${email}`] }
 const throttled = ([ie, i, e]: string[]) => throttle(ie, 10, 600_000) || throttle(`${ie}:s`, 1, 1000) || throttle(i, 100, 600_000) || throttle(e, 50, 600_000)
 const failed = (keys: string[]) => [...keys, `${keys[0]}:s`].forEach(recordFailure)
-// Behind Cloudflare, cf-connecting-ip is the client; it's only trusted with CLOUDFLARE_ONLY, which also refuses every
-// connection that isn't Cloudflare's. Else the client is the peer: the last X-Forwarded-For entry (the one the proxy in
-// front of us, Traefik or nginx, appended; earlier ones are whatever the client sent), or the socket without a proxy.
-const clientIp = (c: Context) => (CLOUDFLARE_ONLY && c.req.header('cf-connecting-ip')) || peerIp(c)
+// The client: cf-connecting-ip when the peer is Cloudflare (which sets it), else the peer itself. Keyed by the peer
+// behind Cloudflare, every visitor would share a few edge addresses' budgets.
+const clientIp = (c: Context) => { const ip = peerIp(c); return (fromCloudflare(ip) && c.req.header('cf-connecting-ip')) || ip }
 
 app.post('/api/login', async (c) => {
   const body = await json(c)

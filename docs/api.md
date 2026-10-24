@@ -13,7 +13,7 @@ session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make 
 | `GET` | `/api/v1/me` | who the token belongs to |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
-| `GET` | `/healthz` | `ok` when the database answers |
+| `GET` | `/healthz` | `ok` when the database answers (local callers only with `CLOUDFLARE_ONLY=1`) |
 
 `<repository>` is `owner/name` on GitHub (`rails/rails`) and `host/path` on GitLab and Bitbucket:
 `gitlab.com/group/sub/project`, `gitlab.acme.dev/team/app` (self-hosted), `bitbucket.org/team/app`. `<number>` is the

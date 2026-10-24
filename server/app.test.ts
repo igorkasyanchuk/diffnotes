@@ -149,6 +149,20 @@ describe('reviews42', () => {
     expect(fromCloudflare('not an ip')).toBe(false)
   })
 
+  it('throttles logins by the client a local proxy or Cloudflare names, never by a header from anyone else', async () => {
+    // a second failure within a second from the same client and email answers 429
+    const attempt = async (remoteAddress: string, headers: Record<string, string>) => (await app.request('/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ email: 'ip@example.com', password: 'x' }),
+    }, { incoming: { socket: { remoteAddress } } })).status
+    expect(await attempt('172.18.0.2', { 'x-forwarded-for': '203.0.113.1' })).toBe(401)
+    expect(await attempt('::ffff:172.18.0.3', { 'x-forwarded-for': '9.9.9.9, 203.0.113.1' })).toBe(429) // same client, via the proxy
+    expect(await attempt('172.18.0.2', { 'x-forwarded-for': '203.0.113.2' })).toBe(401) // another client
+    expect(await attempt('8.8.8.8', { 'x-forwarded-for': '203.0.113.3' })).toBe(401)
+    expect(await attempt('8.8.8.8', { 'x-forwarded-for': '203.0.113.4', 'cf-connecting-ip': '203.0.113.4' })).toBe(429) // a public peer's headers don't count
+    expect(await attempt('104.16.0.1', { 'cf-connecting-ip': '203.0.113.5' })).toBe(401)
+    expect(await attempt('104.16.0.1', { 'cf-connecting-ip': '203.0.113.6' })).toBe(401) // Cloudflare names the client
+  })
+
   it('keeps tokens to annotations and files, and cookie writes to this site', async () => {
     expect((await call('/api/tokens', { token })).status).toBe(401)
     expect((await call('/api/tokens', { token, body: { name: 'x' } })).status).toBe(401)
@@ -250,6 +264,7 @@ describe('reviews42', () => {
   it('renders Markdown without letting a later pass rewrite inside generated tags', async () => {
     const md = (globalThis as unknown as { r42Markdown: (s: string) => string }).r42Markdown
     expect(md('![x](/a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
+    expect(md('![x](http://a/[y](/x/onerror=alert``//))').match(/<a href/g)).toHaveLength(1) // the remote image's link, untouched
     expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
     expect(md('![s](https://t.io/p.png)')).not.toContain('<img') // remote images are links: nothing loads from a third party
     // hostile input stays cheap: deep quotes don't overflow the stack, long lines under a pipe don't backtrack

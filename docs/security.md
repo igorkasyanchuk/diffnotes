@@ -19,9 +19,11 @@
   (`Sec-Fetch-Site`), on top of `SameSite=Lax`, so a sibling subdomain can't post to the API either.
 - **Repositories** belong to an account; the same name can be connected in several accounts, and each only ever sees
   its own notes. Only owners and admins connect new ones (also by uploading).
-- **Behind Cloudflare**: with `CLOUDFLARE_ONLY=1` the server answers only Cloudflare's addresses (the last
-  `X-Forwarded-For` entry, added by the proxy in front, is checked against Cloudflare's ranges), so its own IP can't be
-  used to skip Cloudflare. Without it, the client is that last entry; client-sent ones are ignored.
+- **Behind Cloudflare**: with `CLOUDFLARE_ONLY=1` the server answers only Cloudflare's addresses, so its own IP can't be
+  used to skip Cloudflare (another Cloudflare zone pointed at that IP still comes from Cloudflare; Authenticated Origin
+  Pulls closes that). The peer checked is the socket, or the last `X-Forwarded-For` entry when the socket is a proxy on
+  a private network (Traefik, nginx: the entry it appended); client-sent entries are ignored. The client is
+  `cf-connecting-ip` when the peer is Cloudflare, else the peer.
 - **No third parties**: the page loads nothing from elsewhere (self-hosted font, CSP `'self'`), and note images load
   only from the note's server, so no outside service learns who opens the app or reads a note.
 - **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk.

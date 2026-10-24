@@ -32,9 +32,10 @@
 
   // Markdown as nodes, escaped by r42Markdown (only http(s) and relative URLs survive). Parsed in an inert <template>, so
   // no image starts loading before loadImages() points /files/… at the right server (else github.com would get them)
-  function md(text, server) {
+  function md(text, server) { return nodes(r42Markdown(text), server) }
+  function nodes(html, server) {
     const t = document.createElement('template')
-    t.innerHTML = r42Markdown(text)
+    t.innerHTML = html
     loadImages(t.content, server)
     return t.content
   }
@@ -43,7 +44,7 @@
     root.querySelectorAll('img[data-r42-src]').forEach((img) => {
       const src = img.dataset.r42Src
       img.removeAttribute('src')
-      if (!src.startsWith('/files/')) { img.src = src; return }
+      if (!src.startsWith('/files/')) return // only the note's server's files load: another path would hit this site
       file(server, src).then((u) => { if (u) img.src = u })
     })
     // links to attached files open a preview here instead of navigating the page to /files/…
@@ -356,8 +357,7 @@
         }
         body.append(frame)
       } else {
-        body.innerHTML = r42Preview(name, text) // escaped by r42Preview
-        loadImages(body, link.dataset.r42Server)
+        body.append(nodes(r42Preview(name, text), link.dataset.r42Server)) // escaped by r42Preview, inert until loadImages
       }
       doc.append(head, body)
       doc.addEventListener('click', (e) => e.stopPropagation())

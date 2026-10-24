@@ -51,7 +51,8 @@ Re-running after a push replaces the previous notes and files, so it is safe to 
 ````
 
 `line`/`end_line` are new-side line numbers (`side: "LEFT"` for removed lines); no `line` means a file-level card.
-Bodies are Markdown: headings, lists, task lists, tables, quotes, code, links and images. Long notes are cut with
+Bodies are Markdown: headings, lists, task lists, tables, quotes, code, links and images (uploaded ones: an image from
+another site shows as a link). Long notes are cut with
 *show more*, so the point goes first.
 
 ```bash
