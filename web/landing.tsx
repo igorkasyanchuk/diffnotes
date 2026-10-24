@@ -31,7 +31,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
   const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">sign in →</a>
   return <>
     <section className="lp-hero">
-      <div className="lp-tags"><span>free</span><span>self-hosted</span><span>source-available</span><span>GitHub · GitLab · Bitbucket</span></div>
+      <div className="lp-tags"><span>free</span><span>self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
       <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
     </section>
     <Demo />
@@ -50,7 +50,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     <ol className="lp-install">
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>run the server</b></div>
-        <p className="hint">One container with a volume. Free to self-host, also for commercial use (FSL-1.1-ALv2).</p>
+        <p className="hint">One container with a volume. Free and open source (MIT), also for commercial use.</p>
         <Code prompt text={'git clone https://github.com/igorkasyanchuk/reviews42 && cd reviews42 && docker build -t reviews42 . \\\n  && docker run -d -p 3000:3000 -v reviews42:/data -e ADMIN_EMAIL=you@company.com reviews42'} />
         <p className="hint">Or any Docker host (Coolify, Dokku, a VPS) from the Dockerfile. The first admin password is printed in the logs.</p>
       </li>

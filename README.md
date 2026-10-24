@@ -3,7 +3,7 @@
 <h1 align="center">reviews42</h1>
 
 <p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
-Free · self-hosted · source-available · GitHub, GitLab, Bitbucket</p>
+Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
 <p align="center"><img src="docs/images/github-note.png" alt="A Reviews42 note on a GitHub pull request diff" width="860"></p>
 
@@ -80,5 +80,4 @@ Then ask your agent: **“annotate this PR with reviews42”** and open the PR's
 
 ## License
 
-[FSL-1.1-ALv2](LICENSE.md): free to use, modify and self-host, also for commercial work. You may not offer it as a
-competing product or service. Every release becomes Apache-2.0 two years after it ships.
+[MIT](LICENSE): use it, change it, host it, sell it; keep the copyright notice.
