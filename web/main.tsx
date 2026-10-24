@@ -56,6 +56,11 @@ function Shell({ user, children }: { user: User | null; children: ReactNode }) {
       </nav>
     </header>
     <main>{children}</main>
+    <footer className="foot">
+      <span>Reviews42 · self-hosted PR annotations</span>
+      <a href="/skill/SKILL.md">Agent skill</a>
+      <a href="https://github.com/igorkasyanchuk/reviews42" target="_blank" rel="noreferrer">Source</a>
+    </footer>
   </>
 }
 
@@ -95,6 +100,7 @@ function Login() {
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>Sign in</button>
       <p className="hint">No account? Ask a teammate for an invitation link.</p>
+      <p className="hint">Forgot your password? Ask your server admin to run <code>npm run reset-password</code>.</p>
     </form>
   </div>
 }
