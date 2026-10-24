@@ -188,6 +188,13 @@ describe('reviews42', () => {
     const md = (globalThis as unknown as { r42Markdown: (s: string) => string }).r42Markdown
     expect(md('![x](http://a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
     expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
+    // hostile input stays cheap: deep quotes don't overflow the stack, long lines under a pipe don't backtrack
+    expect(md('>'.repeat(5000) + ' x')).toContain('<blockquote>')
+    const t = performance.now()
+    md(`a | b\n${' '.repeat(19_990)}x`)
+    expect(performance.now() - t).toBeLessThan(100)
+    expect(md('| a | b |\n|---|:---:|\n| 1 | 2 |')).toContain('<td>2</td>')
+    expect(md('use `a || b` here\n---')).toBe('<p>use <code>a || b</code> here</p><hr>')
   })
 
   it('reports 500s to BUGSINK_DSN with the route pattern only', async () => {
@@ -301,11 +308,16 @@ describe('reviews42', () => {
     expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, secret: '' } })).status).toBe(200)
     expect((await call('/api/admin/storage/lifecycle', { cookie: admin, body: {} })).data).toMatchObject({ ok: true, days: 31 })
     expect(seen).toContain('PUT /r42-files/?lifecycle=')
+    // a prefix that would leave the key path, and moving the bucket while files live in it, are refused
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, prefix: 'a#b' } })).status).toBe(400)
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'other-bucket' } })).status).toBe(409)
 
+    // back to disk: files already in the bucket still read, and still get deleted with their PR
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 'disk' } })).status).toBe(200)
+    expect((await call(`/files/${up.data.id}/s3.png`, { token })).status).toBe(200)
     db.prepare('update pulls set expires_at = ? where id = ?').run('2000-01-01T00:00:00.000Z', up.data.id)
     expect(await purge()).toBe(1)
     expect(objects.has(key)).toBe(false)
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 'disk' } })).status).toBe(200)
     server.close()
   })
 })

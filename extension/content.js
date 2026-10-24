@@ -99,8 +99,8 @@
         placed.add(i)
       })
     }
-    clampAll()
     renderBox(placed, list)
+    clampAll() // after renderBox, so the summary and the not-placed notes it builds are measured too
   }
 
   // The Reviews42 box sits above the first file of the diff (never over the code), re-attached when GitHub re-renders.
@@ -223,26 +223,30 @@
     return body.childElementCount ? [bar, body] : [bar]
   }
 
-  // Long notes are cut to a few lines with a show more / less toggle. Measured once they are in the page.
+  // Long notes are cut to a few lines with a show more / less toggle. Measured once they are in the page; hidden ones
+  // (collapsed, notes switched off) keep their last state, since they measure 0 high.
   function clampAll() {
     document.querySelectorAll('.r42-note > .r42-body, .r42-summary').forEach((b) => {
-      if (b.classList.contains('r42-open')) return
+      if (b.classList.contains('r42-open') || !b.offsetParent) return
       const long = b.scrollHeight > 240
       b.classList.toggle('r42-clamped', long)
       let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
       if (long && !more) {
         more = el('button', 'r42-link r42-more', 'show more ↓')
         more.type = 'button'
-        more.addEventListener('click', () => {
-          const open = b.classList.toggle('r42-open')
-          b.classList.toggle('r42-clamped', !open)
-          more.textContent = open ? 'show less ↑' : 'show more ↓'
-        })
         b.after(more)
       }
       if (!long && more) more.remove()
     })
   }
+  // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
+  document.addEventListener('click', (e) => {
+    const more = e.target.closest?.('.r42-more'), b = more?.previousElementSibling
+    if (!b) return
+    const open = b.classList.toggle('r42-open')
+    b.classList.toggle('r42-clamped', !open)
+    more.textContent = open ? 'show less ↑' : 'show more ↓'
+  })
 
   // an attached md / csv / txt file in a modal; images open in the lightbox
   async function preview(link) {

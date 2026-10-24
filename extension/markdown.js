@@ -22,15 +22,20 @@
   }
 
   const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
-  const isRule = (row) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(row)
+  // per cell, not one regex over the row: adjacent \s* in a whole-row pattern backtracks quadratically on long lines
+  const isRule = (row) => cells(row).every((c) => /^:?-{3,}:?$/.test(c))
 
   // Block Markdown: headings, paragraphs, lists (with [ ] / [x] tasks), quotes, fenced code, tables, rules.
-  function markdown(src, resolve = (u) => u) {
+  // depth: quote nesting; past 8 levels the rest is plain text, so `>>>>…` can't overflow the stack
+  function markdown(src, resolve = (u) => u, depth = 0) {
     const out = [], lines = String(src ?? '').replace(/\r\n?/g, '\n').split('\n')
     let list = null, para = [], quote = []
     const flushPara = () => { if (para.length) out.push(`<p>${inline(para.join(' '), resolve)}</p>`); para = [] }
     const flushList = () => { if (list) out.push(`</${list}>`); list = null }
-    const flushQuote = () => { if (quote.length) out.push(`<blockquote>${markdown(quote.join('\n'), resolve)}</blockquote>`); quote = [] }
+    const flushQuote = () => {
+      if (quote.length) out.push(`<blockquote>${depth < 8 ? markdown(quote.join('\n'), resolve, depth + 1) : `<p>${inline(quote.join(' '), resolve)}</p>`}</blockquote>`)
+      quote = []
+    }
     const flush = () => { flushPara(); flushList(); flushQuote() }
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
@@ -43,8 +48,8 @@
       }
       if (/^>\s?/.test(line)) { flushPara(); flushList(); quote.push(line.replace(/^>\s?/, '')); continue }
       flushQuote()
-      // a table: a row with pipes followed by a --- rule
-      if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1])) {
+      // a table: a row with pipes followed by a --- rule with as many cells (else `a || b` above a `---` is a table)
+      if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1]) && cells(lines[i + 1]).length === cells(line).length) {
         flush()
         const head = cells(line), rows = []
         for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]))

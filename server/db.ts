@@ -75,10 +75,15 @@ export function verifyPassword(password: string, stored: string) {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-// wx: of two containers booting side by side (a deploy), the first writer wins and both read its value
+// Of two containers booting side by side (a deploy), the first one wins and both read its value. Written to a temp
+// file and hard-linked into place: the link is atomic, so the other one never reads a created-but-still-empty file.
 function secret(name: string) {
   const file = path.join(DATA_DIR, name)
-  try { fs.writeFileSync(file, randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' }) } catch {}
+  if (!fs.existsSync(file)) {
+    const tmp = `${file}.${randomBytes(6).toString('hex')}`
+    fs.writeFileSync(tmp, randomBytes(32).toString('hex'), { mode: 0o600 })
+    try { fs.linkSync(tmp, file) } catch {} finally { fs.rmSync(tmp, { force: true }) }
+  }
   return fs.readFileSync(file, 'utf8').trim()
 }
 export const sessionSecret = () => secret('session.secret')

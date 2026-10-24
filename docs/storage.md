@@ -6,6 +6,7 @@ Screenshots and files uploaded with notes are stored **on disk** (`DATA_DIR/uplo
 **S3-compatible bucket**. A super admin chooses on **server admin → file storage**.
 
 - Each file remembers where it was written, so switching never breaks older files; new uploads go to the new place.
+  The bucket's endpoint, name and prefix can't change while files are still stored in it (they expire with their PRs).
 - Files are always served through the server (`/files/…`), with the same access check as their PR. The bucket stays private.
 - Quotas and statistics come from the database, so they work the same for both.
 

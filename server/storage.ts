@@ -40,13 +40,14 @@ export async function s3(cfg: S3Config, method: string, key: string, body?: Buff
 
 const objectKey = (cfg: S3Config, pull: string, name: string) => `${cfg.prefix.replace(/^\/+/, '')}pulls/${pull}/${name}`
 
-export function storage(uploads: string, config: () => S3Config | null) {
+// config: the bucket's credentials (kept for reading and deleting older files); useS3: whether new uploads go there
+export function storage(uploads: string, config: () => S3Config | null, useS3: () => boolean) {
   const dir = (pull: string) => path.join(uploads, pull)
   return {
     // which backend new uploads go to
-    current: () => (config() ? 's3' : 'disk') as 'disk' | 's3',
+    current: () => (useS3() ? 's3' : 'disk') as 'disk' | 's3',
     async put(backend: string, pull: string, name: string, data: Buffer, type: string) {
-      if (backend === 's3') return void await s3(need(config()), 'PUT', objectKey(need(config()), pull, name), data, { 'content-type': type })
+      if (backend === 's3') { const cfg = need(config()); return void await s3(cfg, 'PUT', objectKey(cfg, pull, name), data, { 'content-type': type }) }
       fs.mkdirSync(dir(pull), { recursive: true })
       fs.writeFileSync(path.join(dir(pull), name), data)
     },
@@ -60,12 +61,14 @@ export function storage(uploads: string, config: () => S3Config | null) {
       const file = path.join(dir(pull), name)
       return fs.existsSync(file) ? fs.readFileSync(file) : null
     },
-    // ponytail: one DELETE per object; fine at ≤ a few dozen files per PR, use DeleteObjects if PRs get big
+    // ponytail: one DELETE per object, 20 at a time (an account delete can hold thousands); DeleteObjects if that gets slow
     async remove(files: { backend: string; pull: string; name: string }[]) {
-      for (const f of files) {
-        if (f.backend === 's3') { const cfg = config(); if (cfg) await s3(cfg, 'DELETE', objectKey(cfg, f.pull, f.name)).catch(() => {}) }
+      const cfg = files.some((f) => f.backend === 's3') ? config() : null
+      const drop = async (f: { backend: string; pull: string; name: string }) => {
+        if (f.backend === 's3') { if (cfg) await s3(cfg, 'DELETE', objectKey(cfg, f.pull, f.name)).catch(() => {}) }
         else fs.rmSync(path.join(dir(f.pull), f.name), { force: true })
       }
+      for (let i = 0; i < files.length; i += 20) await Promise.all(files.slice(i, i + 20).map(drop))
       for (const p of new Set(files.map((f) => f.pull))) {
         try { fs.rmdirSync(dir(p)) } catch {} // only when empty
       }

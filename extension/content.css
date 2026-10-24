@@ -90,6 +90,7 @@ html.r42-hide-notes .r42-row, html.r42-hide-notes .r42-file { display: none !imp
 /* long notes: cut with a fade, show more / less */
 .r42-clamped { max-height: 240px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 .r42-more { display: block; margin: -4px 12px 8px; }
+.r42-collapsed > .r42-more { display: none; }
 /* Markdown extras: tables, quotes, tasks, rules */
 .r42-md .r42-table { overflow-x: auto; }
 .r42-md table { border-collapse: collapse; font-size: 12.5px; margin: 6px 0; }

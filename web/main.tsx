@@ -94,7 +94,8 @@ function Gallery() {
 function Attachment({ f }: { f: { name: string; type: string; size: number; url: string } }) {
   const [html, setHtml] = useState<string>()
   useEffect(() => {
-    if (!f.type.startsWith('image/')) fetch(f.url).then((r) => r.text()).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
+    // only text: files uploaded before the allow-list (svg, video) are listed as application/octet-stream
+    if (f.type.startsWith('text/')) fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
   }, [f.url])
   return <div className="file-card">
     <div className="where"><a href={f.url} target="_blank" rel="noreferrer">{f.name}</a> · {bytes(f.size)}</div>

@@ -243,12 +243,12 @@ const usage = (pullId: string) =>
 // --- file storage: disk by default, or the S3-compatible bucket a super admin set up on /admin
 
 type StorageSetting = Omit<S3Config, 'secret'> & { kind: 'disk' | 's3'; secret: string }
+// the bucket's credentials stay usable after new uploads switch back to disk, so files already in it still read and delete
 const s3Config = (): S3Config | null => {
   const st = getSetting<StorageSetting>('storage')
-  if (st?.kind !== 's3') return null
-  return { ...st, secret: unseal(st.secret) }
+  return st?.secret ? { ...st, secret: unseal(st.secret) } : null
 }
-const store = storage(UPLOADS, s3Config)
+const store = storage(UPLOADS, s3Config, () => getSetting<StorageSetting>('storage')?.kind === 's3')
 
 // Deletes pull requests and then their files (rows first, so a failed delete in the bucket never leaves a live PR without
 // files; the bucket's lifecycle rule catches anything left over).
@@ -480,13 +480,14 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   if (files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request`)
   if (files.some((f) => f.size > MAX_FILE)) fail(413, `Files up to ${MAX_FILE / MB}MB each`)
   if (files.reduce((n, f) => n + f.size, 0) > MAX_PULL) fail(413, `Up to ${MAX_PULL / MB}MB of files per pull request`)
+  // read and check every file before anything changes (not even a new repository is connected for a refused upload);
+  // also the last await before the transaction, so two uploads can't both see the pull request as new
+  const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
+  const types = files.map((f, i) => fileType(f.name, datas[i]))
 
   const repoId = repositoryFor(`${c.req.param('owner')}/${c.req.param('repo')}`, user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoId, number) as { id: string } | undefined
   const id = existing?.id ?? randomUUID()
-  // read and check every file before anything changes, so a refused file leaves the previous upload intact
-  const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
-  const types = files.map((f, i) => fileType(f.name, datas[i]))
   // stored[i] is files[i]'s stored name (unique, <= 100 chars like safeName, so /files/ finds it); names maps attachment: refs
   const names = new Map<string, string>(), stored: string[] = []
   for (const f of files) {
@@ -504,7 +505,7 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
     return [id, str(a.path, 500) || fail(400, `annotations[${i}].path is required`), line, end,
       a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i] as const
   })
-  // the previous upload's files go once the new rows are in; new files are written first, under the current backend
+  // the previous upload's files go once the new rows are in, then the new files are written under the current backend
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ?').all(id) as { pull: string; name: string; backend: string }[]
   const backend = store.current()
   db.exec('begin')
@@ -525,9 +526,10 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
     for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend)
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }
-  // ponytail: rows commit before the bytes land; a failed write shows as a missing image until the next upload
+  // ponytail: rows commit before the bytes land; a failed write shows as a missing image until the next upload.
+  // Two uploads of one PR at the same moment can interleave here and orphan the first one's bytes; a per-PR lock if that shows up.
   await store.remove(old)
-  for (const [i, name] of stored.entries()) await store.put(backend, id, name, datas[i], types[i])
+  await Promise.all(stored.map((name, i) => store.put(backend, id, name, datas[i], types[i])))
   return c.json({ id, url: `${host(c)}/pulls/${id}`, annotations: rows.length, files: files.length })
 })
 
@@ -608,14 +610,21 @@ app.put('/api/admin/storage', async (c) => {
   if (body.kind !== 's3') { setSetting('storage', { ...(getSetting<StorageSetting>('storage') ?? {}), kind: 'disk' }); return c.json({ ok: true }) }
   const prev = getSetting<StorageSetting>('storage')
   const endpoint = str(body.endpoint, 300).replace(/\/+$/, '')
-  if (!/^https?:\/\/[^/\s]+$/.test(endpoint)) fail(400, 'Endpoint is the bucket service URL, e.g. https://s3.us-west-004.backblazeb2.com')
+  if (!/^https?:\/\/[\w.-]+(:\d+)?$/.test(endpoint)) fail(400, 'Endpoint is the bucket service URL, e.g. https://s3.us-west-004.backblazeb2.com')
   const cfg: S3Config = {
     endpoint, region: str(body.region, 60) || 'auto', bucket: str(body.bucket, 63), key_id: str(body.key_id, 200),
     secret: String(body.secret ?? '').trim() || (prev?.secret ? unseal(prev.secret) : ''),
     prefix: str(body.prefix, 100).replace(/^\/+/, '').replace(/([^/])$/, '$1/'),
   }
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(cfg.bucket)) fail(400, 'Bucket name: 3-63 lowercase letters, digits, dots and dashes')
+  // the prefix goes into URLs and the lifecycle XML: `#`, `?` or `..` would point every key somewhere else
+  if (!/^([\w-][\w.-]*\/)*$/.test(cfg.prefix)) fail(400, 'Prefix: folders of letters, digits, dots, dashes and underscores, e.g. reviews42/')
   if (!cfg.key_id || !cfg.secret) fail(400, 'Key ID and secret key are required')
+  // file rows know only "s3", not which bucket: moving while files live in the old one would make them unreachable
+  const moved = prev?.bucket && (prev.endpoint !== cfg.endpoint || prev.bucket !== cfg.bucket || prev.prefix !== cfg.prefix)
+  if (moved && db.prepare(`select 1 from files where backend = 's3' limit 1`).get()) {
+    fail(409, 'Files are still stored in the current bucket: keep its endpoint, bucket and prefix until they expire')
+  }
   try { await checkS3(cfg) } catch (e) { fail(400, `Couldn't write to the bucket: ${(e as Error).message}`) }
   setSetting('storage', { ...cfg, kind: 's3', secret: seal(cfg.secret) })
   return c.json({ ok: true })
