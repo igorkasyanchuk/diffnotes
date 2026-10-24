@@ -171,6 +171,9 @@ describe('reviews42', () => {
     expect(csp).toMatch(/^sandbox allow-scripts;/)
     expect(csp).not.toContain('allow-same-origin')
     expect(csp).toContain("default-src 'none'")
+    // one etag per variant (a cache must never revalidate the framed html into a page); weak etags from a proxy match too
+    expect(demo.res.headers.get('etag')).not.toBe((await call(`/files/${p.id}/demo.html`, { token })).res.headers.get('etag'))
+    expect((await call(`/files/${p.id}/report.md`, { token, headers: { 'if-none-match': `"x", W/${md.res.headers.get('etag')}` } })).status).toBe(304)
     expect((await call(`/files/${p.id}/anim.gif`, { token })).res.headers.get('content-type')).toBe('image/gif')
     // refused: wrong extension, fake image, binary text, too big; a refused upload keeps the previous files
     expect((await up(new File(['<svg onload=alert(1)>'], 'x.svg'))).status).toBe(415)

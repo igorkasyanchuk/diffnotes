@@ -432,7 +432,7 @@ app.delete('/api/v1/pulls/:owner/:repo/:number', async (c) => {
 const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]/g, '_').slice(-100).replace(/^\.+/, '') || 'file'
 
 // Uploads are checked by content, not only by name: images must start with their format's signature, text files must be
-// UTF-8 without NUL bytes. SVG, HTML, PDF, archives and anything else are refused.
+// UTF-8 without NUL bytes (html too: it only ever runs as a sandboxed demo). SVG, PDF, archives and anything else are refused.
 const MAGIC: Record<string, (b: Buffer) => boolean> = {
   'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
@@ -555,10 +555,13 @@ app.get('/files/:pull/:name', async (c) => {
   const html = f.type === 'text/html' && c.req.header('sec-fetch-dest') === 'iframe'
   const type = f.type.startsWith('image/') ? f.type : html ? 'text/html; charset=utf-8'
     : f.type.startsWith('text/') ? 'text/plain; charset=utf-8' : 'application/octet-stream'
-  // re-uploading a PR keeps its file names, so caches revalidate instead of showing the old file for an hour
-  const etag = `"${createHash('sha256').update(data).digest('base64url').slice(0, 27)}"`
+  // re-uploading a PR keeps its file names, so caches revalidate instead of showing the old file for an hour.
+  // One etag per variant: on a Vary mismatch a browser revalidates with the stored etag and reuses that stored body on a
+  // 304, so a shared etag would let a framed demo's text/html come back as a page of its own.
+  const etag = `"${createHash('sha256').update(data).digest('base64url').slice(0, 27)}${html ? '-demo' : ''}"`
   const headers = { etag, 'cache-control': 'private, no-cache', vary: 'sec-fetch-dest' }
-  if (c.req.header('if-none-match') === etag) return c.body(null, 304, headers)
+  // weak comparison over the list (a proxy that compresses, like Cloudflare, hands out W/"…")
+  if ((c.req.header('if-none-match') ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) return c.body(null, 304, headers)
   return c.body(new Uint8Array(data), 200, {
     ...headers, 'content-type': type, 'content-security-policy': html ? DEMO_CSP : 'sandbox',
     'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name}"`,

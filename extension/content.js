@@ -4,7 +4,13 @@
   const PR = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/(changes|files)/
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
   const collapsed = new Map() // annotation index → collapsed; survives re-renders
-  const images = new Map() // /files/… → data: URL (or a promise of it)
+  const fetched = new Map() // server + /files/… → a promise of its data: URL (images and html demos), fetched once
+  const file = (server, url) => {
+    const k = server + url
+    if (!fetched.has(k)) fetched.set(k, chrome.runtime.sendMessage({ type: 'file', server, url }).then((r) => r?.url, () => null))
+    return fetched.get(k)
+  }
+  const decode = (dataUrl) => new TextDecoder().decode(Uint8Array.from(atob(dataUrl.split(',')[1]), (c) => c.charCodeAt(0)))
 
   const norm = (t) => t.replace(/[‎‏]/g, '').trim()
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n }
@@ -32,9 +38,7 @@
       const src = img.dataset.r42Src
       img.removeAttribute('src')
       if (!src.startsWith('/files/')) { img.src = src; return }
-      const k = server + src
-      if (!images.has(k)) images.set(k, chrome.runtime.sendMessage({ type: 'file', server, url: src }).then((r) => r.url))
-      images.get(k).then((u) => { if (u) img.src = u })
+      file(server, src).then((u) => { if (u) img.src = u })
     })
     // links to attached files open a preview here instead of navigating github.com to /files/…
     root.querySelectorAll('a[href^="/files/"]').forEach((a) => {
@@ -160,8 +164,10 @@
         if (open) return open.remove()
         const pop = el('div', 'r42-float r42-pop')
         pop.id = 'r42-pop'
-        const body = box.querySelector('.r42-box-body')
-        pop.append(body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.'))
+        const body = box.querySelector('.r42-box-body'), copy = body ? body.cloneNode(true) : el('div', 'r42-hint', 'No summary for this pull request.')
+        // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo
+        copy.querySelectorAll('.r42-demo').forEach((d) => d.remove())
+        pop.append(copy)
         // a clone has no listeners: note headers toggle through the pop
         pop.addEventListener('click', (e) => e.target.closest('.r42-head')?.parentElement.classList.toggle('r42-collapsed'))
         document.body.append(pop)
@@ -235,11 +241,11 @@
     if (!b || b.classList.contains('r42-open')) return
     if (!b.offsetParent) return void delete b.dataset.r42Measured
     b.dataset.r42Measured = ''
-    // live demos sit under the text, outside the clamp, so "show more" never cuts one in half
-    b.querySelectorAll('.r42-demo').forEach((d) => b.parentElement.append(d))
+    let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
+    // live demos sit right under their text (and its toggle), outside the clamp, so "show more" never cuts one in half
+    ;(more ?? b).after(...b.querySelectorAll('.r42-demo'))
     const long = b.scrollHeight > 240
     b.classList.toggle('r42-clamped', long)
-    let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
     if (long && !more) {
       more = el('button', 'r42-link r42-more', 'show more ↓')
       more.type = 'button'
@@ -256,8 +262,7 @@
     more.textContent = open ? 'show less ↑' : 'show more ↓'
   })
 
-  const fetchText = (server, url) => chrome.runtime.sendMessage({ type: 'file', server, url }).catch(() => null)
-    .then((r) => r?.url && new TextDecoder().decode(Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0))))
+  const fetchText = (server, url) => file(server, url).then((u) => u && decode(u))
 
   // An uploaded HTML demo runs in the extension's sandboxed demo.html: an opaque origin with no access to github.com,
   // its cookies or the extension, and a CSP (manifest.json) that blocks every network request. The HTML is posted in once.
@@ -277,7 +282,10 @@
     open.addEventListener('click', () => preview(link))
     bar.append(el('span', 'r42-demo-tag', 'live demo · sandboxed'), open)
     wrap.append(bar)
-    ;(link.closest('p, li') ?? link).after(wrap)
+    // after the paragraph, and after the demos of earlier links in it, so they keep the text's order
+    let at = link.closest('p, li') ?? link
+    while (at.nextElementSibling?.classList.contains('r42-demo')) at = at.nextElementSibling
+    at.after(wrap)
     fetchText(server, link.dataset.r42File).then((html) => { if (html) wrap.append(demoFrame(html)) })
   }
 
@@ -289,7 +297,7 @@
     const box = el('div', 'r42-lightbox')
     if (/^data:image\//.test(r.url)) { const big = el('img'); big.src = r.url; box.append(big) }
     else {
-      const text = new TextDecoder().decode(Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0)))
+      const text = decode(r.url)
       const demo = /\.html$/i.test(name)
       const doc = el('div', `r42-doc r42-md${demo ? ' r42-demo-doc' : ''}`), head = el('div', 'r42-bar')
       head.append(el('span', 'r42-badge', 'R42'), el('b', '', name))

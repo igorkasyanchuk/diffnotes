@@ -79,8 +79,7 @@
 .dm-s3 .dm-opt.e { animation: dm-pick .2s 1.7s forwards; }
 @keyframes dm-pick { to { border-color: #e8622a; background: #fff3ec; } }
 @keyframes dm-unpick { to { border-color: #d0d7de; background: transparent; } }
-.dm-total { margin-left: auto; font-weight: 400; }
-.dm-total { display: inline-grid; grid-template-columns: auto auto; column-gap: 6px; }
+.dm-total { margin-left: auto; font-weight: 400; display: inline-grid; grid-template-columns: auto auto; column-gap: 6px; }
 .dm-total b { grid-area: 1 / 2; }
 .dm-total .t2 { opacity: 0; color: #e8622a; }
 .dm-s3 .dm-total .t1 { animation: dm-hide 0s 1.8s forwards; }
