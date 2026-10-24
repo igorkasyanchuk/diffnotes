@@ -9,14 +9,18 @@ import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import {
-  DATA_DIR, RETENTION_DAYS, bootstrap, createAccount, createUser, daysFromNow, db, hashPassword, newToken, now, pullDir, sessionSecret, sha256, verifyPassword,
+  DATA_DIR, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
+  seal, sessionSecret, setSetting, sha256, unseal, verifyPassword,
 } from './db.ts'
+import { applyLifecycle, checkS3, storage } from './storage.ts'
+import type { S3Config } from './storage.ts'
 import type { User } from './db.ts'
 
 const SECRET = process.env.SESSION_SECRET || sessionSecret()
 const MB = 1024 * 1024
-const MAX_FILE = Number(process.env.MAX_FILE_MB ?? 10) * MB
-const MAX_PULL = Number(process.env.MAX_PULL_MB ?? 50) * MB
+const MAX_FILE = Number(process.env.MAX_FILE_MB ?? 1) * MB
+const MAX_PULL = Number(process.env.MAX_PULL_MB ?? 20) * MB
+const MAX_FILES = 30 // per pull request
 const MAX_BODY = Number(process.env.MAX_BODY_KB ?? 1024) * 1024
 const MAX_ANNOTATIONS = 500
 const INVITE_DAYS = 7
@@ -232,11 +236,33 @@ const requireAdmin = (accountId: string, user: User) => {
 }
 const ROLES = ['admin', 'member']
 
-// files and bytes in a pull's upload folder (flat), one pass
-// ponytail: sync walk per request, fine at self-hosted scale; cache sizes in the pulls table if /admin gets slow
-function usage(dir: string) {
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()) : []
-  return { files: files.length, bytes: files.reduce((n, e) => n + fs.statSync(path.join(dir, e.name)).size, 0) }
+// files and bytes of a pull request, from the files table (works the same for disk and S3)
+const usage = (pullId: string) =>
+  db.prepare('select count(*) as files, coalesce(sum(size), 0) as bytes from files where pull_id = ?').get(pullId) as { files: number; bytes: number }
+
+// --- file storage: disk by default, or the S3-compatible bucket a super admin set up on /admin
+
+type StorageSetting = Omit<S3Config, 'secret'> & { kind: 'disk' | 's3'; secret: string }
+const s3Config = (): S3Config | null => {
+  const st = getSetting<StorageSetting>('storage')
+  if (st?.kind !== 's3') return null
+  return { ...st, secret: unseal(st.secret) }
+}
+const store = storage(UPLOADS, s3Config)
+
+// Deletes pull requests and then their files (rows first, so a failed delete in the bucket never leaves a live PR without
+// files; the bucket's lifecycle rule catches anything left over).
+async function dropPulls(ids: string[]) {
+  if (!ids.length) return
+  const marks = ids.map(() => '?').join(',')
+  const files = db.prepare(`select pull_id as pull, name, backend from files where pull_id in (${marks})`).all(...ids) as { pull: string; name: string; backend: string }[]
+  db.prepare(`delete from pulls where id in (${marks})`).run(...ids)
+  await store.remove(files)
+}
+export async function purge() {
+  const ids = purgeExpired()
+  await dropPulls(ids)
+  return ids.length
 }
 
 app.get('/api/dashboard', (c) => {
@@ -273,7 +299,7 @@ app.get('/api/accounts/:id/overview', (c) => {
     (select count(*) from annotations n where n.pull_id = p.id) as annotations
     from pulls p join repositories r on r.id = p.repository_id left join users u on u.id = p.user_id
     where r.account_id = ? order by p.updated_at desc`).all(id) as { id: string; repository: string; annotations: number; expires_at: string }[]
-  const withDisk = pulls.map((p) => ({ ...p, ...usage(pullDir(p.id)) }))
+  const withDisk = pulls.map((p) => ({ ...p, ...usage(p.id) }))
   const repos = db.prepare('select full_name from repositories where account_id = ? order by full_name').all(id) as { full_name: string }[]
   const byRepo = repos.map(({ full_name }) => {
     const ps = withDisk.filter((p) => p.repository === full_name)
@@ -301,12 +327,12 @@ app.put('/api/accounts/:id', async (c) => {
   db.prepare('update accounts set name = ? where id = ?').run(name, id)
   return c.json({ ok: true })
 })
-app.delete('/api/accounts/:id', (c) => {
+app.delete('/api/accounts/:id', async (c) => {
   const id = c.req.param('id'), user = c.get('user')
   if (role(id, user) !== 'owner' && !user.admin) fail(403, 'Only the owner can delete the account')
   const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(id) as { id: string }[]
+  await dropPulls(pulls.map((p) => p.id))
   db.prepare('delete from accounts where id = ?').run(id)
-  for (const p of pulls) fs.rmSync(pullDir(p.id), { recursive: true, force: true })
   return c.json({ ok: true })
 })
 
@@ -354,13 +380,13 @@ app.post('/api/accounts/:id/repositories', async (c) => {
   db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repo, id, name, now())
   return c.json({ id: repo })
 })
-app.delete('/api/repositories/:id', (c) => {
+app.delete('/api/repositories/:id', async (c) => {
   const repo = db.prepare('select id, account_id from repositories where id = ?').get(c.req.param('id')) as { id: string; account_id: string } | undefined
   if (!repo) fail(404, 'Not found')
   requireAdmin(repo!.account_id, c.get('user'))
   const pulls = db.prepare('select id from pulls where repository_id = ?').all(repo!.id) as { id: string }[]
+  await dropPulls(pulls.map((p) => p.id))
   db.prepare('delete from repositories where id = ?').run(repo!.id)
-  for (const p of pulls) fs.rmSync(pullDir(p.id), { recursive: true, force: true })
   return c.json({ ok: true })
 })
 
@@ -372,10 +398,11 @@ const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.up
 
 function pullOut(p: Pull) {
   const annotations = db.prepare('select path, line, end_line, side, title, body from annotations where pull_id = ? order by position').all(p.id)
-  const files = fs.existsSync(pullDir(p.id)) ? fs.readdirSync(pullDir(p.id)) : []
+  const files = (db.prepare('select name, type, size from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number }[])
+    .map((f) => ({ ...f, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary,
-    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files: files.map((f) => `/files/${p.id}/${encodeURIComponent(f)}`),
+    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
   }
 }
 
@@ -395,14 +422,34 @@ app.get('/api/pulls/:id', (c) => {
   role(p!.account_id, c.get('user'))
   return c.json(pullOut(p!))
 })
-app.delete('/api/v1/pulls/:owner/:repo/:number', (c) => {
+app.delete('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   const p = findPull(c)
-  db.prepare('delete from pulls where id = ?').run(p.id)
-  fs.rmSync(pullDir(p.id), { recursive: true, force: true })
+  await dropPulls([p.id])
   return c.json({ ok: true })
 })
 
 const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'file'
+
+// Uploads are checked by content, not only by name: images must start with their format's signature, text files must be
+// UTF-8 without NUL bytes. SVG, HTML, PDF, archives and anything else are refused.
+const MAGIC: Record<string, (b: Buffer) => boolean> = {
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/gif': (b) => ['GIF87a', 'GIF89a'].includes(b.subarray(0, 6).toString('latin1')),
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+}
+const utf8 = new TextDecoder('utf-8', { fatal: true })
+export function fileType(name: string, data: Buffer) {
+  const type = EXT_TYPES[path.extname(name).slice(1).toLowerCase()]
+  if (!type) fail(415, `${name}: only png, jpg, gif, webp, csv, md and txt files are accepted`)
+  if (type.startsWith('image/')) {
+    if (!MAGIC[type](data)) fail(415, `${name}: not a valid ${type.slice(6)} image`)
+  } else {
+    try { utf8.decode(data) } catch { fail(415, `${name}: text files must be UTF-8`) }
+    if (data.includes(0)) fail(415, `${name}: text files can't contain NUL bytes`)
+  }
+  return type
+}
 
 // The repository must be connected to an account you're in; an unknown one is connected to your first owned account.
 function repositoryFor(fullName: string, user: User) {
@@ -430,13 +477,17 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   } else payload = await json(c)
   const list = Array.isArray(payload!.annotations) ? payload!.annotations as Record<string, unknown>[] : fail(400, 'annotations must be an array')
   if (list.length > MAX_ANNOTATIONS) fail(413, `At most ${MAX_ANNOTATIONS} annotations`)
-  if (files.some((f) => f.size > MAX_FILE)) fail(413, `Files up to ${MAX_FILE / MB}MB`)
+  if (files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request`)
+  if (files.some((f) => f.size > MAX_FILE)) fail(413, `Files up to ${MAX_FILE / MB}MB each`)
   if (files.reduce((n, f) => n + f.size, 0) > MAX_PULL) fail(413, `Up to ${MAX_PULL / MB}MB of files per pull request`)
 
   const repoId = repositoryFor(`${c.req.param('owner')}/${c.req.param('repo')}`, user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoId, number) as { id: string } | undefined
-  const id = existing?.id ?? randomUUID(), dir = pullDir(id)
-  // stored[i] is files[i]'s name on disk (unique, <= 100 chars like safeName, so /files/ finds it); names maps attachment: refs
+  const id = existing?.id ?? randomUUID()
+  // read and check every file before anything changes, so a refused file leaves the previous upload intact
+  const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
+  const types = files.map((f, i) => fileType(f.name, datas[i]))
+  // stored[i] is files[i]'s stored name (unique, <= 100 chars like safeName, so /files/ finds it); names maps attachment: refs
   const names = new Map<string, string>(), stored: string[] = []
   for (const f of files) {
     let name = safeName(f.name)
@@ -453,6 +504,9 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
     return [id, str(a.path, 500) || fail(400, `annotations[${i}].path is required`), line, end,
       a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i] as const
   })
+  // the previous upload's files go once the new rows are in; new files are written first, under the current backend
+  const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ?').all(id) as { pull: string; name: string; backend: string }[]
+  const backend = store.current()
   db.exec('begin')
   try {
     if (existing) {
@@ -466,11 +520,14 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
     }
     const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position) values (?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r)
+    db.prepare('delete from files where pull_id = ?').run(id)
+    const add = db.prepare('insert into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, ?)')
+    for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend)
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }
-  fs.rmSync(dir, { recursive: true, force: true })
-  if (files.length) fs.mkdirSync(dir, { recursive: true })
-  for (const [i, f] of files.entries()) fs.writeFileSync(path.join(dir, stored[i]), Buffer.from(await f.arrayBuffer()))
+  // ponytail: rows commit before the bytes land; a failed write shows as a missing image until the next upload
+  await store.remove(old)
+  for (const [i, name] of stored.entries()) await store.put(backend, id, name, datas[i], types[i])
   return c.json({ id, url: `${host(c)}/pulls/${id}`, annotations: rows.length, files: files.length })
 })
 
@@ -479,14 +536,14 @@ app.get('/files/:pull/:name', async (c) => {
   const user = await currentUser(c)
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('pull')) as Pull | undefined
   if (!user || !p || !(user.admin || memberRole(p.account_id, user.id))) return c.notFound()
-  const file = path.join(pullDir(p.id), safeName(c.req.param('name')))
-  if (!fs.existsSync(file)) return c.notFound()
-  const ext = path.extname(file).slice(1).toLowerCase()
-  const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-    mp4: 'video/mp4', webm: 'video/webm', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', json: 'application/json' }[ext]
-  return c.body(fs.readFileSync(file), 200, {
-    'content-type': type ?? 'application/octet-stream', 'content-security-policy': 'sandbox', 'x-content-type-options': 'nosniff',
-    'cache-control': 'private, max-age=3600',
+  const f = db.prepare('select name, type, backend from files where pull_id = ? and name = ?').get(p.id, safeName(c.req.param('name'))) as
+    { name: string; type: string; backend: string } | undefined
+  const data = f && await store.get(f.backend, p.id, f.name)
+  if (!f || !data) return c.notFound()
+  // text (md, csv, txt) is always served as plain text: the web app and the extension render it themselves
+  return c.body(new Uint8Array(data), 200, {
+    'content-type': f.type.startsWith('image/') ? f.type : 'text/plain; charset=utf-8', 'content-security-policy': 'sandbox',
+    'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name}"`, 'cache-control': 'private, max-age=3600',
   })
 })
 
@@ -509,7 +566,7 @@ app.get('/api/admin/stats', (c) => {
       (select u.email from memberships m join users u on u.id = m.user_id where m.account_id = a.id and m.role = 'owner') as owner
     from accounts a order by a.created_at`).all() as { id: string }[]).map((a) => {
     const disk = (db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(a.id) as { id: string }[])
-      .map((p) => usage(pullDir(p.id)))
+      .map((p) => usage(p.id))
     return { ...a, pulls: disk.length, files: disk.reduce((n, u) => n + u.files, 0), bytes: disk.reduce((n, u) => n + u.bytes, 0) }
   })
   const users = db.prepare(`select u.id, u.email, u.name, u.admin, u.created_at,
@@ -538,6 +595,35 @@ app.put('/api/admin/users/:id', async (c) => {
   const res = db.prepare('update users set admin = ? where id = ?').run((await json(c)).admin === true ? 1 : 0, c.req.param('id'))
   if (!res.changes) fail(404, 'Not found')
   return c.json({ ok: true })
+})
+
+// storage settings: the secret key never leaves the server (only whether one is set); a new S3 setup is tested first
+app.get('/api/admin/storage', (c) => {
+  const st = getSetting<StorageSetting>('storage')
+  const counts = db.prepare('select backend, count(*) as files, coalesce(sum(size), 0) as bytes from files group by backend').all()
+  return c.json({ storage: st ? { ...st, secret: undefined, has_secret: !!st.secret } : { kind: 'disk' }, counts, retention_days: RETENTION_DAYS })
+})
+app.put('/api/admin/storage', async (c) => {
+  const body = await json(c)
+  if (body.kind !== 's3') { setSetting('storage', { ...(getSetting<StorageSetting>('storage') ?? {}), kind: 'disk' }); return c.json({ ok: true }) }
+  const prev = getSetting<StorageSetting>('storage')
+  const endpoint = str(body.endpoint, 300).replace(/\/+$/, '')
+  if (!/^https?:\/\/[^/\s]+$/.test(endpoint)) fail(400, 'Endpoint is the bucket service URL, e.g. https://s3.us-west-004.backblazeb2.com')
+  const cfg: S3Config = {
+    endpoint, region: str(body.region, 60) || 'auto', bucket: str(body.bucket, 63), key_id: str(body.key_id, 200),
+    secret: String(body.secret ?? '').trim() || (prev?.secret ? unseal(prev.secret) : ''),
+    prefix: str(body.prefix, 100).replace(/^\/+/, '').replace(/([^/])$/, '$1/'),
+  }
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(cfg.bucket)) fail(400, 'Bucket name: 3-63 lowercase letters, digits, dots and dashes')
+  if (!cfg.key_id || !cfg.secret) fail(400, 'Key ID and secret key are required')
+  try { await checkS3(cfg) } catch (e) { fail(400, `Couldn't write to the bucket: ${(e as Error).message}`) }
+  setSetting('storage', { ...cfg, kind: 's3', secret: seal(cfg.secret) })
+  return c.json({ ok: true })
+})
+app.post('/api/admin/storage/lifecycle', async (c) => {
+  const cfg = s3Config() ?? fail(400, 'S3 storage is not configured')
+  try { await applyLifecycle(cfg, RETENTION_DAYS + 1) } catch (e) { fail(400, (e as Error).message) }
+  return c.json({ ok: true, days: RETENTION_DAYS + 1 })
 })
 
 // --- skill install, health, static web app

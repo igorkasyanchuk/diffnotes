@@ -16,39 +16,81 @@
       const u = safeUrl(url.replace(/&amp;/g, '&'))
       return u ? `${hold(`<a href="${esc(resolve(u))}" target="_blank" rel="noopener noreferrer">`)}${label}</a>` : m
     })
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
     const restore = (x) => x.replace(/\u0000(\d+)\u0000/g, (_, i) => restore(held[i]))
     return restore(s)
   }
 
+  const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+  const isRule = (row) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(row)
+
+  // Block Markdown: headings, paragraphs, lists (with [ ] / [x] tasks), quotes, fenced code, tables, rules.
   function markdown(src, resolve = (u) => u) {
     const out = [], lines = String(src ?? '').replace(/\r\n?/g, '\n').split('\n')
-    let list = null, para = []
+    let list = null, para = [], quote = []
     const flushPara = () => { if (para.length) out.push(`<p>${inline(para.join(' '), resolve)}</p>`); para = [] }
     const flushList = () => { if (list) out.push(`</${list}>`); list = null }
+    const flushQuote = () => { if (quote.length) out.push(`<blockquote>${markdown(quote.join('\n'), resolve)}</blockquote>`); quote = [] }
+    const flush = () => { flushPara(); flushList(); flushQuote() }
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
-      const fence = line.match(/^```/)
-      if (fence) {
-        flushPara(); flushList()
+      if (/^\s*```/.test(line)) {
+        flush()
         const code = []
-        while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i])
+        while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i])
         out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`)
         continue
       }
-      const h = line.match(/^(#{1,4})\s+(.*)/), li = line.match(/^\s*([-*]|\d+\.)\s+(.*)/)
-      if (h) { flushPara(); flushList(); out.push(`<h${h[1].length + 2}>${inline(h[2], resolve)}</h${h[1].length + 2}>`) }
+      if (/^>\s?/.test(line)) { flushPara(); flushList(); quote.push(line.replace(/^>\s?/, '')); continue }
+      flushQuote()
+      // a table: a row with pipes followed by a --- rule
+      if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1])) {
+        flush()
+        const head = cells(line), rows = []
+        for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]))
+        i--
+        out.push(`<div class="r42-table"><table><thead><tr>${head.map((c) => `<th>${inline(c, resolve)}</th>`).join('')}</tr></thead><tbody>${
+          rows.map((r) => `<tr>${head.map((_, k) => `<td>${inline(r[k] ?? '', resolve)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)
+        continue
+      }
+      const h = line.match(/^(#{1,6})\s+(.*)/), li = line.match(/^\s*([-*+]|\d+\.)\s+(.*)/)
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); out.push('<hr>') }
+      else if (h) { flush(); const n = Math.min(h[1].length + 2, 6); out.push(`<h${n}>${inline(h[2], resolve)}</h${n}>`) }
       else if (li) {
         flushPara()
         const tag = /\d/.test(li[1]) ? 'ol' : 'ul'
         if (list !== tag) { flushList(); out.push(`<${tag}>`); list = tag }
-        out.push(`<li>${inline(li[2], resolve)}</li>`)
-      } else if (/^>\s?/.test(line)) { flushPara(); flushList(); out.push(`<blockquote>${inline(line.replace(/^>\s?/, ''), resolve)}</blockquote>`) }
-      else if (!line.trim()) { flushPara(); flushList() }
+        const task = li[2].match(/^\[([ xX])\]\s+(.*)/)
+        out.push(task ? `<li class="task"><input type="checkbox" disabled${task[1] === ' ' ? '' : ' checked'}> ${inline(task[2], resolve)}</li>`
+          : `<li>${inline(li[2], resolve)}</li>`)
+      } else if (!line.trim()) { flushPara(); flushList() }
       else { flushList(); para.push(line.trim()) }
     }
-    flushPara(); flushList()
+    flush()
     return out.join('')
   }
+
+  // CSV (RFC 4180 quotes) → an escaped table; for previews of attached .csv files
+  function csv(text) {
+    const rows = [], s = String(text ?? '')
+    let row = [], cell = '', q = false
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i]
+      if (q) { if (ch === '"' && s[i + 1] === '"') { cell += '"'; i++ } else if (ch === '"') q = false; else cell += ch }
+      else if (ch === '"') q = true
+      else if (ch === ',') { row.push(cell); cell = '' }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && s[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = '' }
+      else cell += ch
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row) }
+    if (!rows.length) return ''
+    const [head, ...body] = rows.slice(0, 501)
+    return `<div class="r42-table"><table><thead><tr>${head.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${
+      body.map((r) => `<tr>${head.map((_, k) => `<td>${esc(r[k] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+      + (rows.length > 501 ? `<p>… ${rows.length - 501} more rows</p>` : '')
+  }
+  // an attached text file as HTML, by its name: .md rendered, .csv as a table, anything else as plain text
+  globalThis.r42Preview = (name, text, resolve) =>
+    /\.md$/i.test(name) ? markdown(text, resolve) : /\.csv$/i.test(name) ? csv(text) : `<pre>${esc(String(text ?? ''))}</pre>`
   globalThis.r42Markdown = markdown
 })()

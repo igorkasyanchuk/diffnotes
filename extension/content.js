@@ -36,7 +36,15 @@
       if (!images.has(k)) images.set(k, chrome.runtime.sendMessage({ type: 'file', server, url: src }).then((r) => r.url))
       images.get(k).then((u) => { if (u) img.src = u })
     })
-    root.querySelectorAll('a[href^="/files/"]').forEach((a) => a.removeAttribute('href'))
+    // links to attached files open a preview here instead of navigating github.com to /files/…
+    root.querySelectorAll('a[href^="/files/"]').forEach((a) => {
+      a.dataset.r42File = a.getAttribute('href')
+      a.dataset.r42Server = server
+      a.removeAttribute('href')
+      a.removeAttribute('target')
+      a.classList.add('r42-file-link')
+    })
+    root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clampAll(), { once: true }))
   }
 
   // Two GitHub diff UIs: the React "changes" view (h3 file-name__*, cells with data-diff-side) and the classic one
@@ -91,6 +99,7 @@
         placed.add(i)
       })
     }
+    clampAll()
     renderBox(placed, list)
   }
 
@@ -214,17 +223,88 @@
     return body.childElementCount ? [bar, body] : [bar]
   }
 
-  // click an image to preview it full size
-  document.addEventListener('click', (e) => {
-    const img = e.target.closest?.('.r42-md img')
-    if (!img?.src) return
-    const box = el('div', 'r42-lightbox'), big = el('img')
-    big.src = img.src
-    box.append(big)
+  // Long notes are cut to a few lines with a show more / less toggle. Measured once they are in the page.
+  function clampAll() {
+    document.querySelectorAll('.r42-note > .r42-body, .r42-summary').forEach((b) => {
+      if (b.classList.contains('r42-open')) return
+      const long = b.scrollHeight > 240
+      b.classList.toggle('r42-clamped', long)
+      let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
+      if (long && !more) {
+        more = el('button', 'r42-link r42-more', 'show more ↓')
+        more.type = 'button'
+        more.addEventListener('click', () => {
+          const open = b.classList.toggle('r42-open')
+          b.classList.toggle('r42-clamped', !open)
+          more.textContent = open ? 'show less ↑' : 'show more ↓'
+        })
+        b.after(more)
+      }
+      if (!long && more) more.remove()
+    })
+  }
+
+  // an attached md / csv / txt file in a modal; images open in the lightbox
+  async function preview(link) {
+    const url = link.dataset.r42File, name = decodeURIComponent(url.split('/').pop())
+    const r = await chrome.runtime.sendMessage({ type: 'file', server: link.dataset.r42Server, url }).catch(() => null)
+    if (!r?.url) return
+    const box = el('div', 'r42-lightbox')
+    if (/^data:image\//.test(r.url)) { const big = el('img'); big.src = r.url; box.append(big) }
+    else {
+      const bytes = Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0))
+      const doc = el('div', 'r42-doc r42-md'), head = el('div', 'r42-bar')
+      head.append(el('span', 'r42-badge', 'R42'), el('b', '', name))
+      const body = el('div', 'r42-doc-body')
+      body.innerHTML = r42Preview(name, new TextDecoder().decode(bytes)) // escaped by r42Preview
+      loadImages(body, link.dataset.r42Server)
+      doc.append(head, body)
+      doc.addEventListener('click', (e) => e.stopPropagation())
+      box.append(doc)
+    }
     box.addEventListener('click', () => box.remove())
     document.body.append(box)
+  }
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest?.('.r42-file-link')
+    if (link) { e.preventDefault(); preview(link) }
   })
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.r42-lightbox, #r42-pop').forEach((n) => n.remove()) })
+
+  // Gallery: a click on an image opens every image of the same note (or summary); ← → move, Esc closes.
+  // A note can carry several shots, e.g. one component at mobile and desktop width.
+  function gallery(imgs, start) {
+    document.querySelector('.r42-lightbox')?.remove()
+    let i = start
+    const box = el('div', 'r42-lightbox r42-gallery'), big = el('img'), cap = el('div', 'r42-cap')
+    const prev = el('button', 'r42-nav r42-prev', '‹'), next = el('button', 'r42-nav r42-next', '›')
+    prev.setAttribute('aria-label', 'Previous image'); next.setAttribute('aria-label', 'Next image')
+    const show = (n) => {
+      i = (n + imgs.length) % imgs.length
+      big.src = imgs[i].src
+      big.alt = imgs[i].alt
+      cap.textContent = `${imgs[i].alt || 'image'}${imgs.length > 1 ? ` · ${i + 1} / ${imgs.length}` : ''}`
+    }
+    prev.addEventListener('click', (e) => { e.stopPropagation(); show(i - 1) })
+    next.addEventListener('click', (e) => { e.stopPropagation(); show(i + 1) })
+    big.addEventListener('click', (e) => { e.stopPropagation(); if (imgs.length > 1) show(i + 1) })
+    box.append(big, cap)
+    if (imgs.length > 1) box.append(prev, next)
+    box.addEventListener('click', () => box.remove())
+    box.r42Show = (d) => show(i + d)
+    document.body.append(box)
+    show(i)
+  }
+  document.addEventListener('click', (e) => {
+    const img = e.target.closest?.('.r42-md img')
+    if (!img?.src || img.closest('.r42-lightbox')) return
+    const group = [...(img.closest('.r42-note, .r42-summary, .r42-doc-body') ?? img.parentElement).querySelectorAll('.r42-md img, img')].filter((x) => x.src)
+    gallery(group, Math.max(0, group.indexOf(img)))
+  })
+  document.addEventListener('keydown', (e) => {
+    const g = document.querySelector('.r42-gallery')
+    if (g && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); e.stopPropagation(); g.r42Show(e.key === 'ArrowRight' ? 1 : -1) }
+    if (e.key === 'Escape') document.querySelectorAll('.r42-lightbox, #r42-pop').forEach((n) => n.remove())
+  }, true)
 
   function clear() {
     observer?.disconnect()

@@ -1,7 +1,13 @@
 import { DatabaseSync } from 'node:sqlite'
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+
+// the only uploads accepted: extension → content type (text is served as text/plain, never rendered as HTML)
+export const EXT_TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  csv: 'text/csv', md: 'text/markdown', txt: 'text/plain',
+}
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data')
 export const UPLOADS = path.join(DATA_DIR, 'uploads')
@@ -43,6 +49,12 @@ db.exec(`
     path text not null, line integer, end_line integer, side text not null default 'RIGHT',
     title text not null default '', body text not null default '', position integer not null default 0);
   create index if not exists annotations_pull on annotations(pull_id);
+  -- uploaded files: bytes live on disk or in S3 (backend), this row is what quotas, stats and /files read
+  create table if not exists files (
+    pull_id text not null references pulls(id) on delete cascade, name text not null, type text not null,
+    size integer not null, backend text not null default 'disk', primary key (pull_id, name));
+  -- server-wide settings a super admin changes on /admin (JSON values)
+  create table if not exists settings (key text primary key, value text not null);
   -- the first release invited co-owners; an account has one owner now, so pending owner invites make admins
   update invites set role = 'admin' where role = 'owner';
 `)
@@ -63,11 +75,36 @@ export function verifyPassword(password: string, stored: string) {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-export function sessionSecret() {
-  const file = path.join(DATA_DIR, 'session.secret')
-  if (!fs.existsSync(file)) fs.writeFileSync(file, randomBytes(32).toString('hex'), { mode: 0o600 })
+// wx: of two containers booting side by side (a deploy), the first writer wins and both read its value
+function secret(name: string) {
+  const file = path.join(DATA_DIR, name)
+  try { fs.writeFileSync(file, randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' }) } catch {}
   return fs.readFileSync(file, 'utf8').trim()
 }
+export const sessionSecret = () => secret('session.secret')
+
+// Secrets kept in settings (the S3 secret key): AES-256-GCM under ENCRYPTION_KEY, else DATA_DIR/encryption.key, so a
+// copy of the DB alone doesn't give them away.
+let key: Buffer | undefined
+const sealKey = () => (key ??= createHash('sha256').update(process.env.ENCRYPTION_KEY || secret('encryption.key')).digest())
+export function seal(text: string) {
+  const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', sealKey(), iv)
+  const data = Buffer.concat([c.update(text, 'utf8'), c.final()])
+  return `v1:${Buffer.concat([iv, c.getAuthTag(), data]).toString('base64')}`
+}
+export function unseal(sealed: string) {
+  const b = Buffer.from(sealed.replace(/^v1:/, ''), 'base64')
+  const d = createDecipheriv('aes-256-gcm', sealKey(), b.subarray(0, 12))
+  d.setAuthTag(b.subarray(12, 28))
+  return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8')
+}
+
+export const getSetting = <T>(k: string): T | null => {
+  const row = db.prepare('select value from settings where key = ?').get(k) as { value: string } | undefined
+  return row ? JSON.parse(row.value) : null
+}
+export const setSetting = (k: string, v: unknown) =>
+  db.prepare('insert into settings (key, value) values (?, ?) on conflict do update set value = excluded.value').run(k, JSON.stringify(v))
 
 export function createUser(email: string, password: string, name = '', admin = 0) {
   const id = randomUUID()
@@ -99,13 +136,21 @@ export function newToken(userId: string, name: string) {
   return token
 }
 
-export const pullDir = (pullId: string) => path.join(UPLOADS, pullId)
 
-// ponytail: runs on boot and hourly from index.ts; a huge backlog is deleted in one statement, fine at self-hosted scale
+// Expired pull requests and stale invites/sessions; returns the expired pull ids for the caller to drop with their files.
 export function purgeExpired() {
-  const gone = db.prepare('delete from pulls where expires_at < ? returning id').all(now()) as { id: string }[]
-  for (const { id } of gone) fs.rmSync(pullDir(id), { recursive: true, force: true })
+  const ids = (db.prepare('select id from pulls where expires_at < ?').all(now()) as { id: string }[]).map((r) => r.id)
   db.prepare('delete from invites where expires_at < ?').run(now())
   db.prepare('delete from sessions where created_at < ?').run(daysFromNow(-30)) // same 30 days currentUser() accepts
-  return gone.length
+  return ids
+}
+
+// Files written before the files table existed: one row per file found on disk, once.
+for (const pull of fs.readdirSync(UPLOADS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
+  if (!db.prepare('select 1 from pulls where id = ?').get(pull)) continue
+  for (const f of fs.readdirSync(path.join(UPLOADS, pull), { withFileTypes: true }).filter((e) => e.isFile())) {
+    const ext = path.extname(f.name).slice(1).toLowerCase()
+    db.prepare(`insert or ignore into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, 'disk')`)
+      .run(pull, f.name, EXT_TYPES[ext] ?? 'application/octet-stream', fs.statSync(path.join(UPLOADS, pull, f.name)).size)
+  }
 }

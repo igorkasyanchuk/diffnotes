@@ -8,7 +8,10 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-'))
 process.env.ADMIN_EMAIL = 'admin@example.com'
 process.env.ADMIN_PASSWORD = 'admin-pass'
 const { app } = await import('./app.ts')
-const { db, purgeExpired } = await import('./db.ts')
+const { db } = await import('./db.ts')
+const { purge } = await import('./app.ts')
+// a real PNG signature plus padding up to n bytes
+const png = (n = 16) => { const b = new Uint8Array(n); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b }
 
 // one sequential story: later tests reuse what earlier ones created
 type Opts = { cookie?: string; token?: string; body?: unknown; form?: FormData; method?: string }
@@ -82,7 +85,7 @@ describe('reviews42', () => {
         { path: 'app/old.ts', line: 3, side: 'LEFT', body: 'Removed' },
       ],
     })], 'payload.json', { type: 'application/json' }))
-    form.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'login.png', { type: 'image/png' }))
+    form.append('file', new File([png()], 'login.png', { type: 'image/png' }))
     const r = await call('/api/v1/pulls/acme/web/42', { token, form, method: 'PUT' })
     expect(r.status).toBe(200)
     expect(r.data).toMatchObject({ annotations: 3, files: 1 })
@@ -110,13 +113,13 @@ describe('reviews42', () => {
   it('keeps same-named uploads apart and every stored file reachable', async () => {
     const long = `${'a'.repeat(96)}.png`, form = new FormData()
     form.set('payload', JSON.stringify({ annotations: [] }))
-    form.append('file', new File(['one'], long))
-    form.append('file', new File(['two'], long))
+    form.append('file', new File([png()], long))
+    form.append('file', new File([png(20)], long))
     const r = await call('/api/v1/pulls/acme/web/42', { token, form, method: 'PUT' })
     expect(r.data.files).toBe(2)
     const p = (await call(`/api/pulls/${pullId}`, { token })).data
     expect(p.files).toHaveLength(2)
-    for (const f of p.files) expect((await call(f, { token })).status).toBe(200)
+    for (const f of p.files) expect((await call(f.url, { token })).status).toBe(200)
     expect((await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: null })).status).toBe(400)
   })
 
@@ -139,9 +142,39 @@ describe('reviews42', () => {
     expect(repos.map((r: { full_name: string }) => r.full_name)).toEqual(['acme/api', 'acme/web'])
   })
 
+  it('accepts only real images and UTF-8 text up to 1 MB, and serves text as plain text', async () => {
+    const up = async (...files: File[]) => {
+      const form = new FormData()
+      form.set('payload', JSON.stringify({ annotations: [{ path: 'r.md', body: 'see [report](attachment:report.md)' }] }))
+      for (const f of files) form.append('file', f)
+      return call('/api/v1/pulls/acme/web/43', { token, form, method: 'PUT' })
+    }
+    const gif = new File([new TextEncoder().encode('GIF89a......')], 'anim.gif')
+    const ok = await up(gif, new File(['# Report\n| a | b |'], 'report.md'), new File(['a,b\n1,2'], 'data.csv'), new File(['hi'], 'notes.txt'))
+    expect(ok.status).toBe(200)
+    const p = (await call('/api/v1/pulls/acme/web/43', { token })).data
+    expect(p.files.map((f: { name: string; type: string }) => `${f.name}:${f.type}`).sort())
+      .toEqual(['anim.gif:image/gif', 'data.csv:text/csv', 'notes.txt:text/plain', 'report.md:text/markdown'])
+    expect(p.annotations[0].body).toContain(`/files/${p.id}/report.md`)
+    const md = await call(`/files/${p.id}/report.md`, { token })
+    expect(md.res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+    expect(md.res.headers.get('content-security-policy')).toBe('sandbox')
+    expect((await call(`/files/${p.id}/anim.gif`, { token })).res.headers.get('content-type')).toBe('image/gif')
+    // refused: wrong extension, fake image, binary text, too big; a refused upload keeps the previous files
+    expect((await up(new File(['<svg onload=alert(1)>'], 'x.svg'))).status).toBe(415)
+    expect((await up(new File(['<script>'], 'x.html'))).status).toBe(415)
+    expect((await up(new File(['not a png'], 'fake.png'))).status).toBe(415)
+    expect((await up(new File([new Uint8Array([0x41, 0, 0x42])], 'bin.txt'))).status).toBe(415)
+    expect((await up(new File([new Uint8Array([0xff, 0xfe, 0xfd])], 'latin.txt'))).status).toBe(415)
+    expect((await up(new File([png(1024 * 1024 + 1)], 'big.png'))).status).toBe(413)
+    expect((await call('/api/v1/pulls/acme/web/43', { token })).data.files).toHaveLength(4)
+    expect((await call('/api/v1/pulls/acme/web/43', { token, method: 'DELETE' })).status).toBe(200)
+  })
+
   it('purges expired pull requests with their files', async () => {
     db.prepare('update pulls set expires_at = ? where id = ?').run('2000-01-01T00:00:00.000Z', pullId)
-    expect(purgeExpired()).toBe(1)
+    expect(await purge()).toBe(1)
+    expect(db.prepare('select count(*) as n from files where pull_id = ?').get(pullId)).toEqual({ n: 0 })
     expect((await call('/api/v1/pulls/acme/web/42', { token })).status).toBe(404)
   })
 
@@ -196,7 +229,7 @@ describe('reviews42', () => {
   it('shows an account overview with storage per repository', async () => {
     const form = new FormData()
     form.set('payload', JSON.stringify({ title: 'Overview', annotations: [{ path: 'a.ts', line: 1, body: 'x' }, { path: 'b.ts', body: 'y' }] }))
-    form.append('file', new File([new Uint8Array(10)], 'shot.png', { type: 'image/png' }))
+    form.append('file', new File([png(10)], 'shot.png', { type: 'image/png' }))
     expect((await call('/api/v1/pulls/acme/web/7', { token, form, method: 'PUT' })).status).toBe(200)
     const o = (await call(`/api/accounts/${accountId}/overview`, { cookie: member })).data
     expect(o.totals).toMatchObject({ members: 2, admins: 2, repositories: 2, pulls: 1, annotations: 2, files: 1, bytes: 10 })
@@ -226,5 +259,53 @@ describe('reviews42', () => {
     const other = (await call('/api/dashboard', { cookie: admin })).data.accounts.find((a: { name: string }) => a.name === 'Other')
     expect((await call(`/api/accounts/${other.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
     expect((await call(`/api/accounts/${other.id}`, { cookie: admin })).status).toBe(404)
+  })
+
+  it('stores files in an S3-compatible bucket when a super admin sets one up, and deletes them with the PR', async () => {
+    const http = await import('node:http')
+    const objects = new Map<string, Buffer>(), seen: string[] = []
+    const server = http.createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (d) => chunks.push(d)).on('end', () => {
+        seen.push(`${req.method} ${req.url}`)
+        if (!String(req.headers.authorization).startsWith('AWS4-HMAC-SHA256 Credential=KEY/')) { res.statusCode = 403; return res.end('unsigned') }
+        if (req.method === 'PUT') objects.set(req.url!, Buffer.concat(chunks))
+        if (req.method === 'DELETE') objects.delete(req.url!)
+        if (req.method === 'GET' && !objects.has(req.url!)) res.statusCode = 404
+        res.end(req.method === 'GET' ? objects.get(req.url!) : '')
+      })
+    }).listen(0)
+    const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const cfg = { kind: 's3', endpoint, region: 'us-west-004', bucket: 'r42-files', key_id: 'KEY', secret: 'SECRET', prefix: 'prod' }
+    expect((await call('/api/admin/storage', { cookie: member, method: 'PUT', body: cfg })).status).toBe(404)
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'Bad_Bucket' } })).status).toBe(400)
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: cfg })).status).toBe(200)
+    const st = (await call('/api/admin/storage', { cookie: admin })).data.storage
+    expect(st).toMatchObject({ kind: 's3', bucket: 'r42-files', prefix: 'prod/', has_secret: true })
+    expect(JSON.stringify(st)).not.toContain('SECRET')
+    expect(JSON.stringify(db.prepare(`select value from settings where key = 'storage'`).get())).not.toContain('SECRET')
+
+    const form = new FormData()
+    form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: '![x](attachment:s3.png)' }] }))
+    form.append('file', new File([png(32)], 's3.png'))
+    const up = await call('/api/v1/pulls/acme/web/44', { token, form, method: 'PUT' })
+    expect(up.status).toBe(200)
+    const key = `/r42-files/prod/pulls/${up.data.id}/s3.png`
+    expect(objects.get(key)?.length).toBe(32)
+    expect(fs.existsSync(path.join(process.env.DATA_DIR!, 'uploads', up.data.id))).toBe(false)
+    const img = await call(`/files/${up.data.id}/s3.png`, { token })
+    expect(img.status).toBe(200)
+    expect(img.res.headers.get('content-type')).toBe('image/png')
+
+    // blank secret keeps the stored one; the lifecycle rule is a signed bucket-level PUT
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, secret: '' } })).status).toBe(200)
+    expect((await call('/api/admin/storage/lifecycle', { cookie: admin, body: {} })).data).toMatchObject({ ok: true, days: 31 })
+    expect(seen).toContain('PUT /r42-files/?lifecycle=')
+
+    db.prepare('update pulls set expires_at = ? where id = ?').run('2000-01-01T00:00:00.000Z', up.data.id)
+    expect(await purge()).toBe(1)
+    expect(objects.has(key)).toBe(false)
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 'disk' } })).status).toBe(200)
+    server.close()
   })
 })

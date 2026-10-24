@@ -1,15 +1,19 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
 import { Code, Landing } from './landing.tsx'
 
-declare global { var r42Markdown: (md: string) => string }
+declare global {
+  var r42Markdown: (md: string) => string
+  var r42Preview: (name: string, text: string) => string
+}
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { path: string; line: number | null; end_line: number | null; side: string; title: string; body: string }
-type Pull = { id: string; repository: string; number: number; title: string; summary: string; updated_at: string; expires_at: string; annotations: Annotation[] }
+type Pull = { id: string; repository: string; number: number; title: string; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
+  files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
   const res = await fetch(url, {
@@ -32,7 +36,72 @@ const bytes = (n: number) => {
 }
 const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) =>
   <a href={to} className={className} onClick={(e) => { if (!e.metaKey && !e.ctrlKey) { e.preventDefault(); go(to) } }}>{children}</a>
-const Md = ({ text }: { text: string }) => <div className="md" dangerouslySetInnerHTML={{ __html: r42Markdown(text) }} />
+// Markdown, cut to a few lines when long with a show more / less toggle (re-measured when images load)
+function Md({ text, clamp = true }: { text: string; clamp?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [open, setOpen] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !clamp) return
+    const measure = () => setLong(el.scrollHeight > 280)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el.firstElementChild ?? el)
+    measure()
+    return () => ro.disconnect()
+  }, [text, clamp])
+  return <>
+    <div ref={ref} className={`md${clamp && long && !open ? ' clamped' : ''}`}><div dangerouslySetInnerHTML={{ __html: r42Markdown(text) }} /></div>
+    {long && <button type="button" className="link more" onClick={() => setOpen(!open)}>{open ? 'show less ↑' : 'show more ↓'}</button>}
+  </>
+}
+
+// Gallery for every image in a note, the summary or the attachments: click one, ← → to move, Esc to close
+function Gallery() {
+  const [g, setG] = useState<{ imgs: { src: string; alt: string }[]; i: number } | null>(null)
+  useEffect(() => {
+    const click = (e: MouseEvent) => {
+      const img = (e.target as HTMLElement).closest?.('.md img, .file-card img') as HTMLImageElement | null
+      if (!img || img.closest('.gallery')) return
+      e.preventDefault()
+      const group = [...(img.closest('.note, .card, .files') ?? document).querySelectorAll<HTMLImageElement>('.md img, .file-card img')]
+      setG({ imgs: group.map((x) => ({ src: x.src, alt: x.alt })), i: Math.max(0, group.indexOf(img)) })
+    }
+    document.addEventListener('click', click)
+    return () => document.removeEventListener('click', click)
+  }, [])
+  useEffect(() => {
+    if (!g) return
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setG(null)
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') setG({ ...g, i: (g.i + (e.key === 'ArrowRight' ? 1 : -1) + g.imgs.length) % g.imgs.length })
+    }
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  }, [g])
+  if (!g) return null
+  const move = (d: number) => (e: React.MouseEvent) => { e.stopPropagation(); setG({ ...g, i: (g.i + d + g.imgs.length) % g.imgs.length }) }
+  const cur = g.imgs[g.i]
+  return <div className="gallery" role="dialog" aria-label="Image gallery" onClick={() => setG(null)}>
+    <img src={cur.src} alt={cur.alt} onClick={g.imgs.length > 1 ? move(1) : undefined} />
+    <div className="cap">{cur.alt || 'image'}{g.imgs.length > 1 && ` · ${g.i + 1} / ${g.imgs.length}`}</div>
+    {g.imgs.length > 1 && <>
+      <button type="button" className="nav prev" aria-label="Previous image" onClick={move(-1)}>‹</button>
+      <button type="button" className="nav next" aria-label="Next image" onClick={move(1)}>›</button>
+    </>}
+  </div>
+}
+
+// an attached md, csv or txt file, fetched and rendered like the extension does
+function Attachment({ f }: { f: { name: string; type: string; size: number; url: string } }) {
+  const [html, setHtml] = useState<string>()
+  useEffect(() => {
+    if (!f.type.startsWith('image/')) fetch(f.url).then((r) => r.text()).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
+  }, [f.url])
+  return <div className="file-card">
+    <div className="where"><a href={f.url} target="_blank" rel="noreferrer">{f.name}</a> · {bytes(f.size)}</div>
+    {f.type.startsWith('image/') ? <img src={f.url} alt={f.name} />
+      : html !== undefined && <div className="md preview" dangerouslySetInnerHTML={{ __html: html }} />}
+  </div>
+}
 const Stat = ({ label, value }: { label: string; value: ReactNode }) => <div className="stat"><b>{value}</b><span>{label}</span></div>
 
 function useLoad<T>(url: string) {
@@ -351,6 +420,10 @@ function PullPage({ id }: { id: string }) {
         <Md text={n.body} />
       </div>)}
     </div>)}
+    {!!data.files?.length && <>
+      <h2>attachments</h2>
+      <div className="files">{data.files.map((f) => <Attachment key={f.name} f={f} />)}</div>
+    </>}
   </>
 }
 
@@ -447,6 +520,64 @@ function Admin({ user }: { user: User }) {
       </tr>)}</tbody>
     </table></div>
     {err && <div className="error">{err}</div>}
+    <StorageSettings />
+  </>
+}
+
+type StorageCfg = { kind: 'disk' | 's3'; endpoint?: string; region?: string; bucket?: string; key_id?: string; prefix?: string; has_secret?: boolean }
+// endpoint and region examples per provider; any S3-compatible service works
+const PRESETS: Record<string, [endpoint: string, region: string, note: string]> = {
+  'Backblaze B2': ['https://s3.us-west-004.backblazeb2.com', 'us-west-004',
+    'Use the bucket\'s Endpoint from its B2 page; the region is the part after "s3.". Keys: Application Keys → keyID + applicationKey. '
+    + 'B2 keeps old versions by default: set the bucket\'s Lifecycle Settings to "Keep only the last version" so deleted files really go.'],
+  'Cloudflare R2': ['https://<account-id>.r2.cloudflarestorage.com', 'auto', 'R2 → Manage API tokens → Object Read & Write for this bucket.'],
+  'AWS S3': ['https://s3.eu-central-1.amazonaws.com', 'eu-central-1', 'An IAM user with s3:PutObject, s3:GetObject, s3:DeleteObject and s3:PutLifecycleConfiguration on the bucket.'],
+  MinIO: ['https://minio.example.com', 'us-east-1', 'Path-style URLs, as MinIO expects by default.'],
+}
+function StorageSettings() {
+  const { data, reload } = useLoad<{ storage: StorageCfg; counts: { backend: string; files: number; bytes: number }[]; retention_days: number }>('/api/admin/storage')
+  const [f, setF] = useState<StorageCfg & { secret?: string }>(), [note, setNote] = useState(''), [ok, setOk] = useState('')
+  useEffect(() => { if (data) setF({ ...data.storage, secret: '' }) }, [data])
+  const save = useSubmit(async () => { setOk(''); await api('/api/admin/storage', f, 'PUT'); setOk(f?.kind === 's3' ? 'bucket checked (write, read, delete) and saved' : 'saved'); reload() })
+  const rule = useSubmit(async () => { const r = await api('/api/admin/storage/lifecycle', {}); setOk(`bucket rule set: files under the prefix expire after ${r.days} days`) })
+  if (!data || !f) return null
+  const set = (k: keyof StorageCfg | 'secret') => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
+  return <>
+    <h2>file storage</h2>
+    <p className="hint">Where uploaded screenshots and files go. Existing files stay where they were written.
+      {data.counts.map((c) => ` ${c.backend}: ${c.files} files, ${bytes(c.bytes)}.`)}</p>
+    <form className="stack card" onSubmit={save.submit}>
+      <label>storage
+        <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as 'disk' | 's3' })}>
+          <option value="disk">disk (DATA_DIR/uploads)</option><option value="s3">S3-compatible bucket</option>
+        </select></label>
+      {f.kind === 's3' && <>
+        <div className="presets">{Object.entries(PRESETS).map(([name, [endpoint, region, n]]) =>
+          <button type="button" key={name} onClick={() => { setF({ ...f, endpoint, region }); setNote(n) }}>{name}</button>)}</div>
+        {note && <p className="hint">{note}</p>}
+        <label>endpoint<input value={f.endpoint ?? ''} onChange={set('endpoint')} placeholder="https://s3.us-west-004.backblazeb2.com" /></label>
+        <div className="two">
+          <label>region<input value={f.region ?? ''} onChange={set('region')} placeholder="auto" /></label>
+          <label>bucket<input value={f.bucket ?? ''} onChange={set('bucket')} placeholder="reviews42-files" /></label>
+        </div>
+        <div className="two">
+          <label>key id<input value={f.key_id ?? ''} onChange={set('key_id')} autoComplete="off" /></label>
+          <label>secret key<input type="password" value={f.secret ?? ''} onChange={set('secret')} autoComplete="new-password"
+            placeholder={f.has_secret ? 'saved, leave blank to keep' : ''} /></label>
+        </div>
+        <label>prefix (folder inside the bucket)<input value={f.prefix ?? ''} onChange={set('prefix')} placeholder="reviews42/" /></label>
+      </>}
+      {save.error && <div className="error">{save.error}</div>}
+      {ok && <div className="ok">{ok}</div>}
+      <div><button className="primary" disabled={save.busy}>{save.busy ? 'checking…' : 'save'}</button></div>
+    </form>
+    {data.storage.kind === 's3' && <div className="card" style={{ marginTop: 12 }}>
+      <p>Files are deleted from the bucket when their PR expires ({data.retention_days} days after the last upload). As a safety net, add a bucket
+        rule that expires everything under the prefix after {data.retention_days + 1} days. It replaces the bucket's lifecycle rules: use a bucket
+        just for Reviews42. Some providers (Backblaze B2) only accept rules in their console.</p>
+      <button type="button" onClick={() => rule.submit()} disabled={rule.busy}>set the expiry rule on the bucket</button>
+      {rule.error && <div className="error">{rule.error}</div>}
+    </div>}
   </>
 }
 
@@ -482,7 +613,7 @@ function App() {
   else if (path === '/settings') page = <Settings />
   else if (path === '/admin' && me.user.admin) page = <Admin user={me.user} />
   else page = <Dashboard />
-  return <AppLayout me={me} path={path}>{page}</AppLayout>
+  return <AppLayout me={me} path={path}>{page}<Gallery /></AppLayout>
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)

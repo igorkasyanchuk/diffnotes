@@ -29,10 +29,20 @@ never write it into files or commits.
 - **One note per changed block** (a run of consecutive added/removed lines), anchored to the block's first line.
   Removed-only blocks get a note on the old side (`"side": "LEFT"`, old line number).
 - **New, renamed or deleted files get one file note** (no `line`), not per-line notes.
-- **Screenshots and files are welcome** when they show the change better than words (UI before/after, a generated
-  report, a short screen recording). Reference each upload in a note's Markdown as `attachment:<file name>`.
-- Markdown in `body` and `summary`: paragraphs, `**bold**`, `*italic*`, `` `code` ``, lists, `>` quotes, fenced code,
-  `[links](https://…)` and images `![alt](attachment:shot.png)`.
+- **Screenshots and files are welcome** when they show the change better than words. Reference each upload in a
+  note's Markdown as `attachment:<file name>`:
+  - images: `![Checkout on mobile](attachment:checkout-mobile.png)`. Put **several images in one note** when they belong
+    together, e.g. a component at mobile and desktop width, or before and after: reviewers flip through them in a gallery
+    with the arrow keys. The alt text is the caption, so make it say what the image shows.
+  - reports and data: `[test report](attachment:report.md)`, `[timings](attachment:bench.csv)`, `[log](attachment:out.txt)`;
+    they open as a rendered preview (Markdown, a CSV table, plain text).
+- **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.md .csv .txt` (UTF-8 text).
+  Up to **1 MB each**, 30 files and 20 MB per PR. Anything else (svg, html, pdf, zip, video) is refused with `415`:
+  convert it first (a PNG screenshot instead of an SVG, a Markdown summary instead of a PDF). Keep screenshots small:
+  crop to the part that changed, PNG for UI, JPG for photos.
+- Markdown in `body` and `summary`: headings, paragraphs, `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, lists and
+  `- [x]` task lists, `>` quotes, fenced code, tables, `---`, `[links](https://…)` and images. Long notes are cut with a
+  "show more" toggle, so put the point in the first two lines.
 
 ## Workflow
 
@@ -50,7 +60,8 @@ never write it into files or commits.
    For an edited block, `line` is the first new line (`+new` in the hunk header) and `end_line` the last
    (`new + m - 1`); for a removed-only block use `"side": "LEFT"` and the old numbers.
 3. **Screenshots** (optional): when the change is visible in a UI and you can run it, take before/after shots
-   with whatever browser tool you have and save them next to the payload.
+   with whatever browser tool you have and save them next to the payload. For responsive UI, shoot the same screen at
+   mobile (~390px) and desktop (~1280px) width and put both in one note.
 4. **Write `reviews42.json`** (outside the repo, e.g. in a temp dir):
    ```json
    {
@@ -74,8 +85,9 @@ never write it into files or commits.
    # JSON only, no files: -H 'content-type: application/json' --data-binary @reviews42.json
    # → {"id":"…","url":"…/pulls/<id>","annotations":3,"files":2}
    ```
-   Files up to 10 MB each, 50 MB per PR. `404` = the repository belongs to an account you are not in;
-   `401` = bad token. A new repository is connected to your account on its first upload.
+   `404` = the repository belongs to an account you are not in; `401` = bad token; `413` = too many or too big files;
+   `415` = a file type that isn't allowed or doesn't match its extension. A new repository is connected to your account on
+   its first upload.
 6. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"` returns what
    was stored; the `annotations` count must match what you wrote.
 
