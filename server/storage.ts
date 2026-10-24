@@ -34,7 +34,9 @@ export async function s3(cfg: S3Config, method: string, key: string, body?: Buff
   delete (headers as Record<string, string>).host
   const res = await fetch(url, { method, headers, body: body && method !== 'GET' ? new Uint8Array(body) : undefined, signal: AbortSignal.timeout(30_000) })
   if (!res.ok && !(method === 'DELETE' && res.status === 404)) {
-    throw new Error(`S3 ${method} ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    // only the S3 error code, never the body: the endpoint is admin-set and could be any internal service
+    const code = (await res.text()).match(/<Code>(\w{1,64})<\/Code>/)?.[1]
+    throw new Error(`S3 ${method} ${res.status}${code ? `: ${code}` : ''}`)
   }
   return res
 }

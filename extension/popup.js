@@ -13,6 +13,7 @@ async function show() {
     btn.textContent = 'Remove'
     btn.addEventListener('click', async () => {
       await chrome.storage.local.set({ servers: (await servers()).filter((x) => x.server !== s.server) })
+      chrome.permissions.remove({ origins: [`${s.server}/*`] }).catch(() => {})
       show()
     })
     row.append(info, btn)
@@ -28,7 +29,10 @@ $('connect').addEventListener('submit', async (e) => {
   e.preventDefault()
   $('error').textContent = ''
   try {
-    const server = new URL($('server').value.trim()).origin, token = $('token').value.trim()
+    const url = new URL($('server').value.trim()), server = url.origin, token = $('token').value.trim()
+    // the token goes with every request: plain http only to this computer
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))
+      throw new Error('Use the https:// address of your server (http only works for localhost)')
     // servers are self-hosted, so each origin is asked for when it is connected
     if (!(await chrome.permissions.request({ origins: [`${server}/*`] }))) throw new Error('Permission to reach the server was denied')
     const res = await fetch(`${server}/api/v1/me`, { headers: { authorization: `Bearer ${token}` } })

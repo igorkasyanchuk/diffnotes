@@ -39,7 +39,7 @@ db.exec(`
     name text not null, hash text not null unique, created_at text not null, last_used_at text);
   create table if not exists repositories (
     id text primary key, account_id text not null references accounts(id) on delete cascade,
-    full_name text not null collate nocase unique, created_at text not null);
+    full_name text not null collate nocase, created_at text not null, unique (account_id, full_name));
   create table if not exists pulls (
     id text primary key, repository_id text not null references repositories(id) on delete cascade,
     number integer not null, title text not null default '', head_sha text not null default '', summary text not null default '',
@@ -59,6 +59,22 @@ db.exec(`
   -- the first release invited co-owners; an account has one owner now, so pending owner invites make admins
   update invites set role = 'admin' where role = 'owner';
 `)
+
+// Repository names were unique server-wide, so whoever connected a name first locked every other account out of it.
+// Now they're unique per account: rebuild the table once (SQLite can't drop a constraint), keeping ids so pulls stay linked.
+if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get() as { sql: string }).sql.includes('nocase unique')) {
+  db.exec('pragma foreign_keys = off; begin immediate')
+  try {
+    if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get() as { sql: string }).sql.includes('nocase unique')) db.exec(`
+      create table repositories_new (
+        id text primary key, account_id text not null references accounts(id) on delete cascade,
+        full_name text not null collate nocase, created_at text not null, unique (account_id, full_name));
+      insert into repositories_new select id, account_id, full_name, created_at from repositories;
+      drop table repositories;
+      alter table repositories_new rename to repositories;`)
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); throw e } finally { db.exec('pragma foreign_keys = on') }
+}
 
 export const now = () => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')

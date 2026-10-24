@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reviews42",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows your team's Reviews42 annotations on GitHub, GitLab and Bitbucket pull requests.",
   "icons": {
     "16": "icon16.png",
@@ -31,7 +31,8 @@
   ],
   "optional_host_permissions": [
     "https://*/*",
-    "http://*/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "content_scripts": [
     {
@@ -56,13 +57,14 @@
     ]
   },
   "content_security_policy": {
-    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; frame-src 'none'; form-action 'none'; base-uri 'none'"
   },
   "web_accessible_resources": [
     {
       "resources": [
         "demo.html"
       ],
+      "use_dynamic_url": true,
       "matches": [
         "https://github.com/*",
         "https://gitlab.com/*",

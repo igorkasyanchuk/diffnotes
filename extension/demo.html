@@ -1,11 +1,17 @@
 <!doctype html>
 <meta charset="utf-8">
 <!-- A sandboxed extension page (manifest "sandbox"): opaque origin, no extension APIs, no access to github.com.
-     The CSP in manifest.json blocks every network request; the content script posts the uploaded HTML once. -->
+     The CSP in manifest.json blocks every network request. The content script posts the uploaded HTML once; it runs in
+     a srcdoc frame inside this page, which inherits the CSP, and whose navigations (location = 'https://…', meta
+     refresh) this page's frame-src 'none' refuses, so a demo can't swap itself for a live page. -->
+<style>html, body, iframe { display: block; width: 100%; height: 100%; margin: 0; border: 0; }</style>
 <script>
   addEventListener('message', function load(e) {
     if (e.source !== parent || typeof e.data?.r42Demo !== 'string') return
     removeEventListener('message', load)
-    document.open(); document.write(e.data.r42Demo); document.close()
+    const f = document.createElement('iframe')
+    f.sandbox = 'allow-scripts'
+    f.srcdoc = e.data.r42Demo
+    document.body.append(f)
   })
 </script>

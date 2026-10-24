@@ -2,7 +2,8 @@
 // Everything is escaped first; only http(s), relative and /files/ URLs survive. resolve(url) turns /files/… into a usable src.
 ;(() => {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-  const safeUrl = (u) => (/^(https?:\/\/|\/(?!\/))/i.test(u) ? u : '')
+  // `/\\host` is no relative path: browsers read it as //host
+  const safeUrl = (u) => (/^(https?:\/\/|\/(?![\/\\]))/i.test(u) ? u : '')
 
   function inline(text, resolve) {
     // code spans and tags with attributes are swapped for \u0000n\u0000 so later passes never rewrite inside them

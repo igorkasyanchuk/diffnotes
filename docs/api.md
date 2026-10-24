@@ -3,7 +3,7 @@
 ← [README](../README.md)
 
 Authenticate with a token from Settings: `authorization: Bearer r42_…`. The web app uses the same routes with its
-session cookie.
+session cookie. Tokens work only on `/api/v1/*` and `/files/*`: they can't make tokens, change passwords or reach `/admin`.
 
 | Method | Path | |
 |---|---|---|
@@ -37,10 +37,12 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - `line` / `end_line`: new-side line numbers; `side: "LEFT"` for removed lines; no `line` = a note on the whole file.
 - `attachment:<file name>` anywhere in `summary` or `body` becomes the uploaded file's URL.
 - Each PUT replaces the previous notes and files and restarts the expiry.
-- An unknown repository is connected to the uploader's account.
+- A repository is looked up in the uploader's accounts (the same name can be connected in several accounts). Not
+  connected in any of them: it is connected to the account the uploader owns or administers; a member gets `403`.
+- Account limits: `MAX_PULLS` live PRs and `MAX_ACCOUNT_MB` of files (see [install](install.md)); over them, `413`.
 
-Response: `{"id", "url", "annotations", "files"}`. Errors: `400` bad payload, `401` bad token, `404` repository of another
-account, `413` too many / too big, `415` file type not allowed (see [security](security.md)).
+Response: `{"id", "url", "annotations", "files"}`. Errors: `400` bad payload, `401` bad token, `403` repository not
+connected and you're only a member, `413` too many / too big / account full, `415` file type not allowed (see [security](security.md)).
 
 ```bash
 curl -fsS -X PUT "$REVIEWS42_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $REVIEWS42_TOKEN" \

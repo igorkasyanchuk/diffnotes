@@ -22,8 +22,7 @@
     head.type = 'button'
     head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)), el('span', 'r42-where', where(a)))
     const body = el('div', 'r42-body r42-md')
-    body.innerHTML = r42Markdown(a.body) // escaped by r42Markdown; only http(s) and relative URLs survive
-    loadImages(body, a.server)
+    body.append(md(a.body, a.server))
     const set = (c) => { collapsed.set(i, c); box.classList.toggle('r42-collapsed', c) }
     set(collapsed.get(i) ?? false)
     head.addEventListener('click', () => { set(!box.classList.contains('r42-collapsed')); clampAll() })
@@ -31,6 +30,14 @@
     return box
   }
 
+  // Markdown as nodes, escaped by r42Markdown (only http(s) and relative URLs survive). Parsed in an inert <template>, so
+  // no image starts loading before loadImages() points /files/… at the right server (else github.com would get them)
+  function md(text, server) {
+    const t = document.createElement('template')
+    t.innerHTML = r42Markdown(text)
+    loadImages(t.content, server)
+    return t.content
+  }
   // server: the Reviews42 server the Markdown came from; its /files/… are fetched by the background with its token
   function loadImages(root, server) {
     root.querySelectorAll('img[data-r42-src]').forEach((img) => {
@@ -63,7 +70,7 @@
       files() {
         const rowFor = (table) => (a) => {
           const side = a.side === 'LEFT' ? 'left' : 'right'
-          for (const cell of table.querySelectorAll(`td[data-line-number="${a.line}"]`)) {
+          for (const cell of table.querySelectorAll(`td[data-line-number="${Number(a.line)}"]`)) {
             const row = cell.closest('tr')
             const s = cell.dataset.diffSide ?? (row.querySelector('td.blob-num') === cell ? 'left' : 'right')
             if (s === side) return row
@@ -92,7 +99,7 @@
         let path = ''
         try { path = JSON.parse(box.querySelector('[data-testid="rd-diff-file-copy-clipboard"]')?.dataset.clipboardText ?? '{}').text ?? '' } catch {}
         const top = box.querySelector('[data-testid="rd-diff-file-body"]')
-        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`td.rd-line-number[data-position="${a.side === 'LEFT' ? 'old' : 'new'}"] a[data-line-number="${a.line}"]`)) }
+        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`td.rd-line-number[data-position="${a.side === 'LEFT' ? 'old' : 'new'}"] a[data-line-number="${Number(a.line)}"]`)) }
       }).filter(Boolean),
     },
     // Bitbucket Cloud: <article data-qa=branch-diff-file>, a div grid whose gutter cells carry both line numbers
@@ -101,7 +108,7 @@
       files: () => [...document.querySelectorAll('[data-qa="branch-diff-file"]')].map((box) => {
         const path = norm(box.querySelector('[data-qa="bk-filepath"]')?.textContent ?? '').replace(/\s*\/\s*/g, '/')
         const top = box.querySelector('[data-qa="bk-file__content"]')
-        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`[data-${a.side === 'LEFT' ? 'old' : 'new'}-line-number="${a.line}"]`)) }
+        return path && top && { path, box, top, rowFor: (a) => lineRow(box.querySelector(`[data-${a.side === 'LEFT' ? 'old' : 'new'}-line-number="${Number(a.line)}"]`)) }
       }).filter(Boolean),
     },
   }
@@ -252,8 +259,8 @@
     const body = el('div', 'r42-box-body')
     for (const p of pull.pulls.filter((x) => x.summary)) {
       const s = el('div', 'r42-md r42-summary')
-      s.innerHTML = (many ? `<h6>${new URL(p.server).host}</h6>` : '') + r42Markdown(p.summary)
-      loadImages(s, p.server)
+      if (many) s.append(el('h6', '', new URL(p.server).host))
+      s.append(md(p.summary, p.server))
       body.append(s)
     }
     for (const e of pull.errors) body.append(el('div', 'r42-hint', e))

@@ -13,8 +13,8 @@ a PR is visible only to members of the account that owns its repository. Anyone 
 | **admin** | invite people (as admin or member), change roles, remove members, add and remove repositories, rename the account |
 | **member** | read the account's notes, upload notes with the skill |
 
-A repository is connected to an account on its first upload (to the uploader's account where they're owner or admin
-first), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab
+A repository is connected to an account on its first upload by an owner or admin (a member's first upload is refused
+until an admin connects it), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab
 and Bitbucket (`gitlab.com/group/project`, `bitbucket.org/team/app`), or just paste the repository's URL.
 
 ## Invitations

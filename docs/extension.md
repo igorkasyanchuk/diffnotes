@@ -15,7 +15,8 @@ Until it is in the Chrome Web Store, load it from this repository:
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
 3. Pin **Reviews42**, open its popup, enter your server (`https://reviews.company.com`) and a token from the server's
-   **Settings**, press **Connect** and allow access to that server.
+   **Settings**, press **Connect** and allow access to that server. The token goes with every request, so the server
+   must be `https://` (plain `http://` only for `localhost`).
 
 After `git pull`, press the reload icon on the extension's card.
 

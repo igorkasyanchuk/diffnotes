@@ -23,9 +23,16 @@ const MAX_PULL = Number(process.env.MAX_PULL_MB ?? 20) * MB
 const MAX_FILES = 30 // per pull request
 const MAX_BODY = Number(process.env.MAX_BODY_KB ?? 1024) * 1024
 const MAX_ANNOTATIONS = 500
+const MAX_ACCOUNT = Number(process.env.MAX_ACCOUNT_MB ?? 1024) * MB // files of all of an account's pull requests
+const MAX_PULLS = Number(process.env.MAX_PULLS ?? 1000) // live pull requests per account
 const INVITE_DAYS = 7
 const ROOT = path.resolve(import.meta.dirname, '..')
-const host = (c: Context) => process.env.PUBLIC_URL ?? new URL(c.req.url).origin
+// without PUBLIC_URL the Host header decides, and it lands in install.sh (shell) and HTML: only a plain host[:port] passes
+const host = (c: Context) => {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '')
+  const origin = new URL(c.req.url).origin
+  return /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin) ? origin : 'http://localhost'
+}
 const DIST = path.relative(process.cwd(), path.join(ROOT, 'dist'))
 const DUMMY_HASH = hashPassword(randomUUID())
 
@@ -41,6 +48,13 @@ type Env = { Variables: { user: User } }
 export const app = new Hono<Env>()
 
 app.use(secureHeaders({ referrerPolicy: 'no-referrer' }))
+// Cookie-signed-in writes must come from this site's own pages. SameSite=Lax lets sibling subdomains through, so ask
+// the browser (Sec-Fetch-Site); curl, the skill and the extension send Bearer tokens instead and aren't affected.
+app.use('/api/*', async (c, next) => {
+  const site = c.req.header('sec-fetch-site')
+  if (c.req.method !== 'GET' && !c.req.header('authorization') && site && site !== 'same-origin' && site !== 'none') return c.json({ error: 'Cross-site request refused' }, 403)
+  await next()
+})
 app.use('/api/*', bodyLimit({ maxSize: MAX_PULL, onError: (c) => c.json({ error: 'Too large' }, 413) }))
 // Optional error tracking: a Sentry envelope to any Sentry-compatible DSN (Bugsink, GlitchTip, Sentry).
 // Only the route pattern is sent, never the path or body.
@@ -84,6 +98,8 @@ const USER_COLS = 'u.id, u.email, u.name, u.admin'
 async function currentUser(c: Context): Promise<User | undefined> {
   const bearer = c.req.header('authorization')?.match(/^Bearer (\S+)$/)?.[1]
   if (bearer) {
+    // tokens are for the skill and the extension: annotations and files only, never tokens, passwords or /admin
+    if (!/^\/(api\/v1|files)\//.test(c.req.path)) return
     const user = db.prepare(`select ${USER_COLS}, t.id as token_id from tokens t join users u on u.id = t.user_id where t.hash = ?`)
       .get(sha256(bearer)) as (User & { token_id: string }) | undefined
     if (!user) return
@@ -122,16 +138,23 @@ function throttle(key: string, limit: number, windowMs: number) {
 }
 // re-reads the key: a sweep in a later throttle() call may have dropped an entry that was still empty
 const recordFailure = (key: string) => failures.set(key, [...(failures.get(key) ?? []), Date.now()])
+// Per IP + email is the tight budget. Per IP stops one client spraying emails; per email (loose) stops many IPs guessing
+// one password, and is high enough that a stranger can't lock a known user out without a lot of addresses.
+const loginKeys = (c: Context, email: string) => { const ip = clientIp(c); return [`ie:${ip}:${email}`, `i:${ip}`, `e:${email}`] }
+const throttled = ([ie, i, e]: string[]) => throttle(ie, 10, 600_000) || throttle(`${ie}:s`, 1, 1000) || throttle(i, 100, 600_000) || throttle(e, 50, 600_000)
+const failed = (keys: string[]) => [...keys, `${keys[0]}:s`].forEach(recordFailure)
+// ponytail: trusts the proxy's client-IP headers (Cloudflare, then Traefik/nginx); reachable without a proxy, they can be
+// spoofed, which only moves a guesser from the per-IP budgets to the per-email one
 const clientIp = (c: Context) =>
   c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? (() => { try { return getConnInfo(c).remote.address } catch { return '' } })() ?? ''
 
 app.post('/api/login', async (c) => {
   const body = await json(c)
-  const email = str(body.email).toLowerCase(), keys = [`e:${email}`, `ie:${clientIp(c)}:${email}`]
-  if (throttle(keys[0], 20, 600_000) || throttle(keys[1], 1, 1000)) return c.json({ error: 'Too many attempts, wait a bit' }, 429)
+  const email = str(body.email).toLowerCase(), keys = loginKeys(c, email)
+  if (throttled(keys)) return c.json({ error: 'Too many attempts, wait a bit' }, 429)
   const row = db.prepare('select id, password from users where email = ?').get(email) as { id: string; password: string } | undefined
   if (!verifyPassword(String(body.password ?? ''), row?.password ?? DUMMY_HASH) || !row) {
-    keys.forEach(recordFailure)
+    failed(keys)
     return c.json({ error: 'Wrong email or password' }, 401)
   }
   await startSession(c, row.id)
@@ -172,10 +195,10 @@ app.post('/api/invites/:token/accept', async (c) => {
   const inv = inviteRow(token) ?? fail(404, 'This invitation is invalid or expired')
   const password = String(body.password ?? '')
   let user = db.prepare('select id, password from users where email = ?').get(inv.email) as { id: string; password: string } | undefined
-  if (user) { // same per-email budget as /api/login, or a shared invite link would allow unlimited password guesses
-    const key = `e:${inv.email.toLowerCase()}`
-    if (throttle(key, 20, 600_000)) fail(429, 'Too many attempts, wait a bit')
-    if (!verifyPassword(password, user.password)) { recordFailure(key); fail(401, 'Wrong password') }
+  if (user) { // same budgets as /api/login, or a shared invite link would allow unlimited password guesses
+    const keys = loginKeys(c, inv.email.toLowerCase())
+    if (throttled(keys)) fail(429, 'Too many attempts, wait a bit')
+    if (!verifyPassword(password, user.password)) { failed(keys); fail(401, 'Wrong password') }
   } else {
     if (password.length < 8) fail(400, 'Password needs at least 8 characters')
     user = { id: createUser(inv.email, password, str(body.name, 100)), password: '' }
@@ -195,7 +218,8 @@ app.use('/api/*', auth)
 app.put('/api/password', async (c) => {
   const body = await json(c), user = c.get('user')
   const row = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
-  if (!verifyPassword(String(body.current ?? ''), row.password)) fail(401, 'Current password is wrong')
+  if (throttle(`pw:${user.id}`, 10, 600_000)) fail(429, 'Too many attempts, wait a bit')
+  if (!verifyPassword(String(body.current ?? ''), row.password)) { recordFailure(`pw:${user.id}`); fail(401, 'Current password is wrong') }
   const next = String(body.password ?? '')
   if (next.length < 8) fail(400, 'Password needs at least 8 characters')
   db.prepare('update users set password = ? where id = ?').run(hashPassword(next), user.id)
@@ -383,7 +407,7 @@ app.post('/api/accounts/:id/repositories', async (c) => {
   const id = c.req.param('id'), name = repoName(str((await json(c)).full_name))
   requireAdmin(id, c.get('user'))
   if (!validRepo(name)) fail(400, 'Use owner/name for GitHub (rails/rails), host/path for GitLab or Bitbucket (gitlab.com/group/project)')
-  if (db.prepare('select 1 from repositories where full_name = ?').get(name)) fail(409, 'This repository is already connected')
+  if (db.prepare('select 1 from repositories where account_id = ? and full_name = ?').get(id, name)) fail(409, 'This repository is already connected')
   const repo = randomUUID()
   db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repo, id, name, now())
   return c.json({ id: repo })
@@ -419,9 +443,14 @@ function pullOut(p: Pull) {
 const PULL_PATH = '/api/v1/pulls/:repo{.+}/:number{[0-9]+}'
 const findPull = (c: Context<Env>) => {
   const full = repoName(c.req.param('repo') ?? '')
-  const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ?`).get(full, Number(c.req.param('number'))) as Pull | undefined
+  const user = c.get('user')
+  // a name can be connected in several accounts: yours only (a super admin's own first, then any), the latest upload
+  // first, the same order repositoryFor() writes in
+  const mine = 'r.account_id in (select account_id from memberships where user_id = ?)'
+  const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ? and (? or ${mine})
+    order by ${mine} desc, p.updated_at desc limit 1`).get(full, Number(c.req.param('number')), user.admin, user.id, user.id) as Pull | undefined
   if (!p) fail(404, 'No annotations for this pull request')
-  role(p!.account_id, c.get('user'))
+  role(p!.account_id, user)
   return p!
 }
 
@@ -463,16 +492,18 @@ export function fileType(name: string, data: Buffer) {
   return type
 }
 
-// The repository must be connected to an account you're in; an unknown one is connected to your first owned account.
-function repositoryFor(fullName: string, user: User) {
+// The repository connected in one of your accounts: the one with this PR's latest upload (what findPull() reads), else
+// one you manage. Not connected anywhere you are: an owner or admin gets it connected to their first such account
+// (`id` is null until the upload passes its checks); a member asks an admin to connect it.
+function repositoryFor(fullName: string, number: number, user: User): { id: string | null; account_id: string } {
   if (!validRepo(fullName)) fail(400, 'Bad repository name: owner/name for GitHub, host/path for GitLab or Bitbucket')
-  const repo = db.prepare('select id, account_id from repositories where full_name = ?').get(fullName) as { id: string; account_id: string } | undefined
-  if (repo) return role(repo.account_id, user) && repo.id
-  const acc = db.prepare(`select account_id from memberships where user_id = ? order by role in ('owner', 'admin') desc limit 1`).get(user.id) as { account_id: string } | undefined
-  if (!acc) fail(403, 'You are not in any account')
-  const id = randomUUID()
-  db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(id, acc!.account_id, fullName, now())
-  return id
+  const repo = db.prepare(`select r.id, r.account_id from repositories r join memberships m on m.account_id = r.account_id and m.user_id = ?
+    where r.full_name = ? order by (select p.updated_at from pulls p where p.repository_id = r.id and p.number = ?) desc nulls last,
+    m.role in ('owner', 'admin') desc limit 1`).get(user.id, fullName, number) as { id: string; account_id: string } | undefined
+  if (repo) return repo
+  const acc = db.prepare(`select account_id from memberships where user_id = ? and role in ('owner', 'admin') order by role = 'owner' desc limit 1`)
+    .get(user.id) as { account_id: string } | undefined
+  return { id: null, account_id: acc?.account_id ?? fail(403, `${fullName} is not connected to your account yet: ask an account admin to connect it in Reviews42`) }
 }
 
 // Replaces the pull request's annotations and files: re-running the skill after a push is idempotent.
@@ -497,8 +528,17 @@ app.put(PULL_PATH, async (c) => {
   const datas = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())))
   const types = files.map((f, i) => fileType(f.name, datas[i]))
 
-  const repoId = repositoryFor(repoName(c.req.param('repo')), user)
-  const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoId, number) as { id: string } | undefined
+  const fullName = repoName(c.req.param('repo')), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
+  const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoFound, number) as { id: string } | undefined
+  // account quotas, so one leaked token can't fill the disk: live pull requests, and file bytes (this PR's old files don't count)
+  if (!existing && (db.prepare('select count(*) as n from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').get(accountId) as { n: number }).n >= MAX_PULLS)
+    fail(413, `This account has ${MAX_PULLS} pull requests with notes, the most it can; delete some or wait for them to expire`)
+  const used = (db.prepare(`select coalesce(sum(f.size), 0) as n from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id
+    where r.account_id = ? and p.id is not ?`).get(accountId, existing?.id ?? null) as { n: number }).n
+  if (used + datas.reduce((n, d) => n + d.length, 0) > MAX_ACCOUNT) fail(413, `This account's files are over ${MAX_ACCOUNT / MB}MB; delete some pull requests or wait for them to expire`)
+  // connected only now: a refused upload leaves nothing behind
+  const repoId = repoFound ?? randomUUID()
+  if (!repoFound) db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repoId, accountId, fullName, now())
   const id = existing?.id ?? randomUUID()
   // stored[i] is files[i]'s stored name (unique, <= 100 chars like safeName, so /files/ finds it); names maps attachment: refs
   const names = new Map<string, string>(), stored: string[] = []
@@ -679,6 +719,40 @@ echo "Now set REVIEWS42_TOKEN (make one at ${host(c)}/settings) in your shell pr
 `))
 app.get('/healthz', (c) => c.text(db.prepare('select 1 as ok').get() ? 'ok' : 'down'))
 
+// crawlers: the landing page only; the app, the API and files stay out of search (they are private anyway)
+app.get('/robots.txt', (c) => c.text(`User-agent: *
+Disallow: /api/
+Disallow: /files/
+Disallow: /dashboard
+Disallow: /settings
+Disallow: /admin
+Disallow: /accounts/
+Disallow: /pulls/
+Disallow: /invite/
+Disallow: /login
+
+Sitemap: ${host(c)}/sitemap.xml
+`))
+app.get('/sitemap.xml', (c) => c.body(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${host(c)}/</loc></url></urlset>
+`, 200, { 'content-type': 'application/xml; charset=utf-8' }))
+
+// the web app's one page, with this server's address in its canonical and Open Graph tags (index.html: __ORIGIN__)
+// and a CSP: scripts only from here, styles and fonts also from Google Fonts, frames only /files demos
+const PAGE_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https: http:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
+  "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+let indexHtml: string | undefined
+const page = (c: Context) => {
+  indexHtml ??= fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
+  c.header('content-security-policy', PAGE_CSP)
+  c.header('cache-control', 'no-cache')
+  if (c.req.path !== '/') c.header('x-robots-tag', 'noindex')
+  return c.html(indexHtml.replaceAll('__ORIGIN__', host(c)))
+}
+app.get('/', page)
+app.get('/index.html', page)
 app.use('/assets/*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=31536000, immutable') }))
-app.use('*', serveStatic({ root: DIST, rewriteRequestPath: (p) => (/\.[a-z0-9]+$/i.test(p) ? p : '/index.html'),
-  onFound: (_p, c) => c.header('cache-control', 'no-cache') }))
+app.use('*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=86400') }))
+// app routes get the page; a missing file or API route is a real 404
+app.get('*', (c) => (/\.[a-z0-9]+$|^\/(api|files)\//i.test(c.req.path) ? c.notFound() : page(c)))

@@ -58,6 +58,7 @@ It prints a new random password and signs that user out everywhere; their agent 
 | `RETENTION_DAYS` | `30` | notes and files are deleted this long after the PR's last upload |
 | `MAX_FILE_MB` / `MAX_PULL_MB` | `1` / `20` | per uploaded file / all files of one PR |
 | `MAX_BODY_KB` | `1024` | JSON request bodies |
+| `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |
 | `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |

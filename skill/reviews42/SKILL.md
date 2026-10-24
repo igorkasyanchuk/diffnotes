@@ -100,8 +100,9 @@ never write it into files or commits.
    # JSON only, no files: -H 'content-type: application/json' --data-binary @reviews42.json
    # → {"id":"…","url":"…/pulls/<id>","annotations":3,"files":2}
    ```
-   `404` = the repository belongs to an account you are not in; `401` = bad token; `413` = too many or too big files;
-   `415` = a file type that isn't allowed or doesn't match its extension. A new repository is connected to your account on
+   `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
+   account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
+   isn't allowed or doesn't match its extension. A new repository is connected to the account you own or administer on
    its first upload.
 6. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $REVIEWS42_TOKEN"` returns what
    was stored; the `annotations` count must match what you wrote.

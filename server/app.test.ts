@@ -117,7 +117,7 @@ describe('reviews42', () => {
     form.append('file', new File([png(20)], long))
     const r = await call('/api/v1/pulls/acme/web/42', { token, form, method: 'PUT' })
     expect(r.data.files).toBe(2)
-    const p = (await call(`/api/pulls/${pullId}`, { token })).data
+    const p = (await call(`/api/pulls/${pullId}`, { cookie: member })).data
     expect(p.files).toHaveLength(2)
     for (const f of p.files) expect((await call(f.url, { token })).status).toBe(200)
     expect((await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: null })).status).toBe(400)
@@ -131,7 +131,25 @@ describe('reviews42', () => {
     expect((await call(`/api/pulls/${pullId}`, { cookie: outsider })).status).toBe(404)
     expect((await call(`/api/accounts/${accountId}`, { cookie: outsider })).status).toBe(404)
     expect((await call('/api/dashboard', { cookie: outsider })).data.pulls).toEqual([])
-    expect((await call('/api/v1/pulls/acme/web/42', { cookie: outsider, method: 'PUT', body: { annotations: [] } })).status).toBe(404)
+    // a member elsewhere can't connect it, and an owner elsewhere gets their own acme/web, never acme's notes
+    expect((await call('/api/v1/pulls/acme/web/42', { cookie: outsider, method: 'PUT', body: { annotations: [] } })).status).toBe(403)
+    const mine = (await call('/api/accounts', { cookie: outsider, body: { name: 'Mine' } })).data
+    const put = await call('/api/v1/pulls/acme/web/42', { cookie: outsider, method: 'PUT', body: { annotations: [{ path: 'x', body: 'mine' }] } })
+    expect(put.status).toBe(200)
+    expect(put.data.id).not.toBe(pullId)
+    expect((await call(`/api/pulls/${pullId}`, { cookie: member })).data.annotations).toEqual([])
+    expect((await call('/api/v1/pulls/acme/web/42', { cookie: outsider })).data.annotations[0].body).toBe('mine')
+    expect((await call(`/api/accounts/${mine.id}`, { cookie: outsider, method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('keeps tokens to annotations and files, and cookie writes to this site', async () => {
+    expect((await call('/api/tokens', { token })).status).toBe(401)
+    expect((await call('/api/tokens', { token, body: { name: 'x' } })).status).toBe(401)
+    expect((await call('/api/password', { token, method: 'PUT', body: { current: 'x', password: 'yyyyyyyy' } })).status).toBe(401)
+    expect((await call('/api/v1/me', { token })).status).toBe(200)
+    const cross = await call('/api/tokens', { cookie: admin, body: { name: 'x' }, headers: { 'sec-fetch-site': 'same-site' } })
+    expect(cross.status).toBe(403)
+    expect((await call('/api/tokens', { cookie: admin, body: { name: 'x' }, headers: { 'sec-fetch-site': 'same-origin' } })).status).toBe(200)
   })
 
   it('connects repositories by name', async () => {

@@ -42,7 +42,10 @@ extension/        manifest, demo.html (sandbox for .html demos), background (hol
 - Deleting PRs goes through `dropPulls()` so their files are removed from whichever backend holds them.
 - Keep docs/ in sync when routes, limits or features change (and the skill, `skill/reviews42/SKILL.md`).
 - Repositories: `owner/name` = GitHub, `host/path` = GitLab (any host but bitbucket.org) or Bitbucket; `repoName()`
-  (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back.
+  (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back. Unique per account (not
+  server-wide): always look names up within the caller's accounts.
+- Bearer tokens authenticate only `/api/v1/*` and `/files/*`; cookie writes need `Sec-Fetch-Site: same-origin`.
+- The web app's page gets `PAGE_CSP` and its `__ORIGIN__` filled (app.ts `page()`); keep index.html's SEO tags there.
 - Diff DOM, one adapter per host in `SITES` (`extension/content.js`); if notes stop appearing, re-check these first:
   GitHub React view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`) and classic (`.file-header[data-path]`,
   `td.blob-num`); GitLab rapid diffs (`diff-file`, `rd-diff-file-copy-clipboard`, `td.rd-line-number[data-position] a[data-line-number]`);
