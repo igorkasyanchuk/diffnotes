@@ -13,7 +13,8 @@
     "build": "vite build",
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "reset-password": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/reset-password.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
