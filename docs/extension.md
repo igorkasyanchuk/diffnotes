@@ -34,7 +34,7 @@ Open a PR's **Files changed** tab:
 |---|---|
 | **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, open in Reviews42 |
 | **File cards** under file headers | notes about a whole file (new, renamed, deleted) |
-| **Line notes** above changed blocks | the “why” for that block; click the header to collapse it |
+| **Line notes** above changed blocks | the “why” for that block; click the header to collapse it; it stays collapsed after a reload until the note changes |
 | **Show more / less** | long notes are cut to a few lines |
 | **Gallery** | click an image: every image of that note, ← → to move, Esc to close |
 | **Previews** | links to attached `.md` / `.csv` / `.txt` open rendered in place |

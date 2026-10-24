@@ -2,7 +2,21 @@
 // apply() runs again whenever the page renders more of the diff (they all render lazily) and only adds what is missing.
 ;(() => {
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
-  const collapsed = new Map() // annotation index → collapsed; survives re-renders
+  // Notes folded by hand stay folded after a reload while their content is the same: keyed by a hash of the PR and the
+  // note (a.fold, set in check()), not its id (a re-upload makes new ids), so a note that changed opens again. Kept
+  // FOLD_DAYS from the fold, past the default 30 days retention. Every tab keeps its copy current through onChanged.
+  // ponytail: 32-bit FNV-1a, a collision only starts some other note folded
+  const FOLD_DAYS = 60
+  let folded = {} // note key → when it was folded
+  const fresh = (all) => { const cut = Date.now() - FOLD_DAYS * 86400_000; for (const [k, t] of Object.entries(all)) if (t < cut) delete all[k]; return all }
+  const foldsLoaded = chrome.storage.local.get('folded').then((s) => { folded = fresh(s.folded ?? {}) }, () => {})
+  chrome.storage.onChanged.addListener((ch) => { if (ch.folded) folded = ch.folded.newValue ?? {} })
+  const hash = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return (h >>> 0).toString(36) }
+  const fold = (notes, c) => {
+    for (const a of notes) if (c) folded[a.fold] = Date.now(); else delete folded[a.fold]
+    // in a microtask: after an extension update this orphaned script's chrome.* calls throw instead of rejecting
+    Promise.resolve().then(() => chrome.storage.local.set({ folded: fresh(folded) })).catch(() => {})
+  }
   const fetched = new Map() // server + /files/… → a promise of its data: URL (images and html demos), fetched once
   const file = (server, url) => {
     const k = server + url
@@ -25,9 +39,8 @@
     head.append(el('span', 'r42-where', where(a)))
     const body = el('div', 'r42-body r42-md')
     body.append(md(a.body, a.server))
-    const set = (c) => { collapsed.set(i, c); box.classList.toggle('r42-collapsed', c) }
-    set(collapsed.get(i) ?? false)
-    head.addEventListener('click', () => { set(!box.classList.contains('r42-collapsed')); clampAll() })
+    box.classList.toggle('r42-collapsed', !!folded[a.fold])
+    head.addEventListener('click', () => { fold([a], box.classList.toggle('r42-collapsed')); clampAll() })
     box.append(head, body)
     if (a.canDelete && a.id) {
       const actions = el('div', 'r42-actions'), remove = el('button', 'r42-link r42-remove', 'remove note')
@@ -247,8 +260,11 @@
         // remove note needs its listener: that stays in the box
         copy.querySelectorAll('.r42-demo, .r42-actions').forEach((d) => d.remove())
         pop.append(copy)
-        // a clone has no listeners: note headers toggle through the pop
-        pop.addEventListener('click', (e) => e.target.closest('.r42-head')?.parentElement.classList.toggle('r42-collapsed'))
+        // a clone has no listeners: note headers toggle (and are remembered) through the pop
+        pop.addEventListener('click', (e) => {
+          const n = e.target.closest('.r42-head')?.parentElement
+          if (n) fold([pull.annotations[n.dataset.r42]], n.classList.toggle('r42-collapsed'))
+        })
         document.body.append(pop)
       })
       top.addEventListener('click', () => { document.getElementById('r42-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
@@ -279,7 +295,7 @@
     title.type = 'button'
     title.append(el('span', 'r42-badge', 'R42'), el('b', '', `Reviews42 · ${pull.annotations.length} notes`))
     title.addEventListener('click', () => { box.classList.toggle('r42-collapsed'); clampAll() })
-    const all = (c) => () => { pull.annotations.forEach((_, i) => collapsed.set(i, c)); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)); clampAll() }
+    const all = (c) => () => { fold(pull.annotations, c); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)); clampAll() }
     const expand = el('button', 'r42-link', 'expand all'), collapse = el('button', 'r42-link', 'collapse all')
     expand.addEventListener('click', all(false))
     collapse.addEventListener('click', all(true))
@@ -363,6 +379,8 @@
     const n = document.querySelector(`.r42-row [data-r42="${i}"], .r42-file[data-r42="${i}"], #r42-box [data-r42="${i}"]`)
     // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
     if (n?.closest('#r42-box.r42-collapsed')) { document.getElementById('r42-box').classList.remove('r42-collapsed'); clampAll() }
+    // a folded note opens: the jump is to read it
+    if (n?.classList.contains('r42-collapsed')) { n.classList.remove('r42-collapsed'); fold([pull.annotations[n.dataset.r42]], false); clampAll() }
     n?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     n?.classList.add('r42-flash')
     setTimeout(() => n?.classList.remove('r42-flash'), 1200)
@@ -504,10 +522,12 @@
     if (current !== key) return
     if (res?.pulls?.length) {
       const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
-      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: p.can_delete }))) }
+      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: p.can_delete,
+        fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')) }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')
     else return
-    collapsed.clear()
+    await foldsLoaded
+    if (current !== key) return
     apply()
     observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(apply, 200) })
     observer.observe(document.body, { childList: true, subtree: true })

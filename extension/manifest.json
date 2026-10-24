@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reviews42",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Shows your team's Reviews42 annotations on GitHub, GitLab and Bitbucket pull requests.",
   "icons": {
     "16": "icon16.png",
