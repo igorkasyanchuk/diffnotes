@@ -14,7 +14,9 @@ See README.md for what it is. Same stack and habits as specdrop.
 ```
 server/db.ts      schema, password hashing, bootstrap (first admin + account), tokens, purgeExpired
 server/app.ts     all routes: auth, invites, accounts, repos, tokens, /api/v1 pulls (skill + extension), /files, /install.sh
+server/storage.ts file bytes on disk or in an S3-compatible bucket (SigV4 signing, lifecycle rule, bucket check)
 server/index.ts   start, hourly purge, SIGTERM
+docs/             user docs linked from README (install, skill, extension, accounts, storage, security, api) + images
 web/main.tsx      routing, public + app (sidebar) layouts, login, invite, dashboard, account, pull preview, settings
 web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
 skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
@@ -32,7 +34,11 @@ extension/        manifest, background (holds the tokens, asks every connected s
   admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
   The first user (bootstrap) is a super admin.
 - Annotation Markdown is untrusted: render it only through `r42Markdown` (escapes everything, keeps http(s) and relative URLs).
-- `/files/*` is served with `CSP: sandbox` + `nosniff`.
+- `/files/*` is served with `CSP: sandbox` + `nosniff`; text uploads as `text/plain`.
+- Uploads: allow-list in `EXT_TYPES` (db.ts), checked by content in `fileType()` (app.ts). Every file has a `files` row
+  (size, type, backend `disk|s3`); stats and quotas read the rows, never the disk or the bucket.
+- Deleting PRs goes through `dropPulls()` so their files are removed from whichever backend holds them.
+- Keep docs/ in sync when routes, limits or features change (and the skill, `skill/reviews42/SKILL.md`).
 - GitHub's diff DOM: `extension/content.js` supports the React changes view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`)
   and the classic one (`.file-header[data-path]`, `td.blob-num`). If notes stop appearing, re-check those selectors first.
 

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <rect width="960" height="220" rx="12" fill="#0a0b0d"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ff8a3d"/></marker>
+  </defs>
+  <g fill="#101216" stroke="#2d323a">
+    <rect x="24" y="56" width="190" height="108" rx="8"/>
+    <rect x="272" y="56" width="190" height="108" rx="8" stroke="#ff8a3d"/>
+    <rect x="520" y="56" width="190" height="108" rx="8"/>
+    <rect x="760" y="56" width="184" height="108" rx="8"/>
+  </g>
+  <g fill="#d8dbe1" font-weight="700">
+    <text x="40" y="86">coding agent</text>
+    <text x="288" y="86" fill="#ff8a3d">reviews42 server</text>
+    <text x="536" y="86">browser extension</text>
+    <text x="774" y="86">github.com PR</text>
+  </g>
+  <g fill="#8b919c" font-size="11.5">
+    <text x="40" y="110">Claude Code, Codex,</text>
+    <text x="40" y="126">Cursor + the skill</text>
+    <text x="40" y="148" fill="#4ade80">$ annotate PR #42</text>
+    <text x="288" y="110">your server, your data</text>
+    <text x="288" y="126">notes, images, files</text>
+    <text x="288" y="148">expire after 30 days</text>
+    <text x="536" y="110">one or more servers</text>
+    <text x="536" y="126">token per server</text>
+    <text x="536" y="148">nothing posted to GitHub</text>
+    <text x="774" y="110">summary box above</text>
+    <text x="774" y="126">notes on changed lines</text>
+    <text x="774" y="148">gallery, previews</text>
+  </g>
+  <g stroke="#ff8a3d" stroke-width="2" marker-end="url(#a)">
+    <line x1="218" y1="110" x2="266" y2="110"/>
+    <line x1="514" y1="110" x2="466" y2="110"/>
+    <line x1="714" y1="110" x2="754" y2="110"/>
+  </g>
+  <g fill="#646b76" font-size="11">
+    <text x="214" y="42">PUT notes + files</text>
+    <text x="470" y="42">GET notes (token)</text>
+    <text x="714" y="42">draws them</text>
+  </g>
+  <text x="24" y="200" fill="#646b76" font-size="11">reviewers read why each block changed, right next to the diff</text>
+</svg>

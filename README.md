@@ -1,68 +1,83 @@
-# Reviews42
+<p align="center"><img src="public/icon.svg" width="56" alt=""></p>
 
-Your coding agent explains its pull request; your team reads the notes right on GitHub.
+<h1 align="center">reviews42</h1>
 
-Three parts, one repo:
+<p align="center"><b>Your coding agent explains the pull request. Your team reads it on GitHub.</b><br>
+Free · self-hosted · source-available · no seats, no SaaS</p>
 
-| Part | Where | What it does |
-|---|---|---|
-| Web app + API | `server/`, `web/` | Accounts (teams), members by invitation, repositories, tokens, annotated PRs. Annotations expire after `RETENTION_DAYS`. |
-| Agent skill | `skill/reviews42/SKILL.md` | Teaches Claude Code, Codex, Cursor and other Agent Skills tools to upload per-file and per-line notes, screenshots and files for a PR. |
-| Chrome extension | `extension/` | Connect one or more servers with a token each; on a PR's changes view it draws their notes next to the diff (expand, collapse, image preview) with a summary box above the files. |
+<p align="center"><img src="docs/images/github-note.png" alt="A Reviews42 note on a GitHub pull request diff" width="860"></p>
 
-Self-hosted. Licensed under [FSL-1.1-ALv2](LICENSE.md): free to use, modify and self-host, also commercially;
-you may not offer it as a competing product or service. Each release becomes Apache-2.0 two years after it ships.
+## TL;DR
 
-## Run it
+- Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
+  screenshots, Markdown reports and CSVs.
+- The notes go to **your own Reviews42 server**, never to GitHub: no bot comments, no notification noise.
+- Reviewers with the **browser extension** see them **inside GitHub's diff**: a summary box on top, notes on the
+  changed lines, image galleries, file previews, one switch to hide everything.
+- Notes **expire on their own** (30 days by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
+- Up and running in **about 3 minutes**: one container, one `curl | sh`, one extension.
+
+<p align="center"><img src="docs/images/flow.svg" alt="agent → reviews42 server ← browser extension → github.com PR" width="860"></p>
+
+## Why
+
+| | |
+|---|---|
+| **Review faster** | Reviewers read *why* a block changed before reading *how*. Fewer “what does this do?” round trips. |
+| **Context from the author** | The agent that wrote the code explains it while it still knows the decisions and trade-offs. |
+| **Screenshots in the diff** | UI changes come with before/after or mobile/desktop shots next to the lines that caused them. |
+| **Zero noise** | Nothing is posted to the PR. The conversation stays for humans. |
+| **Your data** | Self-hosted, invite-only, per-account access. Code context never leaves your infrastructure. |
+| **Any agent, any team** | One skill for every Agent Skills tool; one extension for several servers (teams, clients). |
+
+## See it
+
+| On GitHub | |
+|---|---|
+| <img src="docs/images/github-summary.png" alt="Summary box above the diff" width="420"> | **Summary box** above the files: the PR's summary, linked reports, a notes on/off switch, expand/collapse all. |
+| <img src="docs/images/gallery.png" alt="Image gallery" width="420"> | **Gallery**: several images in one note (mobile + desktop), ← → to flip, Esc to close. |
+| <img src="docs/images/file-preview.png" alt="Markdown report preview" width="420"> | **Previews** of attached `.md`, `.csv` and `.txt` files, rendered in place. |
+| <img src="docs/images/dock.png" alt="Floating dock" width="420"> | **Floating dock** once you scroll: note count, notes switch, summary popover. Long notes get *show more / less*. |
+
+| In the app | |
+|---|---|
+| <img src="docs/images/web-pull.png" alt="A pull request's notes in the web app" width="420"> | Every annotated PR, with its notes and attachments. |
+| <img src="docs/images/account-overview.png" alt="Account overview" width="420"> | **Accounts** with roles (owner, admin, member), invitations, repositories, storage per repository. |
+| <img src="docs/images/server-admin.png" alt="Server admin" width="420"> | **Super admin**: users, accounts, uploads, disk, and where files are stored. |
+
+## Install in 3 minutes
 
 ```bash
-npm install
-ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=change-me npm run dev   # API :3000, Vite :5173
-npm test && npm run typecheck && npm run build
+# 1. the server (any Docker host: a VPS, Coolify, Dokku…)
+git clone https://github.com/igorkasyanchuk/reviews42 && cd reviews42
+docker build -t reviews42 . && docker run -d -p 3000:3000 -v reviews42:/data \
+  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.company.com reviews42
+docker logs <container> | grep "first admin"        # the generated password
+
+# 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
+curl -fsSL https://reviews.company.com/install.sh | sh
+export REVIEWS42_URL=https://reviews.company.com REVIEWS42_TOKEN=r42_…   # token from /settings
+
+# 3. the extension: chrome://extensions → Developer mode → Load unpacked → extension/
+#    then its popup: server + token → Connect
 ```
 
-Docker:
+Then ask your agent: **“annotate this PR with reviews42”** and open the PR's *Files changed* tab.
 
-```bash
-docker build -t reviews42 .
-docker run -p 3000:3000 -v reviews42-data:/data -e ADMIN_EMAIL=you@example.com -e ADMIN_PASSWORD=change-me \
-  -e PUBLIC_URL=https://reviews42.example.com reviews42
-```
+## Docs
 
-On first boot (no users) the server creates the admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (a random password is
-printed when unset) with an account "My team"; that user is a super admin (server stats on `/admin`). Everyone else
-joins through an invitation link an account owner or admin makes. Roles: owner, admin (invites, manages people and
-repositories), member (reads and uploads).
+| | |
+|---|---|
+| [Install & configure](docs/install.md) | Docker, environment variables, first admin, password reset, upgrades, backups |
+| [Agent skill](docs/skill.md) | Install, token, how the agent writes notes, payload format, allowed files |
+| [Browser extension](docs/extension.md) | Install, several servers, what you see on GitHub, troubleshooting |
+| [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, super admin, overview pages |
+| [File storage](docs/storage.md) | Disk or S3-compatible (Backblaze B2, Cloudflare R2, AWS S3, MinIO), expiry |
+| [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets |
+| [API](docs/api.md) | The HTTP API the skill and the extension use |
+| [Development](AGENTS.md) | Stack, layout, commands, code rules |
 
-Lost password: `npm run reset-password [-- email]` on the server (in the container) prints a new random password for
-that user, by default the first admin, and signs them out everywhere.
+## License
 
-| Env | Default | |
-|---|---|---|
-| `PORT` | `3000` | |
-| `DATA_DIR` | `./data` | SQLite DB, uploads, session secret |
-| `PUBLIC_URL` | request origin | `https://…` origin behind a proxy (links, `Secure` cookie) |
-| `RETENTION_DAYS` | `30` | annotations live this long after their last upload |
-| `MAX_FILE_MB` / `MAX_PULL_MB` | `10` / `50` | per uploaded file / per pull request |
-| `SESSION_SECRET` | random, in `DATA_DIR` | cookie signing key |
-| `BUGSINK_DSN` | unset | Sentry-compatible DSN (Bugsink, GlitchTip, Sentry): server 500s are reported with the route pattern only |
-
-## Use it
-
-1. **Skill:** `curl -fsSL https://<your server>/install.sh | sh`, make a token on `/settings`, then
-   `export REVIEWS42_URL=https://<your server> REVIEWS42_TOKEN=r42_…`. Ask your agent: "annotate this PR with reviews42".
-2. **Extension:** `chrome://extensions` → Developer mode → Load unpacked → pick `extension/`. In its popup enter the
-   server and a token, press Connect (Chrome asks to allow that server's origin).
-3. Open the PR's **Files changed** on GitHub. Members of the account that owns the repository see the notes.
-
-## API (token: `authorization: Bearer r42_…`)
-
-| Method | Path | |
-|---|---|---|
-| `PUT` | `/api/v1/pulls/:owner/:repo/:number` | replace a PR's notes: JSON `{title?, head_sha?, summary?, annotations: [{path, line?, end_line?, side?: RIGHT\|LEFT, title?, body}]}`, or multipart `payload` (JSON) + `file` fields; `attachment:<name>` in Markdown links an uploaded file |
-| `GET` | `/api/v1/pulls/:owner/:repo/:number` | the notes (404 when none or not your account's) |
-| `DELETE` | `/api/v1/pulls/:owner/:repo/:number` | remove them now |
-| `GET` | `/api/v1/me` | who the token belongs to |
-| `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
-
-An unknown repository is connected to the uploader's account on its first upload.
+[FSL-1.1-ALv2](LICENSE.md): free to use, modify and self-host, also for commercial work. You may not offer it as a
+competing product or service. Every release becomes Apache-2.0 two years after it ships.
