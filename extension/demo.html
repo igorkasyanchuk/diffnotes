@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- A sandboxed extension page (manifest "sandbox"): opaque origin, no extension APIs, no access to github.com.
+     The CSP in manifest.json blocks every network request; the content script posts the uploaded HTML once. -->
+<script>
+  addEventListener('message', function load(e) {
+    if (e.source !== parent || typeof e.data?.r42Demo !== 'string') return
+    removeEventListener('message', load)
+    document.open(); document.write(e.data.r42Demo); document.close()
+  })
+</script>

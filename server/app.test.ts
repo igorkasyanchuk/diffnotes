@@ -14,9 +14,9 @@ const { purge } = await import('./app.ts')
 const png = (n = 16) => { const b = new Uint8Array(n); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b }
 
 // one sequential story: later tests reuse what earlier ones created
-type Opts = { cookie?: string; token?: string; body?: unknown; form?: FormData; method?: string }
-async function call(url: string, { cookie, token, body, form, method }: Opts = {}) {
-  const headers: Record<string, string> = {}
+type Opts = { cookie?: string; token?: string; body?: unknown; form?: FormData; method?: string; headers?: Record<string, string> }
+async function call(url: string, { cookie, token, body, form, method, headers: extra }: Opts = {}) {
+  const headers: Record<string, string> = { ...extra }
   if (cookie) headers.cookie = cookie
   if (token) headers.authorization = `Bearer ${token}`
   if (body !== undefined) headers['content-type'] = 'application/json'
@@ -150,24 +150,36 @@ describe('reviews42', () => {
       return call('/api/v1/pulls/acme/web/43', { token, form, method: 'PUT' })
     }
     const gif = new File([new TextEncoder().encode('GIF89a......')], 'anim.gif')
-    const ok = await up(gif, new File(['# Report\n| a | b |'], 'report.md'), new File(['a,b\n1,2'], 'data.csv'), new File(['hi'], 'notes.txt'))
+    const ok = await up(gif, new File(['# Report\n| a | b |'], 'report.md'), new File(['a,b\n1,2'], 'data.csv'), new File(['hi'], 'notes.txt'), new File(['<button onclick="this.textContent++">0</button>'], 'demo.html'))
     expect(ok.status).toBe(200)
     const p = (await call('/api/v1/pulls/acme/web/43', { token })).data
     expect(p.files.map((f: { name: string; type: string }) => `${f.name}:${f.type}`).sort())
-      .toEqual(['anim.gif:image/gif', 'data.csv:text/csv', 'notes.txt:text/plain', 'report.md:text/markdown'])
+      .toEqual(['anim.gif:image/gif', 'data.csv:text/csv', 'demo.html:text/html', 'notes.txt:text/plain', 'report.md:text/markdown'])
     expect(p.annotations[0].body).toContain(`/files/${p.id}/report.md`)
     const md = await call(`/files/${p.id}/report.md`, { token })
     expect(md.res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
     expect(md.res.headers.get('content-security-policy')).toBe('sandbox')
+    // revalidated, never cached blind: a re-upload keeps the name
+    expect(md.res.headers.get('cache-control')).toBe('private, no-cache')
+    expect((await call(`/files/${p.id}/report.md`, { token, headers: { 'if-none-match': md.res.headers.get('etag')! } })).status).toBe(304)
+    // HTML demos run only in an opaque sandbox with every network request blocked
+    // …and only when framed: opened as a page of its own it is source text, so it can't pose as this site
+    expect((await call(`/files/${p.id}/demo.html`, { token })).res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+    const demo = await call(`/files/${p.id}/demo.html`, { token, headers: { 'sec-fetch-dest': 'iframe' } })
+    expect(demo.res.headers.get('content-type')).toBe('text/html; charset=utf-8')
+    const csp = demo.res.headers.get('content-security-policy')!
+    expect(csp).toMatch(/^sandbox allow-scripts;/)
+    expect(csp).not.toContain('allow-same-origin')
+    expect(csp).toContain("default-src 'none'")
     expect((await call(`/files/${p.id}/anim.gif`, { token })).res.headers.get('content-type')).toBe('image/gif')
     // refused: wrong extension, fake image, binary text, too big; a refused upload keeps the previous files
     expect((await up(new File(['<svg onload=alert(1)>'], 'x.svg'))).status).toBe(415)
-    expect((await up(new File(['<script>'], 'x.html'))).status).toBe(415)
+    expect((await up(new File(['alert(1)'], 'x.js'))).status).toBe(415)
     expect((await up(new File(['not a png'], 'fake.png'))).status).toBe(415)
     expect((await up(new File([new Uint8Array([0x41, 0, 0x42])], 'bin.txt'))).status).toBe(415)
     expect((await up(new File([new Uint8Array([0xff, 0xfe, 0xfd])], 'latin.txt'))).status).toBe(415)
     expect((await up(new File([png(1024 * 1024 + 1)], 'big.png'))).status).toBe(413)
-    expect((await call('/api/v1/pulls/acme/web/43', { token })).data.files).toHaveLength(4)
+    expect((await call('/api/v1/pulls/acme/web/43', { token })).data.files).toHaveLength(5)
     expect((await call('/api/v1/pulls/acme/web/43', { token, method: 'DELETE' })).status).toBe(200)
   })
 
@@ -195,6 +207,7 @@ describe('reviews42', () => {
     expect(performance.now() - t).toBeLessThan(100)
     expect(md('| a | b |\n|---|:---:|\n| 1 | 2 |')).toContain('<td>2</td>')
     expect(md('use `a || b` here\n---')).toBe('<p>use <code>a || b</code> here</p><hr>')
+    expect(md('the pipe |\n---')).toBe('<p>the pipe |</p><hr>')
   })
 
   it('reports 500s to BUGSINK_DSN with the route pattern only', async () => {

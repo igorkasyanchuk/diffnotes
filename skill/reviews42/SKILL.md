@@ -36,8 +36,14 @@ never write it into files or commits.
     with the arrow keys. The alt text is the caption, so make it say what the image shows.
   - reports and data: `[test report](attachment:report.md)`, `[timings](attachment:bench.csv)`, `[log](attachment:out.txt)`;
     they open as a rendered preview (Markdown, a CSV table, plain text).
-- **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.md .csv .txt` (UTF-8 text).
-  Up to **1 MB each**, 30 files and 20 MB per PR. Anything else (svg, html, pdf, zip, video) is refused with `415`:
+  - interactive demos: `[try the picker](attachment:picker-demo.html)` when clicking beats a screenshot (a component's
+    states, an animation, a form's validation). Reviewers get a live preview under the note and can expand it at phone,
+    tablet or desktop width. Write **one self-contained file**: CSS in `<style>`, JS in `<script>`, images as `data:`
+    URIs, fake data inline. It runs in a locked sandbox: **no network at all** (no CDN scripts, fonts, `fetch`, external
+    images), no cookies or storage, no popups or `alert()`, and `<form>` submission is blocked (use click
+    handlers). Keep it small and focused on the change.
+- **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.md .csv .txt .html` (UTF-8 text).
+  Up to **1 MB each**, 30 files and 20 MB per PR. Anything else (svg, pdf, zip, video) is refused with `415`:
   convert it first (a PNG screenshot instead of an SVG, a Markdown summary instead of a PDF). Keep screenshots small:
   crop to the part that changed, PNG for UI, JPG for photos.
 - Markdown in `body` and `summary`: headings, paragraphs, `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, lists and

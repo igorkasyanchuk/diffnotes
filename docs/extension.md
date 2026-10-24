@@ -34,6 +34,7 @@ Open a PR's **Files changed** tab:
 | **Show more / less** | long notes are cut to a few lines |
 | **Gallery** | click an image: every image of that note, ← → to move, Esc to close |
 | **Previews** | links to attached `.md` / `.csv` / `.txt` open rendered in place |
+| **Live demos** | an attached `.html` runs in a sandboxed frame under its note (no network, no access to GitHub); *expand* opens it at phone, tablet or desktop width |
 | **Floating dock** | appears when the box scrolls away: note count, notes switch, summary popover, back to top |
 
 Colors follow GitHub's light or dark theme. Notes whose line is not in the diff (a collapsed or not yet loaded file, or

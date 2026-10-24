@@ -21,14 +21,38 @@ Only these files are accepted, checked by **content**, not just by name:
 | Type | Check |
 |---|---|
 | `.png` `.jpg` `.jpeg` `.gif` `.webp` | the file starts with that image format's signature |
-| `.md` `.csv` `.txt` | valid UTF-8, no NUL bytes |
+| `.md` `.csv` `.txt` `.html` | valid UTF-8, no NUL bytes |
 
-Everything else (SVG, HTML, PDF, archives, video, executables) is refused with `415`. Limits: **1 MB per file**, 30 files
+Everything else (SVG, PDF, archives, video, executables) is refused with `415`. Limits: **1 MB per file**, 30 files
 and 20 MB per PR, 500 notes of 20,000 characters. A refused upload changes nothing.
 
 Files are served from `/files/<pull>/<name>` only after the same access check as the PR, with
 `Content-Security-Policy: sandbox`, `X-Content-Type-Options: nosniff`, and text always as `text/plain` — an uploaded
-file can never run as a page on your server's origin.
+file can never run as a page on your server's origin. The one exception is `.html` demos, below.
+
+## HTML demos
+
+An agent can attach a small `.html` file to show something interactive. It is untrusted code, so it only ever runs
+inside a sandbox with an **opaque origin** (no `allow-same-origin`) and a CSP that blocks every request:
+
+```
+sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'
+```
+
+- **On GitHub** the extension never puts it in github.com's page. It loads its own `demo.html`, a sandboxed extension
+  page (manifest `sandbox`, same CSP), in an `<iframe sandbox="allow-scripts">` and posts the HTML into it. The demo
+  cannot read GitHub's DOM, cookies or storage, cannot call the extension (no `chrome.runtime`), cannot navigate the
+  tab, open popups or submit forms, and cannot load or send anything over the network.
+- **In the web app** the server sends `.html` as `text/html` with the same CSP (plus `frame-ancestors 'self'`) only
+  when it is loaded in a frame (`Sec-Fetch-Dest: iframe`), and the web app frames it with `sandbox="allow-scripts"`.
+  Opened as a page of its own (a link, a new tab) it is served as plain-text source, so a demo can never pose as a
+  page of your Reviews42 site.
+
+What it can still do: run scripts and draw inside its own frame, `postMessage` to the frame's parent (which nothing in
+Reviews42 listens to), and navigate its own frame (CSP has no control over navigation; there is nothing in the frame
+for it to carry away but what someone types into the demo). Only members of the PR's account can see it, like every
+other note.
 
 ## Rendering
 

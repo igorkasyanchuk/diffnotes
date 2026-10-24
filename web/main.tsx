@@ -37,19 +37,19 @@ const bytes = (n: number) => {
 const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) =>
   <a href={to} className={className} onClick={(e) => { if (!e.metaKey && !e.ctrlKey) { e.preventDefault(); go(to) } }}>{children}</a>
 // Markdown, cut to a few lines when long with a show more / less toggle (re-measured when images load)
-function Md({ text, clamp = true }: { text: string; clamp?: boolean }) {
+function Md({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [open, setOpen] = useState(false)
   useLayoutEffect(() => {
     const el = ref.current
-    if (!el || !clamp) return
+    if (!el) return
     const measure = () => setLong(el.scrollHeight > 280)
     const ro = new ResizeObserver(measure)
     ro.observe(el.firstElementChild ?? el)
     measure()
     return () => ro.disconnect()
-  }, [text, clamp])
+  }, [text])
   return <>
-    <div ref={ref} className={`md${clamp && long && !open ? ' clamped' : ''}`}><div dangerouslySetInnerHTML={{ __html: r42Markdown(text) }} /></div>
+    <div ref={ref} className={`md${long && !open ? ' clamped' : ''}`}><div dangerouslySetInnerHTML={{ __html: r42Markdown(text) }} /></div>
     {long && <button type="button" className="link more" onClick={() => setOpen(!open)}>{open ? 'show less ↑' : 'show more ↓'}</button>}
   </>
 }
@@ -90,16 +90,42 @@ function Gallery() {
   </div>
 }
 
+// An uploaded HTML demo: the server sends it with a CSP that sandboxes it (opaque origin, no cookies, no network);
+// the iframe's own sandbox repeats that. Expand opens it large, at phone, tablet or desktop width.
+function Demo({ f }: { f: { name: string; url: string } }) {
+  const [big, setBig] = useState(false), [w, setW] = useState('100%')
+  const frame = (cls: string) => <iframe className={cls} src={f.url} title={f.name} sandbox="allow-scripts" referrerPolicy="no-referrer" style={{ width: cls === 'demo-big' ? w : undefined }} />
+  useEffect(() => {
+    if (!big) return
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setBig(false)
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  }, [big])
+  return <>
+    <div className="demo-bar"><span>live demo · sandboxed</span><button type="button" className="btn small" onClick={() => setBig(true)}>expand ⤢</button></div>
+    {frame('demo-frame')}
+    {big && <div className="demo-modal" role="dialog" aria-label={f.name} onClick={() => setBig(false)}>
+      <div className="demo-box" onClick={(e) => e.stopPropagation()}>
+        <div className="demo-head"><b>{f.name}</b>{[['mobile', '390px'], ['tablet', '768px'], ['desktop', '100%']].map(([l, x]) =>
+          <button key={l} type="button" className={`btn small${w === x ? ' primary' : ''}`} onClick={() => setW(x)}>{l}</button>)}
+          <button type="button" className="btn small" onClick={() => setBig(false)} aria-label="Close">✕</button></div>
+        <div className="demo-stage">{frame('demo-big')}</div>
+      </div>
+    </div>}
+  </>
+}
+
 // an attached md, csv or txt file, fetched and rendered like the extension does
 function Attachment({ f }: { f: { name: string; type: string; size: number; url: string } }) {
   const [html, setHtml] = useState<string>()
   useEffect(() => {
     // only text: files uploaded before the allow-list (svg, video) are listed as application/octet-stream
-    if (f.type.startsWith('text/')) fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
+    if (f.type.startsWith('text/') && f.type !== 'text/html') fetch(f.url).then((r) => (r.ok ? r.text() : Promise.reject())).then((t) => setHtml(r42Preview(f.name, t)), () => setHtml('<p>could not load</p>'))
   }, [f.url])
   return <div className="file-card">
     <div className="where"><a href={f.url} target="_blank" rel="noreferrer">{f.name}</a> · {bytes(f.size)}</div>
     {f.type.startsWith('image/') ? <img src={f.url} alt={f.name} />
+      : f.type === 'text/html' ? <Demo f={f} />
       : html !== undefined && <div className="md preview" dangerouslySetInnerHTML={{ __html: html }} />}
   </div>
 }

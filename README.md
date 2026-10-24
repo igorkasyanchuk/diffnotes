@@ -10,7 +10,7 @@ Free · self-hosted · source-available · no seats, no SaaS</p>
 ## TL;DR
 
 - Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
-  screenshots, Markdown reports and CSVs.
+  screenshots, Markdown reports, CSVs and small interactive HTML demos.
 - The notes go to **your own Reviews42 server**, never to GitHub: no bot comments, no notification noise.
 - Reviewers with the **browser extension** see them **inside GitHub's diff**: a summary box on top, notes on the
   changed lines, image galleries, file previews, one switch to hide everything.
@@ -37,6 +37,7 @@ Free · self-hosted · source-available · no seats, no SaaS</p>
 | <img src="docs/images/github-summary.png" alt="Summary box above the diff" width="420"> | **Summary box** above the files: the PR's summary, linked reports, a notes on/off switch, expand/collapse all. |
 | <img src="docs/images/gallery.png" alt="Image gallery" width="420"> | **Gallery**: several images in one note (mobile + desktop), ← → to flip, Esc to close. |
 | <img src="docs/images/file-preview.png" alt="Markdown report preview" width="420"> | **Previews** of attached `.md`, `.csv` and `.txt` files, rendered in place. |
+| <img src="docs/images/html-demo.png" alt="A live HTML demo in a note" width="420"> | **Live demos**: a small `.html` file runs in a locked sandbox under its note (no network, no access to GitHub); expand it at phone, tablet or desktop width. |
 | <img src="docs/images/dock.png" alt="Floating dock" width="420"> | **Floating dock** once you scroll: note count, notes switch, summary popover. Long notes get *show more / less*. |
 
 | In the app | |

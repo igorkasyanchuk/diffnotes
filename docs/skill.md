@@ -67,6 +67,10 @@ curl -fsS -X PUT "$REVIEWS42_URL/api/v1/pulls/acme/shop/42" -H "authorization: B
 | `.md` | UTF-8 text, no NUL bytes | rendered Markdown preview |
 | `.csv` | UTF-8 text | a table |
 | `.txt` | UTF-8 text | plain text |
+| `.html` | UTF-8 text | a live, sandboxed demo under the note; *expand* opens it at phone, tablet or desktop width |
 
-Up to **1 MB per file**, 30 files and 20 MB per PR (server settings). SVG, HTML, PDF, archives and video are refused
+An `.html` demo must be one self-contained file (inline `<style>` and `<script>`, images as `data:` URIs): it runs with
+**no network access**, no cookies or storage, no forms or popups. See [security](security.md#html-demos).
+
+Up to **1 MB per file**, 30 files and 20 MB per PR (server settings). SVG, PDF, archives and video are refused
 with `415`. Details in [security](security.md).

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Hono } from 'hono'
@@ -236,10 +236,6 @@ const requireAdmin = (accountId: string, user: User) => {
 }
 const ROLES = ['admin', 'member']
 
-// files and bytes of a pull request, from the files table (works the same for disk and S3)
-const usage = (pullId: string) =>
-  db.prepare('select count(*) as files, coalesce(sum(size), 0) as bytes from files where pull_id = ?').get(pullId) as { files: number; bytes: number }
-
 // --- file storage: disk by default, or the S3-compatible bucket a super admin set up on /admin
 
 type StorageSetting = Omit<S3Config, 'secret'> & { kind: 'disk' | 's3'; secret: string }
@@ -296,13 +292,13 @@ app.get('/api/accounts/:id/overview', (c) => {
   const id = c.req.param('id')
   role(id, c.get('user'))
   const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, u.email as uploader,
-    (select count(*) from annotations n where n.pull_id = p.id) as annotations
+    (select count(*) from annotations n where n.pull_id = p.id) as annotations,
+    (select count(*) from files f where f.pull_id = p.id) as files, (select coalesce(sum(f.size), 0) from files f where f.pull_id = p.id) as bytes
     from pulls p join repositories r on r.id = p.repository_id left join users u on u.id = p.user_id
-    where r.account_id = ? order by p.updated_at desc`).all(id) as { id: string; repository: string; annotations: number; expires_at: string }[]
-  const withDisk = pulls.map((p) => ({ ...p, ...usage(p.id) }))
+    where r.account_id = ? order by p.updated_at desc`).all(id) as { repository: string; annotations: number; files: number; bytes: number; expires_at: string }[]
   const repos = db.prepare('select full_name from repositories where account_id = ? order by full_name').all(id) as { full_name: string }[]
   const byRepo = repos.map(({ full_name }) => {
-    const ps = withDisk.filter((p) => p.repository === full_name)
+    const ps = pulls.filter((p) => p.repository === full_name)
     return { repository: full_name, pulls: ps.length, annotations: ps.reduce((n, p) => n + p.annotations, 0),
       files: ps.reduce((n, p) => n + p.files, 0), bytes: ps.reduce((n, p) => n + p.bytes, 0) }
   })
@@ -317,7 +313,7 @@ app.get('/api/accounts/:id/overview', (c) => {
       annotations: byRepo.reduce((n, r) => n + r.annotations, 0), files: byRepo.reduce((n, r) => n + r.files, 0),
       bytes: byRepo.reduce((n, r) => n + r.bytes, 0), expiring_soon: pulls.filter((p) => p.expires_at < soon).length,
     },
-    retention_days: RETENTION_DAYS, repositories: byRepo, recent: withDisk.slice(0, 10),
+    retention_days: RETENTION_DAYS, repositories: byRepo, recent: pulls.slice(0, 10),
   })
 })
 
@@ -331,8 +327,11 @@ app.delete('/api/accounts/:id', async (c) => {
   const id = c.req.param('id'), user = c.get('user')
   if (role(id, user) !== 'owner' && !user.admin) fail(403, 'Only the owner can delete the account')
   const pulls = db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(id) as { id: string }[]
-  await dropPulls(pulls.map((p) => p.id))
+  // dropPulls deletes the PR rows before its first await; the account goes in the same tick, so no upload can add a PR
+  // whose files the cascade would then leave behind, and a slow bucket only delays the response, not the delete
+  const dropped = dropPulls(pulls.map((p) => p.id))
   db.prepare('delete from accounts where id = ?').run(id)
+  await dropped
   return c.json({ ok: true })
 })
 
@@ -385,8 +384,9 @@ app.delete('/api/repositories/:id', async (c) => {
   if (!repo) fail(404, 'Not found')
   requireAdmin(repo!.account_id, c.get('user'))
   const pulls = db.prepare('select id from pulls where repository_id = ?').all(repo!.id) as { id: string }[]
-  await dropPulls(pulls.map((p) => p.id))
+  const dropped = dropPulls(pulls.map((p) => p.id)) // rows now, files after: see the account delete
   db.prepare('delete from repositories where id = ?').run(repo!.id)
+  await dropped
   return c.json({ ok: true })
 })
 
@@ -428,7 +428,8 @@ app.delete('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   return c.json({ ok: true })
 })
 
-const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'file'
+// cut from the front, so a long name keeps the extension fileType() checked (else `….html.png` would be stored as `….html`)
+const safeName = (n: string) => n.replace(/[^A-Za-z0-9._-]/g, '_').slice(-100).replace(/^\.+/, '') || 'file'
 
 // Uploads are checked by content, not only by name: images must start with their format's signature, text files must be
 // UTF-8 without NUL bytes. SVG, HTML, PDF, archives and anything else are refused.
@@ -441,7 +442,7 @@ const MAGIC: Record<string, (b: Buffer) => boolean> = {
 const utf8 = new TextDecoder('utf-8', { fatal: true })
 export function fileType(name: string, data: Buffer) {
   const type = EXT_TYPES[path.extname(name).slice(1).toLowerCase()]
-  if (!type) fail(415, `${name}: only png, jpg, gif, webp, csv, md and txt files are accepted`)
+  if (!type) fail(415, `${name}: only png, jpg, gif, webp, csv, md, txt and html files are accepted`)
   if (type.startsWith('image/')) {
     if (!MAGIC[type](data)) fail(415, `${name}: not a valid ${type.slice(6)} image`)
   } else {
@@ -533,6 +534,11 @@ app.put('/api/v1/pulls/:owner/:repo/:number', async (c) => {
   return c.json({ id, url: `${host(c)}/pulls/${id}`, annotations: rows.length, files: files.length })
 })
 
+// The one policy for uploaded HTML demos (the extension's demo.html uses the same): scripts and styles inline only,
+// images, fonts and media from data:/blob: only; no fetch, no external files, no forms, no popups, no top navigation.
+export const DEMO_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+  "img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+
 // Files need the same access as their pull request; sandboxed so uploaded HTML/SVG can't run on this origin.
 app.get('/files/:pull/:name', async (c) => {
   const user = await currentUser(c)
@@ -542,10 +548,20 @@ app.get('/files/:pull/:name', async (c) => {
     { name: string; type: string; backend: string } | undefined
   const data = f && await store.get(f.backend, p.id, f.name)
   if (!f || !data) return c.notFound()
-  // text (md, csv, txt) is always served as plain text: the web app and the extension render it themselves
+  // text (md, csv, txt) is always served as plain text: the web app and the extension render it themselves.
+  // HTML demos run only inside a frame, in an opaque sandbox (no cookies, no access to this origin) with every network
+  // request blocked; opened as a page of its own (a link, a new tab) it is shown as source, so it can't pose as this site.
+  // Rows from before the allow-list (svg, video) are neither: they download.
+  const html = f.type === 'text/html' && c.req.header('sec-fetch-dest') === 'iframe'
+  const type = f.type.startsWith('image/') ? f.type : html ? 'text/html; charset=utf-8'
+    : f.type.startsWith('text/') ? 'text/plain; charset=utf-8' : 'application/octet-stream'
+  // re-uploading a PR keeps its file names, so caches revalidate instead of showing the old file for an hour
+  const etag = `"${createHash('sha256').update(data).digest('base64url').slice(0, 27)}"`
+  const headers = { etag, 'cache-control': 'private, no-cache', vary: 'sec-fetch-dest' }
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304, headers)
   return c.body(new Uint8Array(data), 200, {
-    'content-type': f.type.startsWith('image/') ? f.type : 'text/plain; charset=utf-8', 'content-security-policy': 'sandbox',
-    'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name}"`, 'cache-control': 'private, max-age=3600',
+    ...headers, 'content-type': type, 'content-security-policy': html ? DEMO_CSP : 'sandbox',
+    'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name}"`,
   })
 })
 
@@ -565,12 +581,11 @@ app.get('/api/admin/stats', (c) => {
   const accounts = (db.prepare(`select a.id, a.name, a.created_at,
       (select count(*) from memberships m where m.account_id = a.id) as members,
       (select count(*) from repositories r where r.account_id = a.id) as repositories,
-      (select u.email from memberships m join users u on u.id = m.user_id where m.account_id = a.id and m.role = 'owner') as owner
-    from accounts a order by a.created_at`).all() as { id: string }[]).map((a) => {
-    const disk = (db.prepare('select p.id from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').all(a.id) as { id: string }[])
-      .map((p) => usage(p.id))
-    return { ...a, pulls: disk.length, files: disk.reduce((n, u) => n + u.files, 0), bytes: disk.reduce((n, u) => n + u.bytes, 0) }
-  })
+      (select u.email from memberships m join users u on u.id = m.user_id where m.account_id = a.id and m.role = 'owner') as owner,
+      (select count(*) from pulls p join repositories r on r.id = p.repository_id where r.account_id = a.id) as pulls,
+      (select count(*) from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id where r.account_id = a.id) as files,
+      (select coalesce(sum(f.size), 0) from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id where r.account_id = a.id) as bytes
+    from accounts a order by a.created_at`).all() as { files: number; bytes: number }[])
   const users = db.prepare(`select u.id, u.email, u.name, u.admin, u.created_at,
       (select count(*) from memberships m where m.user_id = u.id) as accounts,
       (select max(t.last_used_at) from tokens t where t.user_id = u.id) as token_used_at,

@@ -20,7 +20,7 @@ docs/             user docs linked from README (install, skill, extension, accou
 web/main.tsx      routing, public + app (sidebar) layouts, login, invite, dashboard, account, pull preview, settings
 web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
 skill/reviews42/  the agent skill, served at /skill/SKILL.md with {{HOST}} filled in
-extension/        manifest, background (holds the tokens, asks every connected server), content (draws on github.com:
+extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on github.com:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
 ```
 
@@ -34,7 +34,9 @@ extension/        manifest, background (holds the tokens, asks every connected s
   admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
   The first user (bootstrap) is a super admin.
 - Annotation Markdown is untrusted: render it only through `r42Markdown` (escapes everything, keeps http(s) and relative URLs).
-- `/files/*` is served with `CSP: sandbox` + `nosniff`; text uploads as `text/plain`.
+- `/files/*` is served with `CSP: sandbox` + `nosniff`; text uploads as `text/plain`. `.html` demos are the exception:
+  `text/html` with `DEMO_CSP` (app.ts; opaque sandbox, no network). The extension runs them only in its sandboxed
+  `extension/demo.html` (manifest `sandbox` + the same CSP), never in github.com's page. Keep the two policies equal.
 - Uploads: allow-list in `EXT_TYPES` (db.ts), checked by content in `fileType()` (app.ts). Every file has a `files` row
   (size, type, backend `disk|s3`); stats and quotas read the rows, never the disk or the bucket.
 - Deleting PRs goes through `dropPulls()` so their files are removed from whichever backend holds them.

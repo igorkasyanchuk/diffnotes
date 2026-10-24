@@ -15,13 +15,13 @@
     box.dataset.r42 = i
     const head = el('button', 'r42-head')
     head.type = 'button'
-    head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/[`*_#>]/g, '').slice(0, 120)), el('span', 'r42-where', where(a)))
+    head.append(el('span', 'r42-badge', 'R42'), el('span', 'r42-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)), el('span', 'r42-where', where(a)))
     const body = el('div', 'r42-body r42-md')
     body.innerHTML = r42Markdown(a.body) // escaped by r42Markdown; only http(s) and relative URLs survive
     loadImages(body, a.server)
     const set = (c) => { collapsed.set(i, c); box.classList.toggle('r42-collapsed', c) }
     set(collapsed.get(i) ?? false)
-    head.addEventListener('click', () => set(!box.classList.contains('r42-collapsed')))
+    head.addEventListener('click', () => { set(!box.classList.contains('r42-collapsed')); clampAll() })
     box.append(head, body)
     return box
   }
@@ -43,8 +43,9 @@
       a.removeAttribute('href')
       a.removeAttribute('target')
       a.classList.add('r42-file-link')
+      if (/\.html$/i.test(a.dataset.r42File)) inlineDemo(a, server)
     })
-    root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clampAll(), { once: true }))
+    root.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => clamp(img.closest('.r42-note > .r42-body, .r42-summary')), { once: true }))
   }
 
   // Two GitHub diff UIs: the React "changes" view (h3 file-name__*, cells with data-diff-side) and the classic one
@@ -129,6 +130,7 @@
     document.documentElement.classList.toggle('r42-hide-notes', v)
     document.querySelectorAll('.r42-switch').forEach((b) => b.setAttribute('aria-checked', String(!v)))
     if (save) chrome.storage.local.set({ hideNotes: v })
+    clampAll() // notes that were hidden get measured now that they show
   }
   function notesSwitch() {
     const b = el('button', 'r42-switch')
@@ -191,8 +193,8 @@
     const title = el('button', 'r42-head r42-box-title')
     title.type = 'button'
     title.append(el('span', 'r42-badge', 'R42'), el('b', '', `Reviews42 · ${pull.annotations.length} notes`))
-    title.addEventListener('click', () => box.classList.toggle('r42-collapsed'))
-    const all = (c) => () => { pull.annotations.forEach((_, i) => collapsed.set(i, c)); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)) }
+    title.addEventListener('click', () => { box.classList.toggle('r42-collapsed'); clampAll() })
+    const all = (c) => () => { pull.annotations.forEach((_, i) => collapsed.set(i, c)); document.querySelectorAll('.r42-note').forEach((n) => n.classList.toggle('r42-collapsed', c)); clampAll() }
     const expand = el('button', 'r42-link', 'expand all'), collapse = el('button', 'r42-link', 'collapse all')
     expand.addEventListener('click', all(false))
     collapse.addEventListener('click', all(true))
@@ -223,21 +225,27 @@
     return body.childElementCount ? [bar, body] : [bar]
   }
 
-  // Long notes are cut to a few lines with a show more / less toggle. Measured once they are in the page; hidden ones
-  // (collapsed, notes switched off) keep their last state, since they measure 0 high.
+  // Long notes are cut to a few lines with a show more / less toggle. Each is measured once it shows (hidden ones,
+  // collapsed or notes switched off, measure 0 high and wait for clampAll() after they open) and again when one of its
+  // images loads; apply() runs on every GitHub re-render, so already measured notes cost no layout.
   function clampAll() {
-    document.querySelectorAll('.r42-note > .r42-body, .r42-summary').forEach((b) => {
-      if (b.classList.contains('r42-open') || !b.offsetParent) return
-      const long = b.scrollHeight > 240
-      b.classList.toggle('r42-clamped', long)
-      let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
-      if (long && !more) {
-        more = el('button', 'r42-link r42-more', 'show more ↓')
-        more.type = 'button'
-        b.after(more)
-      }
-      if (!long && more) more.remove()
-    })
+    document.querySelectorAll('.r42-note > .r42-body:not([data-r42-measured]), .r42-summary:not([data-r42-measured])').forEach(clamp)
+  }
+  function clamp(b) {
+    if (!b || b.classList.contains('r42-open')) return
+    if (!b.offsetParent) return void delete b.dataset.r42Measured
+    b.dataset.r42Measured = ''
+    // live demos sit under the text, outside the clamp, so "show more" never cuts one in half
+    b.querySelectorAll('.r42-demo').forEach((d) => b.parentElement.append(d))
+    const long = b.scrollHeight > 240
+    b.classList.toggle('r42-clamped', long)
+    let more = b.nextElementSibling?.classList.contains('r42-more') ? b.nextElementSibling : null
+    if (long && !more) {
+      more = el('button', 'r42-link r42-more', 'show more ↓')
+      more.type = 'button'
+      b.after(more)
+    }
+    if (!long && more) more.remove()
   }
   // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
   document.addEventListener('click', (e) => {
@@ -248,7 +256,32 @@
     more.textContent = open ? 'show less ↑' : 'show more ↓'
   })
 
-  // an attached md / csv / txt file in a modal; images open in the lightbox
+  const fetchText = (server, url) => chrome.runtime.sendMessage({ type: 'file', server, url }).catch(() => null)
+    .then((r) => r?.url && new TextDecoder().decode(Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0))))
+
+  // An uploaded HTML demo runs in the extension's sandboxed demo.html: an opaque origin with no access to github.com,
+  // its cookies or the extension, and a CSP (manifest.json) that blocks every network request. The HTML is posted in once.
+  function demoFrame(html) {
+    const f = el('iframe', 'r42-demo-frame')
+    f.setAttribute('sandbox', 'allow-scripts')
+    f.setAttribute('referrerpolicy', 'no-referrer')
+    // every load: moving an iframe in the DOM reloads it
+    f.addEventListener('load', () => f.contentWindow.postMessage({ r42Demo: html }, '*'))
+    f.src = chrome.runtime.getURL('demo.html')
+    return f
+  }
+  // a link to an .html attachment in a note gets a live preview under it; "expand" opens it large
+  function inlineDemo(link, server) {
+    const wrap = el('div', 'r42-demo'), bar = el('div', 'r42-demo-bar'), open = el('button', 'r42-demo-open', 'expand ⤢')
+    open.type = 'button'
+    open.addEventListener('click', () => preview(link))
+    bar.append(el('span', 'r42-demo-tag', 'live demo · sandboxed'), open)
+    wrap.append(bar)
+    ;(link.closest('p, li') ?? link).after(wrap)
+    fetchText(server, link.dataset.r42File).then((html) => { if (html) wrap.append(demoFrame(html)) })
+  }
+
+  // an attached md / csv / txt file in a modal, an html demo in a sandboxed frame; images open in the lightbox
   async function preview(link) {
     const url = link.dataset.r42File, name = decodeURIComponent(url.split('/').pop())
     const r = await chrome.runtime.sendMessage({ type: 'file', server: link.dataset.r42Server, url }).catch(() => null)
@@ -256,12 +289,24 @@
     const box = el('div', 'r42-lightbox')
     if (/^data:image\//.test(r.url)) { const big = el('img'); big.src = r.url; box.append(big) }
     else {
-      const bytes = Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0))
-      const doc = el('div', 'r42-doc r42-md'), head = el('div', 'r42-bar')
+      const text = new TextDecoder().decode(Uint8Array.from(atob(r.url.split(',')[1]), (c) => c.charCodeAt(0)))
+      const demo = /\.html$/i.test(name)
+      const doc = el('div', `r42-doc r42-md${demo ? ' r42-demo-doc' : ''}`), head = el('div', 'r42-bar')
       head.append(el('span', 'r42-badge', 'R42'), el('b', '', name))
       const body = el('div', 'r42-doc-body')
-      body.innerHTML = r42Preview(name, new TextDecoder().decode(bytes)) // escaped by r42Preview
-      loadImages(body, link.dataset.r42Server)
+      if (demo) {
+        const frame = demoFrame(text)
+        for (const [label, w] of [['mobile', '390px'], ['tablet', '768px'], ['desktop', '100%']]) {
+          const b = el('button', `r42-demo-w${w === '100%' ? ' on' : ''}`, label)
+          b.type = 'button'
+          b.addEventListener('click', () => { frame.style.width = w; head.querySelectorAll('.r42-demo-w').forEach((x) => x.classList.toggle('on', x === b)) })
+          head.append(b)
+        }
+        body.append(frame)
+      } else {
+        body.innerHTML = r42Preview(name, text) // escaped by r42Preview
+        loadImages(body, link.dataset.r42Server)
+      }
       doc.append(head, body)
       doc.addEventListener('click', (e) => e.stopPropagation())
       box.append(doc)

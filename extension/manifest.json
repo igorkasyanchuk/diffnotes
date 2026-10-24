@@ -45,5 +45,23 @@
       ],
       "run_at": "document_idle"
     }
+  ],
+  "sandbox": {
+    "pages": [
+      "demo.html"
+    ]
+  },
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "demo.html"
+      ],
+      "matches": [
+        "https://github.com/*"
+      ]
+    }
   ]
 }
