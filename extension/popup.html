@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 300px; margin: 0; padding: 14px; font: 13px/1.45 system-ui, sans-serif; color: #16181d; background: #f6f5f1; }
+    h1 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+    label { display: grid; gap: 3px; margin-bottom: 8px; color: #4a505c; font-size: 12px; }
+    input { font: 13px system-ui; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+    button { font: 500 13px system-ui; padding: 7px 12px; border-radius: 6px; border: 1px solid #16181d; background: #16181d; color: #fff; cursor: pointer; }
+    button.plain { background: #fff; color: #16181d; border-color: #ccc; }
+    .error { color: #c9362b; margin-top: 8px; }
+    .hint { color: #858a94; font-size: 12px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1><img src="icon.png" width="18" height="18" alt="" />Reviews42</h1>
+  <form id="connect">
+    <label>Server <input id="server" placeholder="https://reviews42.example.com" required /></label>
+    <label>Token <input id="token" type="password" placeholder="r42_…" required /></label>
+    <button>Connect</button>
+    <p class="hint">Make a token on your server's <a id="settings" href="#" target="_blank">Settings</a> page.</p>
+  </form>
+  <div id="connected" hidden>
+    <p>Connected to <b id="host"></b> as <b id="who"></b>.</p>
+    <p class="hint">Open a pull request's “Files changed” on GitHub: annotated ones show their notes there.</p>
+    <button id="disconnect" class="plain">Disconnect</button>
+  </div>
+  <div class="error" id="error"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

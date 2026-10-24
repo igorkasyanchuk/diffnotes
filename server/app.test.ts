@@ -1,0 +1,156 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { beforeAll, describe, expect, it } from 'vitest'
+import '../extension/markdown.js'
+
+process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'r42-'))
+process.env.ADMIN_EMAIL = 'admin@example.com'
+process.env.ADMIN_PASSWORD = 'admin-pass'
+const { app } = await import('./app.ts')
+const { db, purgeExpired } = await import('./db.ts')
+
+// one sequential story: later tests reuse what earlier ones created
+type Opts = { cookie?: string; token?: string; body?: unknown; form?: FormData; method?: string }
+async function call(url: string, { cookie, token, body, form, method }: Opts = {}) {
+  const headers: Record<string, string> = {}
+  if (cookie) headers.cookie = cookie
+  if (token) headers.authorization = `Bearer ${token}`
+  if (body !== undefined) headers['content-type'] = 'application/json'
+  const res = await app.request(url, { method: method ?? (body || form ? 'POST' : 'GET'), headers, body: form ?? (body === undefined ? undefined : JSON.stringify(body)) })
+  return { status: res.status, res, data: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() }
+}
+const login = async (email: string, password: string) => {
+  const r = await call('/api/login', { body: { email, password } })
+  expect(r.status).toBe(200)
+  return r.res.headers.get('set-cookie')!.split(';')[0]
+}
+
+let admin = '', token = '', accountId = '', member = '', pullId = ''
+
+describe('reviews42', () => {
+  beforeAll(async () => { admin = await login('admin@example.com', 'admin-pass') })
+
+  it('rejects a wrong password and anonymous API calls', async () => {
+    expect((await call('/api/login', { body: { email: 'admin@example.com', password: 'nope' } })).status).toBe(401)
+    expect((await call('/api/dashboard')).status).toBe(401)
+    expect((await call('/api/me')).data).toEqual({ user: null })
+  })
+
+  it('bootstraps the first admin with an account', async () => {
+    const d = (await call('/api/dashboard', { cookie: admin })).data
+    expect(d.accounts).toHaveLength(1)
+    expect(d.accounts[0].role).toBe('owner')
+    expect(d.retention_days).toBe(30)
+    accountId = d.accounts[0].id
+  })
+
+  it('invites a member who signs up through the link', async () => {
+    const { token: inv } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { email: 'Dev@Example.com' } })).data
+    expect((await call(`/api/invites/${inv}`)).data).toMatchObject({ email: 'dev@example.com', exists: false })
+    expect((await call(`/api/invites/${inv}/accept`, { body: { name: 'Dev', password: 'short' } })).status).toBe(400)
+    const ok = await call(`/api/invites/${inv}/accept`, { body: { name: 'Dev', password: 'dev-password' } })
+    expect(ok.status).toBe(200)
+    member = ok.res.headers.get('set-cookie')!.split(';')[0]
+    expect((await call(`/api/invites/${inv}`)).status).toBe(404)
+    const acc = (await call(`/api/accounts/${accountId}`, { cookie: member })).data
+    expect(acc.role).toBe('member')
+    expect(acc.invites).toEqual([])
+    expect((await call(`/api/accounts/${accountId}/invites`, { cookie: member, body: { email: 'x@y.z' } })).status).toBe(403)
+  })
+
+  it('issues tokens shown once', async () => {
+    token = (await call('/api/tokens', { cookie: admin, body: { name: 'laptop' } })).data.token
+    expect(token).toMatch(/^r42_/)
+    const list = (await call('/api/tokens', { cookie: admin })).data
+    expect(list).toHaveLength(1)
+    expect(JSON.stringify(list)).not.toContain(token)
+    expect((await call('/api/v1/me', { token })).data.user.email).toBe('admin@example.com')
+    expect((await call('/api/v1/me', { token: 'r42_wrong' })).status).toBe(401)
+  })
+
+  it('uploads annotations with files and links attachment: references', async () => {
+    const form = new FormData()
+    form.set('payload', new File([JSON.stringify({
+      title: 'Add login', head_sha: 'abc123', summary: 'Overview ![shot](attachment:login.png)',
+      annotations: [
+        { path: 'app/login.ts', title: 'New file', body: 'Why it exists' },
+        { path: 'app/routes.ts', line: 12, end_line: 14, body: 'Before/after ![x](attachment:login.png)' },
+        { path: 'app/old.ts', line: 3, side: 'LEFT', body: 'Removed' },
+      ],
+    })], 'payload.json', { type: 'application/json' }))
+    form.append('file', new File([new Uint8Array([137, 80, 78, 71])], 'login.png', { type: 'image/png' }))
+    const r = await call('/api/v1/pulls/acme/web/42', { token, form, method: 'PUT' })
+    expect(r.status).toBe(200)
+    expect(r.data).toMatchObject({ annotations: 3, files: 1 })
+    pullId = r.data.id
+    const p = (await call('/api/v1/pulls/acme/web/42', { token })).data
+    expect(p.annotations[1]).toMatchObject({ line: 12, end_line: 14, side: 'RIGHT' })
+    expect(p.annotations[2].side).toBe('LEFT')
+    expect(p.summary).toContain(`/files/${pullId}/login.png`)
+    const img = await call(`/files/${pullId}/login.png`, { token })
+    expect(img.status).toBe(200)
+    expect(img.res.headers.get('content-security-policy')).toBe('sandbox')
+    expect((await call(`/files/${pullId}/login.png`)).status).toBe(404)
+  })
+
+  it('replaces annotations on a re-run, keeping the same pull', async () => {
+    const r = await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: { annotations: [{ path: 'a.ts', line: 1, body: 'only one' }] } })
+    expect(r.data.id).toBe(pullId)
+    const p = (await call(`/api/pulls/${pullId}`, { cookie: member })).data
+    expect(p.annotations).toHaveLength(1)
+    expect(p.files).toEqual([])
+    expect((await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: { annotations: [{ body: 'no path' }] } })).status).toBe(400)
+    expect((await call('/api/v1/pulls/acme/web/0', { token, method: 'PUT', body: { annotations: [] } })).status).toBe(400)
+  })
+
+  it('keeps same-named uploads apart and every stored file reachable', async () => {
+    const long = `${'a'.repeat(96)}.png`, form = new FormData()
+    form.set('payload', JSON.stringify({ annotations: [] }))
+    form.append('file', new File(['one'], long))
+    form.append('file', new File(['two'], long))
+    const r = await call('/api/v1/pulls/acme/web/42', { token, form, method: 'PUT' })
+    expect(r.data.files).toBe(2)
+    const p = (await call(`/api/pulls/${pullId}`, { token })).data
+    expect(p.files).toHaveLength(2)
+    for (const f of p.files) expect((await call(f, { token })).status).toBe(200)
+    expect((await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: null })).status).toBe(400)
+  })
+
+  it('hides pull requests from people outside the account', async () => {
+    const other = (await call('/api/accounts', { cookie: admin, body: { name: 'Other' } })).data
+    const { token: t } = (await call(`/api/accounts/${other.id}/invites`, { cookie: admin, body: { email: 'out@example.com' } })).data
+    const outsider = (await call(`/api/invites/${t}/accept`, { body: { password: 'outsider-pass' } })).res.headers.get('set-cookie')!.split(';')[0]
+    expect((await call('/api/v1/pulls/acme/web/42', { cookie: outsider })).status).toBe(404)
+    expect((await call(`/api/pulls/${pullId}`, { cookie: outsider })).status).toBe(404)
+    expect((await call(`/api/accounts/${accountId}`, { cookie: outsider })).status).toBe(404)
+    expect((await call('/api/dashboard', { cookie: outsider })).data.pulls).toEqual([])
+    expect((await call('/api/v1/pulls/acme/web/42', { cookie: outsider, method: 'PUT', body: { annotations: [] } })).status).toBe(404)
+  })
+
+  it('connects repositories by name', async () => {
+    expect((await call(`/api/accounts/${accountId}/repositories`, { cookie: admin, body: { full_name: 'not a repo' } })).status).toBe(400)
+    expect((await call(`/api/accounts/${accountId}/repositories`, { cookie: admin, body: { full_name: 'https://github.com/acme/api' } })).status).toBe(200)
+    expect((await call(`/api/accounts/${accountId}/repositories`, { cookie: admin, body: { full_name: 'acme/web' } })).status).toBe(409)
+    const repos = (await call(`/api/accounts/${accountId}`, { cookie: member })).data.repositories
+    expect(repos.map((r: { full_name: string }) => r.full_name)).toEqual(['acme/api', 'acme/web'])
+  })
+
+  it('purges expired pull requests with their files', async () => {
+    db.prepare('update pulls set expires_at = ? where id = ?').run('2000-01-01T00:00:00.000Z', pullId)
+    expect(purgeExpired()).toBe(1)
+    expect((await call('/api/v1/pulls/acme/web/42', { token })).status).toBe(404)
+  })
+
+  it('serves the skill with the host filled in', async () => {
+    const r = await call('http://r42.test/skill/SKILL.md')
+    expect(r.data).toContain('http://r42.test')
+    expect((await call('http://r42.test/install.sh')).data).toContain('http://r42.test/skill/SKILL.md')
+  })
+
+  it('renders Markdown without letting a later pass rewrite inside generated tags', async () => {
+    const md = (globalThis as unknown as { r42Markdown: (s: string) => string }).r42Markdown
+    expect(md('![x](http://a/[y](/x/onerror=alert``//))')).not.toContain('<a href')
+    expect(md('[*a](http://x/*b)')).toContain('href="http://x/*b"')
+  })
+})
