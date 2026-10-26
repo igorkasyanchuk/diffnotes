@@ -27,6 +27,8 @@ What to paste into the Chrome Web Store developer dashboard for `extension/`. Pa
 > • previews of attached Markdown, CSV and text files
 > • small interactive HTML demos, run in a locked sandbox with no network access
 > • a floating dock and one switch to hide every note
+> • a deploy card: migrations, env vars, flags and rollback, pinned on top
+> • keyboard: j / k between notes, n to hide them, ? for the keys
 >
 > Nothing is posted to the pull request: no bot comments, no notifications. Notes live on a DiffNotes server you or your
 > company runs (free, open source, MIT) and are visible only to your team.

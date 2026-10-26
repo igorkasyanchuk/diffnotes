@@ -69,6 +69,10 @@ never write it into files or commits.
 - **Risk**: give `"risk": "high" | "medium" | "low"` to the notes where reviewers should look hardest or can relax
   (money, auth, data loss, migrations, concurrency are high; copy and renames low). Reviewers get a "where to look
   hardest" list at the top. Use it sparingly and say why in the note's text; leave it out when there is nothing to flag.
+- **Deploy card**: when shipping the PR takes more than a merge, add `"deploy"` (Markdown) for whoever deploys it:
+  migrations (reversible or not), new env vars and their values' shape (never real secrets), feature flags, the order
+  of steps, how to roll back. Read them from the diff (migration files, config, env examples). Leave it out when there
+  is nothing to do beyond merging, unless the repository's rules ask for one (then say "nothing special").
 - **Allowed files**: `.png .jpg .jpeg .gif .webp` (real images, checked by content), `.mp4 .webm` (screen recordings,
   checked by content), `.md .csv .txt .html` (UTF-8 text). Up to **{{MAX_FILE_MB}} MB each** (videos {{MAX_VIDEO_MB}} MB),
   {{MAX_FILES}} files and {{MAX_PULL_MB}} MB per PR (this server's limits). Anything else (svg, pdf, zip, mov…) is refused with `415`:
@@ -111,6 +115,7 @@ never write it into files or commits.
      "title": "PR title",
      "head_sha": "<headRefOid>",
      "summary": "Two or three sentences: what this PR does and why. ![after](attachment:after.png)",
+     "deploy": "1. Run the `add_invites` migration (reversible).\n2. Set `INVITE_DAYS` (optional, 7 by default).\n\nRollback: revert; the table stays, unused.",
      "annotations": [
        { "path": "app/models/invite.rb", "body": "New: an invitation a teammate opens to join the team." },
        { "path": "app/controllers/sessions_controller.rb", "line": 14, "end_line": 22, "risk": "high",
@@ -131,14 +136,15 @@ never write it into files or commits.
    full, current set):
    ```bash
    H=${DIFFNOTES_URL:-{{HOST}}}
-   curl -fsS -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+   curl -sS --fail-with-body -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
      -F payload=@diffnotes.json -F file=@after.png -F file=@before.png
    # JSON only, no files: -H 'content-type: application/json' --data-binary @diffnotes.json
    # → {"id":"…","url":"…/pulls/<id>","annotations":3,"files":2}
    ```
    `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
    account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
-   isn't allowed or doesn't match its extension. A new repository is connected to the account you own or administer on
+   isn't allowed or doesn't match its extension; `422` = the repository's rules ask for more (a risk on every note, a
+   deploy card, a screenshot or recording for some paths): the message says what, so add it and upload again. A new repository is connected to the account you own or administer on
    its first upload.
 7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
    was stored; the `annotations` count must match what you wrote.

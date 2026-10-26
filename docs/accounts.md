@@ -17,6 +17,18 @@ A repository is connected to an account on its first upload by an owner or admin
 until an admin connects it), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab
 and Bitbucket (`gitlab.com/group/project`, `bitbucket.org/team/app`), or just paste the repository's URL.
 
+## Repository rules
+
+Account → **repositories** → **rules** (owners and admins) sets what every upload to that repository must carry:
+
+- **every note rates its risk** (`low`, `medium` or `high`), so the "where to look hardest" list is complete;
+- **a deploy card**: migrations, env vars, feature flags, the order of steps, how to roll back (or "nothing special");
+- **screenshots or a recording when a note touches** these paths: globs like `web/**`, `**/*.css`, `app/views/*`
+  (`**` any folders, `*` within one name; `web/` means `web/**`), comma separated, 300 characters at most.
+
+An upload that misses one is refused with `422` and a message saying what to add; the skill and MCP clients read it,
+add it and upload again. The rules show as chips on the repository for everyone in the account.
+
 ## Deleting
 
 - **A repository**: account → **repositories** → **delete** (admins). Its PRs, notes and uploaded files go with it.

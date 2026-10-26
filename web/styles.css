@@ -264,3 +264,12 @@ button.more { margin-top: 4px; font-size: 12px; }
 .dn-dg-edge.bold { stroke-width: 2.6; }
 .dn-dg-arrow { fill: var(--muted); }
 .dn-dg-elabel { fill: var(--muted); font-size: 11px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }
+
+/* repository rules form, opened under its row; the deploy card on a PR's page */
+.list > :has(> .rules) { flex-wrap: wrap; }
+.rules { flex-basis: 100%; display: grid; gap: 8px; padding: 6px 0 4px; font-size: 13px; }
+.rules label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ink); }
+.rules input[type=checkbox] { width: auto; flex: none; margin: 0; accent-color: var(--accent); }
+.rules input:not([type]) { flex: 1; min-width: 160px; }
+.card.deploy { border-left: 3px solid var(--accent); margin-bottom: 12px; }
+.card.deploy h3 { margin: 0 0 6px; }

@@ -14,7 +14,7 @@ declare global {
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; summary: string; updated_at: string; expires_at: string; annotations: Annotation[]
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -333,7 +333,7 @@ function Dashboard() {
 type Acc = {
   account: { id: string; name: string }; role: string
   members: { id: string; email: string; name: string; role: string }[]
-  repositories: { id: string; full_name: string; pulls: number }[]
+  repositories: { id: string; full_name: string; pulls: number; rules: Rules }[]
   invites: { token: string; email: string; role: string; expires_at: string }[]
 }
 type Overview = {
@@ -446,15 +446,33 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
   </>
 }
 
+type Rules = { risk?: boolean; deploy?: boolean; screenshots?: string }
+const ruleChips = (r: Rules) => [r.risk && 'risk on every note', r.deploy && 'deploy card', r.screenshots && `screenshots for ${r.screenshots}`].filter(Boolean) as string[]
+// what every upload to a repository must carry; the server answers 422 with what is missing and the agent adds it
+function RulesForm({ id, rules, done }: { id: string; rules: Rules; done: () => void }) {
+  const [r, setR] = useState(rules)
+  const save = useSubmit(async () => { await api(`/api/repositories/${id}/rules`, r, 'PUT'); done() })
+  return <form className="rules" onSubmit={save.submit}>
+    <label><input type="checkbox" checked={!!r.risk} onChange={(e) => setR({ ...r, risk: e.target.checked })} /> every note rates its risk</label>
+    <label><input type="checkbox" checked={!!r.deploy} onChange={(e) => setR({ ...r, deploy: e.target.checked })} /> a deploy card (migrations, env vars, flags, rollback)</label>
+    <label>screenshots or a recording when a note touches <input placeholder="web/**, **/*.css" value={r.screenshots ?? ''} onChange={(e) => setR({ ...r, screenshots: e.target.value })} /></label>
+    <div><button>save rules</button></div>
+    {save.error && <div className="error">{save.error}</div>}
+  </form>
+}
+
 function Repositories({ id, data, admin, reload }: TabProps) {
-  const [repo, setRepo] = useState('')
+  const [repo, setRepo] = useState(''), [editing, setEditing] = useState('')
   const add = useSubmit(async () => { await api(`/api/accounts/${id}/repositories`, { full_name: repo }); setRepo(''); reload() })
   return <>
     <div className="list">
       {data.repositories.length ? data.repositories.map((r) => <div key={r.id}>
         <a className="grow" href={repoUrl(r.full_name)} target="_blank" rel="noreferrer">{r.full_name}</a>
+        {ruleChips(r.rules).map((c) => <span key={c} className="chip hot" title="every upload must have it">{c}</span>)}
         <span className="chip">{r.pulls} PRs</span>
+        {admin && <button className="link" onClick={() => setEditing(editing === r.id ? '' : r.id)}>rules</button>}
         {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Delete ${r.full_name}? Its pull requests, notes and uploaded files are deleted too. There is no undo.`)}>delete</button>}
+        {editing === r.id && <RulesForm id={r.id} rules={r.rules} done={() => { setEditing(''); reload() }} />}
       </div>) : <div className="empty">no repositories yet. they are added on the first upload{admin && ', or here'}.</div>}
     </div>
     {admin && <>
@@ -502,6 +520,7 @@ function PullPage({ id }: { id: string }) {
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
       {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
         'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.')}>delete notes</button>}</p>
+    {data.deploy && <div className="card deploy"><h3>deploy</h3><Md text={data.deploy} /></div>}
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
     {risky.length > 0 && <div className="card risks">
       <h3>where to look hardest</h3>

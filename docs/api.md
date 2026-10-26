@@ -13,6 +13,7 @@ session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can
 | `DELETE` | `/api/pulls/:id` | the same by PR id (web app's **delete notes**); the extension adds `?id=<pull id>` to the route above, `409` if the PR changed |
 | `DELETE` | `/api/v1/annotations/:id` | remove one note (the extension's **remove note**); the PR and its files stay |
 | `GET` | `/api/v1/me` | who the token belongs to |
+| `PUT` | `/api/repositories/:id/rules` | `{risk, deploy, screenshots}`: what every upload must carry (account admins, web app session) |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `POST` | `/mcp` | the same notes for MCP clients (see [MCP](#mcp)); `GET` answers `405` |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
@@ -31,6 +32,7 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   "title": "PR title",
   "head_sha": "commit the notes were written for",
   "summary": "Markdown",
+  "deploy": "Markdown, optional: what shipping it takes",
   "annotations": [
     { "path": "app/a.ts", "line": 10, "end_line": 14, "side": "RIGHT", "title": "optional", "body": "Markdown", "risk": "high" }
   ]
@@ -39,7 +41,11 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 
 - `line` / `end_line`: new-side line numbers; `side: "LEFT"` for removed lines; no `line` = a note on the whole file.
 - `risk` (optional): `high`, `medium` or `low`; anything else is dropped. The extension and the web app list risky notes first.
-- `attachment:<file name>` anywhere in `summary` or `body` becomes the uploaded file's URL.
+- `deploy` (optional): the deploy card, Markdown: migrations, new env vars, feature flags, the order of steps, how to
+  roll back. Shown pinned at the top of the summary box and on the PR's page.
+- The repository's [rules](accounts.md#repository-rules) can require a risk on every note, a deploy card, or an image
+  or video when a note is on certain paths; an upload that misses one gets `422` saying what to add.
+- `attachment:<file name>` anywhere in `summary`, `deploy` or `body` becomes the uploaded file's URL.
 - In `body` and `summary`: ` ```mermaid ` flowcharts are drawn as diagrams, and two adjacent images named
   `…-before` / `…-after` (or captioned Before / After) become one image with a drag handle. An image whose file is an
   `.mp4` or `.webm` (`![caption](attachment:flow.webm)`) plays inline as a muted video with controls.
@@ -54,10 +60,11 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 (one note or all) is for the PR's uploader and the account's owner and admins; other members get `403`.
 
 Response: `{"id", "url", "annotations", "files"}`. Errors: `400` bad payload, `401` bad token, `403` repository not
-connected and you're only a member, `413` too many / too big / account full, `415` file type not allowed (see [security](security.md)).
+connected and you're only a member, `413` too many / too big / account full, `415` file type not allowed (see [security](security.md)), `422` the
+repository's rules ask for more (the message lists it).
 
 ```bash
-curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+curl -sS --fail-with-body -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
   -F payload=@diffnotes.json -F file=@after.png
 ```
 

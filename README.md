@@ -75,9 +75,9 @@ Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https:/
 | [Deploy](docs/deploy.md) | Docker Compose, Coolify, Render (one-click), Fly.io, Railway; one instance only |
 | [Agent skill](docs/skill.md) | Install, token, how the agent writes notes, payload format, allowed files |
 | [Browser extension](docs/extension.md) | Install (Chrome, Firefox, Safari), several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
-| [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, super admin, overview pages |
+| [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, repository rules, super admin, overview pages |
 | [File storage](docs/storage.md) | Disk or S3-compatible (Backblaze B2, Cloudflare R2, AWS S3, MinIO), expiry |
-| [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets |
+| [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets; report a vulnerability: [SECURITY.md](SECURITY.md) |
 | [API](docs/api.md) | The HTTP API the skill and the extension use |
 | [Development](AGENTS.md) | Stack, layout, commands, code rules |
 | [Changelog](CHANGELOG.md) | What changed in each version; releases are tagged `vX.Y.Z` |

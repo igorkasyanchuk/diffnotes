@@ -83,8 +83,10 @@ if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get
   } catch (e) { db.exec('rollback'); throw e } finally { db.exec('pragma foreign_keys = on') }
 }
 
-// risk (low | medium | high) came later: add the column to databases made before it
-try { db.exec('alter table annotations add column risk text') } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
+// columns that came later, added to databases made before them: risk, the deploy card, repository rules (JSON)
+for (const sql of ['alter table annotations add column risk text', "alter table pulls add column deploy text not null default ''",
+  "alter table repositories add column rules text not null default '{}'"])
+  try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 
 export const now = () => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')

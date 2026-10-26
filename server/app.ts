@@ -360,8 +360,8 @@ app.get('/api/accounts/:id', (c) => {
   const account = db.prepare('select id, name from accounts where id = ?').get(id)
   const members = db.prepare(`select u.id, u.email, u.name, m.role from memberships m join users u on u.id = m.user_id
     where m.account_id = ? order by u.email`).all(id)
-  const repositories = db.prepare(`select r.id, r.full_name, (select count(*) from pulls p where p.repository_id = r.id) as pulls
-    from repositories r where r.account_id = ? order by r.full_name`).all(id)
+  const repositories = (db.prepare(`select r.id, r.full_name, r.rules, (select count(*) from pulls p where p.repository_id = r.id) as pulls
+    from repositories r where r.account_id = ? order by r.full_name`).all(id) as { rules: string }[]).map((r) => ({ ...r, rules: JSON.parse(r.rules) }))
   const invites = canManage(my)
     ? db.prepare('select token, email, role, expires_at from invites where account_id = ? order by created_at desc').all(id) : []
   return c.json({ account, role: my, members, repositories, invites })
@@ -474,6 +474,19 @@ app.post('/api/accounts/:id/repositories', async (c) => {
   db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repo, id, name, now())
   return c.json({ id: repo })
 })
+// Rules every upload to the repository must meet (admins set them): a risk on every note, a deploy card, and a
+// screenshot or recording when a note is on a path matching one of the globs (web/**, **/*.css). savePull() checks them.
+app.put('/api/repositories/:id/rules', async (c) => {
+  const repo = db.prepare('select account_id from repositories where id = ?').get(c.req.param('id')) as { account_id: string } | undefined
+  requireAdmin(repo?.account_id ?? fail(404, 'Not found'), c.get('user'))
+  const body = await json(c), paths = str(body.screenshots, 301)
+  if (paths.length > 300) fail(400, 'Paths for screenshots: 300 characters at most') // cut, the last glob would silently never match
+  // gitignore habits: /web/** is web/** (note paths never start with /), web/ is everything under web/
+  const screenshots = paths.split(/[\s,]+/).map((g) => g.replace(/^\/+/, '').replace(/\/$/, '/**')).filter(Boolean).join(', ')
+  const rules: Rules = { ...(body.risk === true && { risk: true }), ...(body.deploy === true && { deploy: true }), ...(screenshots && { screenshots }) }
+  db.prepare('update repositories set rules = ? where id = ?').run(JSON.stringify(rules), c.req.param('id'))
+  return c.json(rules)
+})
 app.delete('/api/repositories/:id', async (c) => {
   const repo = db.prepare('select id, account_id from repositories where id = ?').get(c.req.param('id')) as { id: string; account_id: string } | undefined
   if (!repo) fail(404, 'Not found')
@@ -487,8 +500,8 @@ app.delete('/api/repositories/:id', async (c) => {
 
 // --- pull request annotations (the skill writes, the extension and the web app read)
 
-type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; updated_at: string; expires_at: string; full_name: string; account_id: string; user_id: string | null }
-const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.updated_at, p.expires_at, r.full_name, r.account_id, p.user_id
+type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; deploy: string; updated_at: string; expires_at: string; full_name: string; account_id: string; user_id: string | null }
+const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.deploy, p.updated_at, p.expires_at, r.full_name, r.account_id, p.user_id
   from pulls p join repositories r on r.id = p.repository_id`
 
 // Removing notes is for whoever uploaded them (the PR's author, through their agent) and the account's owner and admins;
@@ -502,7 +515,7 @@ function pullOut(p: Pull, user: User) {
   const files = (db.prepare('select name, type, size from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number }[])
     .map((f) => ({ ...f, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
-    id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary,
+    id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary, deploy: p.deploy,
     updated_at: p.updated_at, expires_at: p.expires_at, annotations, files, can_delete: canRemove(p, user),
   }
 }
@@ -611,11 +624,49 @@ app.put(PULL_PATH, async (c) => {
 })
 
 type Upload = { name: string; data: Buffer }
+type Rules = { risk?: boolean; deploy?: boolean; screenshots?: string }
+// a path glob: ** any directories, * and ? within one name; matched against the whole path. A table, not a RegExp:
+// *a*a*a*b as a regex backtracks for minutes on a long path, and any account owner can set one (the server would stall)
+export const glob = (g: string) => {
+  const parts = g.match(/\*\*\/|\*\*|\*|\?|[^*?]/g) ?? []
+  return {
+    // next[j]: the path from j on matches the parts after this one; ok[j]: from this one on. O(glob × path)
+    test(p: string) {
+      let next = Array.from({ length: p.length + 1 }, (_, j) => j === p.length), ok = [...next]
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const t = parts[i]
+        let dir = false // **/: a '/' at j or later is followed by a match
+        for (let j = p.length; j >= 0; j--) {
+          const c = p[j], more = j < p.length
+          if (t === '**/') { dir ||= c === '/' && next[j + 1]; ok[j] = next[j] || dir }
+          else if (t === '*' || t === '**') ok[j] = next[j] || (more && (t === '**' || c !== '/') && ok[j + 1])
+          else ok[j] = more && (t === '?' ? c !== '/' : c === t) && next[j + 1]
+        }
+        ;[next, ok] = [ok, next]
+      }
+      return next[0]
+    },
+  }
+}
+// what an upload lacks under its repository's rules (empty: it passes)
+function unmet(rules: Rules, deploy: string, notes: { path: string; risk: string | null }[], types: string[]) {
+  const out: string[] = []
+  if (rules.risk && notes.some((n) => !n.risk)) out.push('a risk (low, medium or high) on every note')
+  if (rules.deploy && !deploy) out.push('a deploy card ("deploy": migrations, env vars, flags, the order of steps, how to roll back; or "nothing special")')
+  // an attached image or video already passes: no glob runs then (up to 500 notes × 300 characters of globs)
+  if (rules.screenshots && !types.some((t) => /^(image|video)\//.test(t))) {
+    const globs = rules.screenshots.split(', ').map(glob), hit = notes.find((n) => globs.some((g) => g.test(n.path)))
+    if (hit) out.push(`a screenshot or recording, since ${hit.path} matches ${rules.screenshots}`)
+  }
+  return out
+}
 // the one upload path, for PUT /api/v1/pulls/… and the MCP tool upload_notes
 async function savePull(user: User, repo: string, number: number, raw: unknown, files: Upload[], origin: string) {
   if (!Number.isInteger(number) || number < 1) fail(400, 'Bad pull request number')
   const payload = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const list = Array.isArray(payload.annotations) ? payload.annotations as Record<string, unknown>[] : fail(400, 'annotations must be an array')
+  // a note that isn't an object (null, a string) has no path: 400 below, not a TypeError
+  const list = Array.isArray(payload.annotations) ? (payload.annotations as unknown[]).map((a) => (a && typeof a === 'object' ? a : {}) as Record<string, unknown>)
+    : fail(400, 'annotations must be an array')
   if (list.length > MAX_ANNOTATIONS) fail(413, `At most ${MAX_ANNOTATIONS} annotations`)
   if (files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request`)
   // every file is checked before anything changes (not even a new repository is connected for a refused upload);
@@ -626,6 +677,11 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
 
   const fullName = repoName(repo), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoFound, number) as { id: string } | undefined
+  const deploy = str(payload.deploy, 20_000) // blank or not a string: no card
+  const notes = list.map((a, i) => ({ path: str(a.path, 500) || fail(400, `annotations[${i}].path is required`), risk: RISKS.includes(a.risk as string) ? a.risk as string : null }))
+  const rules = repoFound ? JSON.parse((db.prepare('select rules from repositories where id = ?').get(repoFound) as { rules: string }).rules) as Rules : {}
+  const missing = unmet(rules, deploy, notes, types)
+  if (missing.length) fail(422, `${fullName}'s rules ask for ${missing.join('; ')}. Add it and upload again.`)
   // account quotas, so one leaked token can't fill the disk: live pull requests, and file bytes (this PR's old files don't count)
   if (!existing && (db.prepare('select count(*) as n from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').get(accountId) as { n: number }).n >= MAX_PULLS)
     fail(413, `This account has ${MAX_PULLS} pull requests with notes, the most it can; delete some or wait for them to expire`)
@@ -647,12 +703,11 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const link = (md: string) => md.replace(/attachment:([^\s)"']+)/g, (m, n: string) =>
     names.has(n) ? `/files/${id}/${encodeURIComponent(names.get(n)!)}` : m)
 
+  const summaryMd = link(String(payload.summary ?? '').slice(0, 20_000)), deployMd = link(deploy)
   const rows = list.map((a, i) => {
     const line = Number.isInteger(a.line) && (a.line as number) > 0 ? a.line as number : null
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
-    return [id, str(a.path, 500) || fail(400, `annotations[${i}].path is required`), line, end,
-      a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i,
-      RISKS.includes(a.risk as string) ? a.risk as string : null] as const
+    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i, notes[i].risk] as const
   })
   // the previous upload's files go once the new rows are in, then the new files are written under the current backend
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ?').all(id) as { pull: string; name: string; backend: string }[]
@@ -660,13 +715,13 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   db.exec('begin')
   try {
     if (existing) {
-      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
-        .run(str(payload.title, 300), str(payload.head_sha, 64), link(String(payload.summary ?? '').slice(0, 20_000)), user.id, now(), daysFromNow(RETENTION_DAYS), id)
+      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, deploy = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
+        .run(str(payload.title, 300), str(payload.head_sha, 64), summaryMd, deployMd, user.id, now(), daysFromNow(RETENTION_DAYS), id)
       db.prepare('delete from annotations where pull_id = ?').run(id)
     } else {
-      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, user_id, created_at, updated_at, expires_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload.title, 300), str(payload.head_sha, 64),
-        link(String(payload.summary ?? '').slice(0, 20_000)), user.id, now(), now(), daysFromNow(RETENTION_DAYS))
+      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, user_id, created_at, updated_at, expires_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload.title, 300), str(payload.head_sha, 64),
+        summaryMd, deployMd, user.id, now(), now(), daysFromNow(RETENTION_DAYS))
     }
     const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r)
@@ -696,8 +751,8 @@ const limits = () => `Files: png, jpg, gif, webp (real images) up to ${MAX_FILE 
 const TOOLS = [
   {
     name: 'get_notes', title: 'Read DiffNotes notes',
-    description: 'The DiffNotes notes on a pull request: summary, head_sha, annotations (path, line, end_line, side, title, body, risk) and attached files. ' +
-      'Use it before re-annotating after new commits, to keep what still applies. Bodies and the summary link files as /files/…: ' +
+    description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, annotations (path, line, end_line, side, title, body, risk) and attached files. ' +
+      'Use it before re-annotating after new commits, to keep what still applies. Bodies, the summary and the deploy card link files as /files/…: ' +
       'every upload replaces all files, so to keep one, attach it again and write it as attachment:<name>. ' +
       'Errors with "No annotations" when the PR has none.',
     inputSchema: { type: 'object', properties: target, required: ['repo', 'number'] },
@@ -712,7 +767,9 @@ const TOOLS = [
       'Write plain words a reviewer gets without reading the code first: what changed, why, what to check. No praise, no restating the diff. ' +
       'Never put secrets or private data in notes, titles, summaries or files: API keys, passwords, tokens, private keys, connection strings, ' +
       '.env values, session cookies, personal or customer data. Crop or blur them out of screenshots and recordings; say "an API key" instead. ' +
-      'risk high / medium / low only where it helps reviewers decide where to look hardest. The summary: two or three sentences, what the PR does and why.\n' +
+      'risk high / medium / low only where it helps reviewers decide where to look hardest. The summary: two or three sentences, what the PR does and why. ' +
+      'deploy: when shipping takes more than a merge (migrations, env vars, flags, steps in order, rollback), say so for whoever deploys it. ' +
+      'An error naming the repository\'s rules lists what it requires (a risk on every note, a deploy card, screenshots): add it and upload again.\n' +
       'Markdown in body and summary. Attach files and reference them as attachment:<name>: screenshots ![Checkout on mobile](attachment:checkout.png), ' +
       'a short screen recording of a flow or animation ![Dragging a card](attachment:drag.webm), two images named …-before.png / …-after.png become a ' +
       'slider, [report](attachment:report.md) or [timings](attachment:bench.csv) open as previews, [try it](attachment:demo.html) runs a ' +
@@ -727,6 +784,7 @@ const TOOLS = [
             title: { type: 'string', description: 'The PR title' },
             head_sha: { type: 'string', description: 'The PR head commit the notes describe' },
             summary: { type: 'string', description: 'Markdown: what the PR does and why, two or three sentences' },
+            deploy: { type: 'string', description: 'Markdown deploy card for whoever ships it: migrations, new env vars, feature flags, the order of steps, how to roll back. Leave out when shipping needs nothing special' },
             annotations: {
               type: 'array', maxItems: MAX_ANNOTATIONS,
               items: {

@@ -190,3 +190,12 @@ html.dn-dark .dn-risk-low { background: rgba(46, 160, 67, .16); color: #3fb950; 
 
 /* changed since your last visit */
 .dn-changed { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--dn-link) 15%, transparent); color: var(--dn-link); font: 600 11px/1.6 -apple-system, sans-serif; }
+
+/* the deploy card, pinned at the top of the box */
+/* tinted, not --dn-muted-bg: its `code` and `pre` (env vars, commands) use that one and would vanish */
+.dn-deploy { border-left: 3px solid var(--dn); margin: 4px 6px 8px; background: color-mix(in srgb, var(--dn) 6%, var(--dn-bg)); border-radius: 6px; }
+/* ? : the keyboard shortcuts */
+.dn-keys .dn-doc { width: min(380px, 94vw); }
+.dn-key { display: flex; gap: 12px; align-items: center; padding: 4px 0; }
+.dn-key kbd { min-width: 28px; text-align: center; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 2px 6px;
+  border: 1px solid var(--dn-line); border-bottom-width: 2px; border-radius: 5px; background: var(--dn-muted-bg); }

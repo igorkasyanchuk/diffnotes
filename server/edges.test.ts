@@ -27,7 +27,7 @@ const built = fs.existsSync(index) && fs.readFileSync(index, 'utf8') !== STAND_I
 if (!built) { fs.mkdirSync(path.dirname(index), { recursive: true }); fs.writeFileSync(index, STAND_IN) }
 afterAll(() => { if (!built) fs.rmSync(index) })
 
-const { app, recordFailure, throttle } = await import('./app.ts')
+const { app, glob, recordFailure, throttle } = await import('./app.ts')
 const { db, setSetting } = await import('./db.ts')
 const { call, login, mcp } = client(app)
 
@@ -236,5 +236,61 @@ describe('super admin', () => {
     const pull = (await call('/api/v1/pulls/o/n/1', { token })).data.id
     db.prepare(`insert into files (pull_id, name, type, size, backend) values (?, 'x.png', 'image/png', 1, 's3')`).run(pull)
     expect((await put(s3)).status).toBe(409)
+  })
+})
+
+describe('repository rules and the deploy card', () => {
+  it('matches path globs', () => {
+    expect(glob('web/**').test('web/a/b.tsx')).toBe(true)
+    expect(glob('**/*.css').test('styles.css')).toBe(true)
+    expect(glob('**/*.css').test('web/x/styles.css')).toBe(true)
+    expect(glob('*.css').test('web/styles.css')).toBe(false)
+    expect(glob('a?.md').test('ab.md')).toBe(true)
+    expect(glob('a.(b)+').test('a.(b)+')).toBe(true) // regex characters are literal
+    expect(glob('a/**/b').test('a/b')).toBe(true)
+    expect(glob('a/**/b').test('a/x/y/b')).toBe(true)
+    expect(glob('a?').test('a/')).toBe(false)
+    // a pattern that would backtrack for ages as a regex answers at once
+    const t = Date.now()
+    expect(glob('*a'.repeat(100) + 'b').test('a'.repeat(500))).toBe(false)
+    expect(Date.now() - t).toBeLessThan(1000)
+  })
+
+  it('refuses an upload that misses what its repository requires, and stores the deploy card', async () => {
+    const acc = (await call('/api/accounts', { cookie: admin, body: { name: 'Ruled' } })).data.id
+    const repo = (await call(`/api/accounts/${acc}/repositories`, { cookie: admin, body: { full_name: 'ruled/app' } })).data.id
+    const put = (payload: unknown, files: [string, Uint8Array][] = []) => {
+      const form = new FormData()
+      form.set('payload', JSON.stringify(payload))
+      for (const [name, data] of files) form.append('file', new File([data as BlobPart], name))
+      return call('/api/v1/pulls/ruled/app/1', { token, form, method: 'PUT' })
+    }
+    expect((await call(`/api/repositories/${repo}/rules`, { cookie: dev, method: 'PUT', body: { risk: true } })).status).toBe(404)
+    expect((await call(`/api/repositories/nope/rules`, { cookie: admin, method: 'PUT', body: { risk: true } })).status).toBe(404)
+    // gitignore habits: a leading / goes, a folder means everything in it
+    expect((await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: { screenshots: '/api/ docs/' } })).data).toEqual({ screenshots: 'api/**, docs/**' })
+    const set = await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: { risk: true, deploy: true, screenshots: ' web/** ,, *.css ', extra: 1 } })
+    expect(set.data).toEqual({ risk: true, deploy: true, screenshots: 'web/**, *.css' })
+    expect((await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: { screenshots: 'a/'.repeat(151) } })).status).toBe(400)
+    expect((await call(`/api/accounts/${acc}`, { cookie: admin })).data.repositories[0].rules).toEqual(set.data)
+
+    const bad = await put({ annotations: [{ path: 'web/a.tsx', body: 'x' }] })
+    expect(bad.status).toBe(422)
+    expect(bad.data.error).toContain('a risk (low, medium or high) on every note')
+    expect(bad.data.error).toContain('a deploy card')
+    expect(bad.data.error).toContain('web/a.tsx matches web/**, *.css')
+    expect((await call('/api/v1/pulls/ruled/app/1', { token })).status).toBe(404) // nothing stored
+    expect((await put({ deploy: '  \n ', annotations: [{ path: 'api/a.ts', body: 'x', risk: 'low' }] })).data.error).toContain('a deploy card') // blank is none
+    expect((await put({ deploy: 'x', annotations: [null] })).status).toBe(400) // not a note: no path
+    // a note off the globs needs no screenshot; on them, an image or video does it
+    expect((await put({ deploy: 'nothing special', annotations: [{ path: 'api/a.ts', body: 'x', risk: 'low' }] })).status).toBe(200)
+    const ok = await put({ deploy: 'Run `migrate`, then flip **express**.', annotations: [{ path: 'web/a.tsx', body: 'x', risk: 'high' }] }, [['shot.png', png()]])
+    expect(ok.status).toBe(200)
+    expect((await call('/api/v1/pulls/ruled/app/1', { token })).data.deploy).toBe('Run `migrate`, then flip **express**.')
+    const mcpBad = await mcp('tools/call', { name: 'upload_notes', arguments: { repo: 'ruled/app', number: 1, payload: { annotations: [{ path: 'a', body: 'x' }] } } }, token)
+    expect(JSON.stringify(mcpBad.data)).toContain('rules ask for')
+
+    expect((await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: {} })).data).toEqual({})
+    expect((await put({ annotations: [{ path: 'web/a.tsx', body: 'x' }] })).status).toBe(200)
   })
 })

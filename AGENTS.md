@@ -24,6 +24,7 @@ skill/diffnotes/  the agent skill, served at /skill/SKILL.md with {{HOST}} fille
 extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on GitHub, GitLab and Bitbucket diffs:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
 Dockerfile        image; docker-entrypoint.sh gives /data to `node` and drops root. docker-compose.yml, render.yaml, fly.toml: deploy templates
+SECURITY.md       how to report a vulnerability (GitHub private advisories)
 CHANGELOG.md      one version for server, web, extension (package.json + extension/manifest.json), tagged vX.Y.Z
 ```
 

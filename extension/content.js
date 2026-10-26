@@ -353,14 +353,14 @@
         () => removeNotes(p.server, `/api/v1/pulls/${p.repo}/${p.number}?id=${p.id}`)))
       return b
     })
-    // the summary as Markdown for the PR's description: /files/… links point at their server (readers sign in there),
-    // images become links (the site can't load them without a session). Nothing is posted anywhere.
-    const summaries = pull.pulls.filter((p) => p.summary), copy = el('button', 'dn-link', 'copy summary')
+    // the summary (and deploy card) as Markdown for the PR's description: /files/… links point at their server (readers
+    // sign in there), images become links (the site can't load them without a session). Nothing is posted anywhere.
+    const summaries = pull.pulls.filter((p) => p.summary || p.deploy), copy = el('button', 'dn-link', 'copy summary')
     copy.type = 'button'
     copy.title = 'Copy the summary as Markdown, e.g. for the PR description'
     copy.addEventListener('click', () => {
       const text = summaries.map((p) => (many ? `### ${new URL(p.server).host}\n\n` : '') +
-        p.summary.replace(/!?\[([^\]]*)\]\((\/files\/[^)\s]+)\)/g, (m, label, u) => `[${label || 'image'}](${p.server}${u})`)).join('\n\n')
+        [p.summary, p.deploy && `### Deploy\n\n${p.deploy}`].filter(Boolean).join('\n\n').replace(/!?\[([^\]]*)\]\((\/files\/[^)\s]+)\)/g, (m, label, u) => `[${label || 'image'}](${p.server}${u})`)).join('\n\n')
       navigator.clipboard.writeText(text).then(() => 'copied ✓', () => 'copy failed').then((t) => {
         copy.textContent = t
         setTimeout(() => { copy.textContent = 'copy summary' }, 1500)
@@ -368,6 +368,12 @@
     })
     bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...opens, ...removes)
     const body = el('div', 'dn-box-body')
+    // the deploy card, pinned first: what shipping this PR takes (migrations, env vars, flags, rollback), for whoever deploys it
+    for (const p of pull.pulls.filter((x) => x.deploy)) {
+      const d = el('div', 'dn-md dn-summary dn-deploy')
+      d.append(el('div', 'dn-risks-title', many ? `Deploy · ${new URL(p.server).host}` : 'Deploy'), md(p.deploy, p.server))
+      body.append(d)
+    }
     // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
     const risky = pull.annotations.map((a, i) => [a, i]).filter(([a]) => RISKS.includes(a.risk))
       .sort(([a], [b]) => RISKS.indexOf(a.risk) - RISKS.indexOf(b.risk))
@@ -429,15 +435,68 @@
     if (i == null) return
     if (hidden) setHidden(false)
     document.getElementById('dn-pop')?.remove()
-    const n = document.querySelector(`.dn-row [data-dn="${i}"], .dn-file[data-dn="${i}"], #dn-box [data-dn="${i}"]`)
-    // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
-    if (n?.closest('#dn-box.dn-collapsed')) { document.getElementById('dn-box').classList.remove('dn-collapsed'); clampAll() }
-    // a folded note opens: the jump is to read it
-    if (n?.classList.contains('dn-collapsed')) { n.classList.remove('dn-collapsed'); fold([pull.annotations[n.dataset.dn]], false); clampAll() }
-    n?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    n?.classList.add('dn-flash')
-    setTimeout(() => n?.classList.remove('dn-flash'), 1200)
+    reveal(document.querySelector(`.dn-row [data-dn="${i}"], .dn-file[data-dn="${i}"], #dn-box [data-dn="${i}"]`), true)
   })
+  // open: a folded note unfolds (a jump is to read it); j / k only scroll to it
+  function reveal(n, open) {
+    if (!n) return
+    // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
+    if (n.closest('#dn-box.dn-collapsed')) { document.getElementById('dn-box').classList.remove('dn-collapsed'); clampAll() }
+    if (open && n.classList.contains('dn-collapsed')) { n.classList.remove('dn-collapsed'); fold([pull.annotations[n.dataset.dn]], false); clampAll() }
+    n.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    n.classList.add('dn-flash')
+    setTimeout(() => n.classList.remove('dn-flash'), 1200)
+  }
+
+  // Keyboard, while the PR has notes and nothing editable has focus: j / k next / previous note in page order, n notes
+  // on / off, o opens the current note's attachment, ? lists the keys (a second ? leaves them to the site's own help).
+  // j / k take over the site's own (GitLab, Bitbucket: next file) only while notes show.
+  let cursor = null // the note j / k went to last
+  const KEYS = [['j', 'next note'], ['k', 'previous note'], ['n', 'notes on / off'], ['o', 'open the note’s attachment'],
+    ['?', 'these keys (press again for the site’s own)'], ['Esc', 'close']]
+  function step(d) {
+    const list = [...document.querySelectorAll('.dn-note')].filter((n) => n.offsetParent && !n.closest('#dn-pop'))
+    if (!list.length) return false // no note in sight: the site's own j / k
+    let i = list.indexOf(cursor)
+    if (i < 0) { // from where the page is: the first note below the top third is next, the one before it previous
+      const below = list.findIndex((n) => n.getBoundingClientRect().top > innerHeight / 3)
+      i = (below < 0 ? list.length : below) - (d > 0 ? 1 : 0)
+    }
+    // past either end: stay (clamping would make k go down to the first note, j up to the last)
+    if (!list[i + d]) return
+    cursor = list[i + d]
+    reveal(cursor, false)
+  }
+  // false: nothing to open (no current note, or one without a file or a loaded image): the site's own o goes through
+  function openAt() {
+    const link = cursor?.querySelector('.dn-file-link'), img = cursor?.querySelector('.dn-md img[src]')
+    if (link) preview(link)
+    else if (img) img.click() // the gallery (delegated click)
+    else return false
+  }
+  function keys() {
+    const box = el('div', 'dn-lightbox dn-keys'), doc = el('div', 'dn-doc'), head = el('div', 'dn-bar'), body = el('div', 'dn-doc-body')
+    head.append(el('span', 'dn-badge', 'DN'), el('b', '', 'Keyboard'))
+    for (const [k, what] of KEYS) { const r = el('div', 'dn-key'); r.append(el('kbd', '', k), el('span', '', what)); body.append(r) }
+    doc.append(head, body)
+    doc.addEventListener('click', (e) => e.stopPropagation())
+    box.addEventListener('click', () => box.remove())
+    document.body.append(box)
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!pull || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
+    // composedPath: an input in a shadow root reaches the document as its host. A checkbox (the "Viewed" box) takes no typing
+    const t = e.composedPath()[0]
+    if (t instanceof Element && t.closest('input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable]:not([contenteditable="false"])')) return
+    const help = document.querySelector('.dn-keys')
+    if (help) return void (e.key === '?' && help.remove()) // the site's own ? help goes through
+    if (document.querySelector('.dn-lightbox')) return // a gallery or preview has its own keys
+    const act = { j: () => step(1), k: () => step(-1), n: () => setHidden(!hidden), o: openAt, '?': keys }[e.key]
+    if (!act || (hidden && e.key !== 'n' && e.key !== '?')) return
+    if (act() === false) return // did nothing: the key stays the site's
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }, true)
   // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
   document.addEventListener('click', (e) => {
     const more = e.target.closest?.('.dn-more'), b = more?.previousElementSibling
@@ -588,7 +647,7 @@
     observer?.disconnect()
     observer = null
     seen?.disconnect()
-    pull = error = seen = null
+    pull = error = seen = cursor = null
     document.querySelectorAll('.dn-row, .dn-file, #dn-box, #dn-dock, #dn-pop, .dn-cmp-big').forEach((n) => n.remove())
   }
 

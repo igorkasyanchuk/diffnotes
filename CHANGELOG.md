@@ -4,6 +4,19 @@ All notable changes to DiffNotes (server, web app, browser extension and agent s
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/). Releases are tagged `vX.Y.Z` ([how](docs/install.md#releases)).
 
+## [1.1.0] - 2026-10-26
+
+### Added
+
+- **Deploy card**: the agent says what shipping a PR takes (migrations, env vars, feature flags, the order of steps,
+  rollback) in `deploy`; it is pinned at the top of the summary box and the PR's page, and *copy summary* includes it.
+- **Repository rules**: an account admin sets what every upload to a repository must carry (a risk on every note, a
+  deploy card, screenshots or a recording for paths like `web/**`); a missing one is refused with `422` saying what to
+  add, and the skill and MCP clients add it.
+- **Keyboard** in the extension: `j` / `k` next / previous note, `n` notes on / off, `o` opens the note's attachment,
+  `?` lists the keys.
+- `SECURITY.md`: report vulnerabilities privately through GitHub.
+
 ## [1.0.0] - 2026-10-25
 
 First tagged release; until now DiffNotes was known as Reviews42.
@@ -50,4 +63,5 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
+[1.1.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.1.0
 [1.0.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.0.0

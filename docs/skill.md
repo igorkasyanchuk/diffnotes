@@ -40,6 +40,9 @@ stored notes, keeps and fixes the ones that still hold and drops the rest; with 
 (`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**, and the uploader or an admin can remove single
 notes right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
 after image pairs (shown with a drag handle), short screen recordings and Mermaid flowcharts (drawn as diagrams).
+When shipping the PR takes more than a merge (a migration, a new env var, a flag, steps in order), the agent adds a
+**deploy card**, pinned at the top of the summary. A repository's [rules](accounts.md#repository-rules) can require
+a risk on every note, a deploy card or screenshots; the agent adds what an upload is refused for and sends it again.
 
 ## What a note looks like
 
@@ -48,6 +51,7 @@ after image pairs (shown with a drag handle), short screen recordings and Mermai
   "title": "Express shipping at checkout",
   "head_sha": "4f2c…",
   "summary": "Adds an express option. Empty carts stop early. See the [test report](attachment:report.md).",
+  "deploy": "1. Run the `add_express_fee` migration (reversible).\n2. Set `EXPRESS_FEE=499`.\n\nRollback: unset it; the option hides, no data is lost.",
   "annotations": [
     { "path": "app/checkout.ts", "line": 43, "end_line": 45, "title": "Charge the express fee",
       "body": "Empty carts used to reach the payment provider with 0; now they return early.\n\n![Checkout on mobile](attachment:mobile.png) ![Checkout on desktop](attachment:desktop.png)" },
@@ -63,7 +67,7 @@ another site shows as a link). Long notes are cut with
 *show more*, so the point goes first.
 
 ```bash
-curl -fsS -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
+curl -sS --fail-with-body -X PUT "$DIFFNOTES_URL/api/v1/pulls/acme/shop/42" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
   -F payload=@diffnotes.json -F file=@mobile.png -F file=@desktop.png -F file=@report.md
 ```
 
