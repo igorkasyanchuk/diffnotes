@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   expires; `/demo` walks a visitor through extension, account, token and the PR.
 - **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
+### Fixed
+
+- Extension: the dock's ↑ (and *summary*) used a box GitHub had already re-rendered away, so ↑ did nothing; it
+  now scrolls to the live box, clear of the sticky header.
+
 ## [1.1.0] - 2026-10-26
 
 ### Added

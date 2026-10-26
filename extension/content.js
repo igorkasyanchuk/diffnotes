@@ -277,6 +277,8 @@
     }
     if (d.dataset.key !== box.dataset.key) {
       d.dataset.key = box.dataset.key
+      // the page may re-render the diff and a new box take this one's place with the same key: always the live one
+      const live = () => document.getElementById('dn-box') ?? box
       const summary = el('button', 'dn-pill-btn', 'summary'), top = el('button', 'dn-pill-btn', '↑')
       top.title = 'Back to the DiffNotes box'
       summary.addEventListener('click', () => {
@@ -284,7 +286,7 @@
         if (open) return open.remove()
         const pop = el('div', 'dn-float dn-pop')
         pop.id = 'dn-pop'
-        const body = box.querySelector('.dn-box-body'), copy = body ? body.cloneNode(true) : el('div', 'dn-hint', 'No summary for this pull request.')
+        const body = live().querySelector('.dn-box-body'), copy = body ? body.cloneNode(true) : el('div', 'dn-hint', 'No summary for this pull request.')
         // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo.
         // remove note needs its listener: that stays in the box
         copy.querySelectorAll('.dn-demo, .dn-actions').forEach((d) => d.remove())
@@ -297,7 +299,7 @@
         })
         document.body.append(pop)
       })
-      top.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
+      top.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); live().scrollIntoView({ behavior: 'smooth', block: 'start' }) })
       d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), ...changedLink(), notesSwitch(), summary, top)
     }
     // watch the box's header bar: once it is above the viewport the dock takes over, even if the tall summary still shows

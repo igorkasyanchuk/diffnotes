@@ -44,7 +44,7 @@ html.dn-dark {
 .dn-md a { color: var(--dn-link); }
 
 /* the box above the diff */
-#dn-box { border: 1px solid var(--dn-line); border-top: 2px solid var(--dn); border-radius: 8px; background: var(--dn-bg); margin: 0 0 16px; overflow: hidden;
+#dn-box { scroll-margin-top: 80px; /* clears the host's sticky header when the dock's ↑ scrolls back */ border: 1px solid var(--dn-line); border-top: 2px solid var(--dn); border-radius: 8px; background: var(--dn-bg); margin: 0 0 16px; overflow: hidden;
   box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.25); }
 .dn-bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 12px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--dn) 9%, var(--dn-muted-bg)), var(--dn-muted-bg) 60%); }
