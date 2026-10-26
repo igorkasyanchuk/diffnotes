@@ -11,9 +11,9 @@ import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import {
   DATA_DIR, DB_FILE, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
-  seal, sessionSecret, setSetting, sha256, unseal, verifyPassword,
+  sessionSecret, sha256, unseal, verifyPassword,
 } from './db.ts'
-import { applyLifecycle, checkS3, storage } from './storage.ts'
+import { applyLifecycle, s3FromEnv, storage } from './storage.ts'
 import type { S3Config } from './storage.ts'
 import type { User } from './db.ts'
 
@@ -402,15 +402,18 @@ const requireAdmin = (accountId: string, user: User) => {
 }
 const ROLES = ['admin', 'member']
 
-// --- file storage: disk by default, or the S3-compatible bucket a super admin set up on /admin
+// --- file storage: disk by default, or the S3-compatible bucket STORAGE_TYPE names (environment, storage.ts)
 
-type StorageSetting = Omit<S3Config, 'secret'> & { kind: 'disk' | 's3'; secret: string }
-// the bucket's credentials stay usable after new uploads switch back to disk, so files already in it still read and delete
-const s3Config = (): S3Config | null => {
-  const st = getSetting<StorageSetting>('storage')
+s3FromEnv(process.env) // a half-set or malformed bucket stops the boot here
+// Before the environment, a super admin set the bucket on /admin (the secret sealed in settings). Without STORAGE_TYPE
+// its files still read and delete with it; new uploads go to disk. Moving: the same bucket and keys into the environment.
+type LegacySetting = S3Config & { kind: 'disk' | 's3' }
+const legacyS3 = (): S3Config | null => {
+  const st = getSetting<LegacySetting>('storage')
   return st?.secret ? { ...st, secret: unseal(st.secret) } : null
 }
-const store = storage(UPLOADS, s3Config, () => getSetting<StorageSetting>('storage')?.kind === 's3')
+const s3Config = () => s3FromEnv(process.env) ?? legacyS3()
+const store = storage(UPLOADS, s3Config, () => !!s3FromEnv(process.env))
 
 // Deletes pull requests and then their files (rows first, so a failed delete in the bucket never leaves a live PR without
 // files; the bucket's lifecycle rule catches anything left over).
@@ -1116,35 +1119,14 @@ app.put('/api/admin/users/:id', async (c) => {
   return c.json({ ok: true })
 })
 
-// storage settings: the secret key never leaves the server (only whether one is set); a new S3 setup is tested first
+// where files go (read only: the environment); the secret key never leaves the server
 app.get('/api/admin/storage', (c) => {
-  const st = getSetting<StorageSetting>('storage')
+  const env = s3FromEnv(process.env), cfg = env ?? legacyS3()
   const counts = db.prepare('select backend, count(*) as files, coalesce(sum(size), 0) as bytes from files group by backend').all()
-  return c.json({ storage: st ? { ...st, secret: undefined, has_secret: !!st.secret } : { kind: 'disk' }, counts, retention_days: RETENTION_DAYS })
-})
-app.put('/api/admin/storage', async (c) => {
-  const body = await json(c)
-  if (body.kind !== 's3') { setSetting('storage', { ...(getSetting<StorageSetting>('storage') ?? {}), kind: 'disk' }); return c.json({ ok: true }) }
-  const prev = getSetting<StorageSetting>('storage')
-  const endpoint = str(body.endpoint, 300).replace(/\/+$/, '')
-  if (!/^https?:\/\/[\w.-]+(:\d+)?$/.test(endpoint)) fail(400, 'Endpoint is the bucket service URL, e.g. https://s3.us-west-004.backblazeb2.com')
-  const cfg: S3Config = {
-    endpoint, region: str(body.region, 60) || 'auto', bucket: str(body.bucket, 63), key_id: str(body.key_id, 200),
-    secret: String(body.secret ?? '').trim() || (prev?.secret ? unseal(prev.secret) : ''),
-    prefix: str(body.prefix, 100).replace(/^\/+/, '').replace(/([^/])$/, '$1/'),
-  }
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(cfg.bucket)) fail(400, 'Bucket name: 3-63 lowercase letters, digits, dots and dashes')
-  // the prefix goes into URLs and the lifecycle XML: `#`, `?` or `..` would point every key somewhere else
-  if (!/^([\w-][\w.-]*\/)*$/.test(cfg.prefix)) fail(400, 'Prefix: folders of letters, digits, dots, dashes and underscores, e.g. diffnotes/')
-  if (!cfg.key_id || !cfg.secret) fail(400, 'Key ID and secret key are required')
-  // file rows know only "s3", not which bucket: moving while files live in the old one would make them unreachable
-  const moved = prev?.bucket && (prev.endpoint !== cfg.endpoint || prev.bucket !== cfg.bucket || prev.prefix !== cfg.prefix)
-  if (moved && db.prepare(`select 1 from files where backend = 's3' limit 1`).get()) {
-    fail(409, 'Files are still stored in the current bucket: keep its endpoint, bucket and prefix until they expire')
-  }
-  try { await checkS3(cfg) } catch (e) { fail(400, `Couldn't write to the bucket: ${(e as Error).message}`) }
-  setSetting('storage', { ...cfg, kind: 's3', secret: seal(cfg.secret) })
-  return c.json({ ok: true })
+  return c.json({
+    storage: { kind: env ? 's3' : 'disk', type: (process.env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk', ...(cfg && { source: env ? 'env' : 'settings', endpoint: cfg.endpoint, region: cfg.region, bucket: cfg.bucket, prefix: cfg.prefix, key_id: cfg.key_id }) },
+    counts, retention_days: RETENTION_DAYS,
+  })
 })
 app.post('/api/admin/storage/lifecycle', async (c) => {
   const cfg = s3Config() ?? fail(400, 'S3 storage is not configured')

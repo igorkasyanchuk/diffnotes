@@ -222,8 +222,6 @@ button.more { margin-top: 4px; font-size: 12px; }
 .gallery .prev { left: 20px; }
 .gallery .next { right: 20px; }
 
-.presets { display: flex; flex-wrap: wrap; gap: 6px; }
-.presets button { font-size: 12px; padding: 4px 10px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
 

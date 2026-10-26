@@ -40,7 +40,16 @@ services:
       # DEMO_PR: owner/name#12                  # a live demo PR every signed-in user can read (/demo)
       # UMAMI_SCRIPT: ""
       # UMAMI_WEBSITE_ID: ""
-      # S3 storage is not an env var: set it on /admin (docs/storage.md)
+      # file storage (docs/storage.md): disk by default, or one provider's bucket
+      # STORAGE_TYPE: b2                        # disk, b2, r2, s3 or minio
+      # B2_REGION: us-west-004                  # b2: the part after "s3." in the bucket's Endpoint
+      # B2_BUCKET: diffnotes-files
+      # B2_KEY_ID: ""
+      # B2_APPLICATION_KEY: ""
+      # R2_ACCOUNT_ID / R2_BUCKET / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY      r2
+      # AWS_REGION / AWS_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY      s3
+      # MINIO_ENDPOINT / MINIO_BUCKET / MINIO_ACCESS_KEY / MINIO_SECRET_KEY      minio (or any S3-compatible)
+      # STORAGE_PREFIX: diffnotes/
 
 volumes:
   diffnotes:

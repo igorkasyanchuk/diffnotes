@@ -3,10 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 // Where uploaded files live: on disk under DATA_DIR/uploads (default) or in an S3-compatible bucket (AWS S3, R2, B2,
-// MinIO…), chosen by a super admin in the server settings. Each file row remembers its backend, so switching keeps old
+// MinIO…) set by STORAGE_TYPE and its provider's environment variables. Each file row remembers its backend, so switching keeps old
 // files readable. Keys are `<prefix>pulls/<pull id>/<name>`; names are already reduced to [A-Za-z0-9._-].
 
-// endpoint without a trailing slash, prefix '' or `a/b/`: PUT /api/admin/storage normalizes both before saving
+// endpoint without a trailing slash, prefix '' or `a/b/`: s3FromEnv() normalizes both
 export type S3Config = { endpoint: string; region: string; bucket: string; key_id: string; secret: string; prefix: string }
 
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
@@ -39,6 +39,38 @@ export async function s3(cfg: S3Config, method: string, key: string, body?: Buff
     throw new Error(`S3 ${method} ${res.status}${code ? `: ${code}` : ''}`)
   }
   return res
+}
+
+// STORAGE_TYPE picks where files go: disk (default), b2, r2, s3 (AWS) or minio (also any other S3-compatible service),
+// each with its provider's own variables (named as its console names them), plus STORAGE_PREFIX for a folder in the bucket.
+// In the environment, not the database: the secret never lands in the database or its backups, and a stolen super admin
+// session can't point uploads at another bucket. A missing or malformed value throws, so it fails the boot, not an upload.
+const REGION = /^[a-z0-9-]{2,40}$/
+type Provider = { vars: Record<'bucket' | 'key_id' | 'secret' | 'place', string>; endpoint: (place: string) => string; region: (place: string) => string; place: RegExp; hint: string }
+export const PROVIDERS: Record<string, Provider> = {
+  b2: { vars: { place: 'B2_REGION', bucket: 'B2_BUCKET', key_id: 'B2_KEY_ID', secret: 'B2_APPLICATION_KEY' },
+    endpoint: (r) => `https://s3.${r}.backblazeb2.com`, region: (r) => r, place: REGION, hint: 'the part after "s3." in the bucket\'s Endpoint, e.g. us-west-004' },
+  r2: { vars: { place: 'R2_ACCOUNT_ID', bucket: 'R2_BUCKET', key_id: 'R2_ACCESS_KEY_ID', secret: 'R2_SECRET_ACCESS_KEY' },
+    endpoint: (id) => `https://${id}.r2.cloudflarestorage.com`, region: () => 'auto', place: /^[a-f0-9]{32}$/, hint: 'the 32-character account ID' },
+  s3: { vars: { place: 'AWS_REGION', bucket: 'AWS_BUCKET', key_id: 'AWS_ACCESS_KEY_ID', secret: 'AWS_SECRET_ACCESS_KEY' },
+    endpoint: (r) => `https://s3.${r}.amazonaws.com`, region: (r) => r, place: REGION, hint: 'the bucket\'s region, e.g. eu-central-1' },
+  minio: { vars: { place: 'MINIO_ENDPOINT', bucket: 'MINIO_BUCKET', key_id: 'MINIO_ACCESS_KEY', secret: 'MINIO_SECRET_KEY' },
+    endpoint: (u) => u.replace(/\/+$/, ''), region: () => 'us-east-1', place: /^https?:\/\/[\w.-]+(:\d+)?\/*$/, hint: 'the service URL, e.g. https://minio.example.com' },
+}
+export function s3FromEnv(env: Record<string, string | undefined>): S3Config | null {
+  const type = (env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk'
+  if (type === 'disk') return null
+  const p = PROVIDERS[type]
+  if (!p) throw new Error(`STORAGE_TYPE is disk, ${Object.keys(PROVIDERS).join(', ')}; not ${type}`)
+  const v = (k: string) => (env[k] ?? '').trim()
+  const missing = Object.values(p.vars).filter((k) => !v(k))
+  if (missing.length) throw new Error(`STORAGE_TYPE=${type} needs ${missing.join(', ')}`)
+  const place = v(p.vars.place), bucket = v(p.vars.bucket), prefix = v('STORAGE_PREFIX').replace(/^\/+/, '').replace(/([^/])$/, '$1/')
+  if (!p.place.test(place)) throw new Error(`${p.vars.place}: ${p.hint}`)
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error(`${p.vars.bucket}: 3-63 lowercase letters, digits, dots and dashes`)
+  // the prefix goes into URLs and the lifecycle XML: `#`, `?` or `..` would point every key somewhere else
+  if (!/^([\w-][\w.-]*\/)*$/.test(prefix)) throw new Error('STORAGE_PREFIX: folders of letters, digits, dots, dashes and underscores, e.g. diffnotes/')
+  return { endpoint: p.endpoint(place), region: p.region(place), bucket, key_id: v(p.vars.key_id), secret: v(p.vars.secret), prefix }
 }
 
 const objectKey = (cfg: S3Config, pull: string, name: string) => `${cfg.prefix}pulls/${pull}/${name}`
@@ -90,7 +122,7 @@ export async function applyLifecycle(cfg: S3Config, days: number) {
   await s3(cfg, 'PUT', '', body, { 'content-md5': createHash('md5').update(body).digest('base64'), 'content-type': 'application/xml' }, 'lifecycle=')
 }
 
-// put, read back and delete one object: proves the endpoint, bucket and keys work before saving them
+// put, read back and delete one object: proves the endpoint, bucket and keys work (logged at start)
 export async function checkS3(cfg: S3Config) {
   const key = `${cfg.prefix}diffnotes-check-${Date.now()}.txt`
   await s3(cfg, 'PUT', key, Buffer.from('ok'), { 'content-type': 'text/plain' })

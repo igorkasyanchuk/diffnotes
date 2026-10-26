@@ -680,59 +680,32 @@ function Admin({ user }: { user: User }) {
   </>
 }
 
-type StorageCfg = { kind: 'disk' | 's3'; endpoint?: string; region?: string; bucket?: string; key_id?: string; prefix?: string; has_secret?: boolean }
-// endpoint and region examples per provider; any S3-compatible service works
-const PRESETS: Record<string, [endpoint: string, region: string, note: string]> = {
-  'Backblaze B2': ['https://s3.us-west-004.backblazeb2.com', 'us-west-004',
-    'Use the bucket\'s Endpoint from its B2 page; the region is the part after "s3.". Keys: Application Keys → keyID + applicationKey. '
-    + 'B2 keeps old versions by default: set the bucket\'s Lifecycle Settings to "Keep only the last version" so deleted files really go.'],
-  'Cloudflare R2': ['https://<account-id>.r2.cloudflarestorage.com', 'auto', 'R2 → Manage API tokens → Object Read & Write for this bucket.'],
-  'AWS S3': ['https://s3.eu-central-1.amazonaws.com', 'eu-central-1', 'An IAM user with s3:PutObject, s3:GetObject, s3:DeleteObject and s3:PutLifecycleConfiguration on the bucket.'],
-  MinIO: ['https://minio.example.com', 'us-east-1', 'Path-style URLs, as MinIO expects by default.'],
-}
+type StorageCfg = { kind: 'disk' | 's3'; type: string; source?: 'env' | 'settings'; endpoint?: string; region?: string; bucket?: string; prefix?: string; key_id?: string }
+// read only: STORAGE_TYPE and its provider's variables in the server's environment (docs/storage.md)
 function StorageSettings() {
-  const { data, reload } = useLoad<{ storage: StorageCfg; counts: { backend: string; files: number; bytes: number }[]; retention_days: number }>('/api/admin/storage')
-  const [f, setF] = useState<StorageCfg & { secret?: string }>(), [note, setNote] = useState(''), [ok, setOk] = useState('')
-  useEffect(() => { if (data) setF({ ...data.storage, secret: '' }) }, [data])
-  const save = useSubmit(async () => { setOk(''); await api('/api/admin/storage', f, 'PUT'); setOk(f?.kind === 's3' ? 'bucket checked (write, read, delete) and saved' : 'saved'); reload() })
+  const { data } = useLoad<{ storage: StorageCfg; counts: { backend: string; files: number; bytes: number }[]; retention_days: number }>('/api/admin/storage')
+  const [ok, setOk] = useState('')
   const rule = useSubmit(async () => { const r = await api('/api/admin/storage/lifecycle', {}); setOk(`bucket rule set: files under the prefix expire after ${r.days} days`) })
-  if (!data || !f) return null
-  const set = (k: keyof StorageCfg | 'secret') => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
+  if (!data) return null
+  const st = data.storage
   return <>
     <h2>file storage</h2>
-    <p className="hint">Where uploaded screenshots and files go. Existing files stay where they were written.
+    <p className="hint">Where uploaded screenshots and files go, set by <code>STORAGE_TYPE</code> (disk, b2, r2, s3, minio) and that provider's
+      variables in the server's environment, never here. Existing files stay where they were written.
       {data.counts.map((c) => ` ${c.backend}: ${c.files} files, ${bytes(c.bytes)}.`)}</p>
-    <form className="stack card" onSubmit={save.submit}>
-      <label>storage
-        <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as 'disk' | 's3' })}>
-          <option value="disk">disk (DATA_DIR/uploads)</option><option value="s3">S3-compatible bucket</option>
-        </select></label>
-      {f.kind === 's3' && <>
-        <div className="presets">{Object.entries(PRESETS).map(([name, [endpoint, region, n]]) =>
-          <button type="button" key={name} onClick={() => { setF({ ...f, endpoint, region }); setNote(n) }}>{name}</button>)}</div>
-        {note && <p className="hint">{note}</p>}
-        <label>endpoint<input value={f.endpoint ?? ''} onChange={set('endpoint')} placeholder="https://s3.us-west-004.backblazeb2.com" /></label>
-        <div className="two">
-          <label>region<input value={f.region ?? ''} onChange={set('region')} placeholder="auto" /></label>
-          <label>bucket<input value={f.bucket ?? ''} onChange={set('bucket')} placeholder="diffnotes-files" /></label>
-        </div>
-        <div className="two">
-          <label>key id<input value={f.key_id ?? ''} onChange={set('key_id')} autoComplete="off" /></label>
-          <label>secret key<input type="password" value={f.secret ?? ''} onChange={set('secret')} autoComplete="new-password"
-            placeholder={f.has_secret ? 'saved, leave blank to keep' : ''} /></label>
-        </div>
-        <label>prefix (folder inside the bucket)<input value={f.prefix ?? ''} onChange={set('prefix')} placeholder="diffnotes/" /></label>
-      </>}
-      {save.error && <div className="error">{save.error}</div>}
-      {ok && <div className="ok">{ok}</div>}
-      <div><button className="primary" disabled={save.busy}>{save.busy ? 'checking…' : 'save'}</button></div>
-    </form>
-    {data.storage.kind === 's3' && <div className="card" style={{ marginTop: 12 }}>
+    <div className="card">
+      <p>new uploads: <strong>{st.kind === 's3' ? `${st.type} bucket` : 'disk (DATA_DIR/uploads)'}</strong></p>
+      {st.bucket && <p className="hint">{st.source === 'settings' && 'Set up on this page before the environment; its files still read and delete. '}
+        endpoint <code>{st.endpoint}</code> · region <code>{st.region}</code> · bucket <code>{st.bucket}</code>
+        {st.prefix && <> · prefix <code>{st.prefix}</code></>} · key <code>{st.key_id}</code></p>}
+    </div>
+    {st.bucket && <div className="card" style={{ marginTop: 12 }}>
       <p>Files are deleted from the bucket when their PR expires ({data.retention_days} days after the last upload). As a safety net, add a bucket
         rule that expires everything under the prefix after {data.retention_days + 1} days. It replaces the bucket's lifecycle rules: use a bucket
         just for DiffNotes. Some providers (Backblaze B2) only accept rules in their console.</p>
       <button type="button" onClick={() => rule.submit()} disabled={rule.busy}>set the expiry rule on the bucket</button>
       {rule.error && <div className="error">{rule.error}</div>}
+      {ok && <div className="ok">{ok}</div>}
     </div>}
   </>
 }

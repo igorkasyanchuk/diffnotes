@@ -512,7 +512,7 @@ describe('diffnotes', () => {
     expect((await call(`/api/accounts/${other.id}`, { cookie: admin })).status).toBe(404)
   })
 
-  it('stores files in an S3-compatible bucket when a super admin sets one up, and deletes them with the PR', async () => {
+  it('stores files in the S3-compatible bucket STORAGE_TYPE names, and deletes them with the PR', async () => {
     const http = await import('node:http')
     const objects = new Map<string, Buffer>(), seen: string[] = []
     const server = http.createServer((req, res) => {
@@ -527,14 +527,13 @@ describe('diffnotes', () => {
       })
     }).listen(0)
     const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-    const cfg = { kind: 's3', endpoint, region: 'us-west-004', bucket: 'dn-files', key_id: 'KEY', secret: 'SECRET', prefix: 'prod' }
-    expect((await call('/api/admin/storage', { cookie: member, method: 'PUT', body: cfg })).status).toBe(404)
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'Bad_Bucket' } })).status).toBe(400)
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: cfg })).status).toBe(200)
+    const env = { STORAGE_TYPE: 'minio', MINIO_ENDPOINT: endpoint, MINIO_BUCKET: 'dn-files', MINIO_ACCESS_KEY: 'KEY', MINIO_SECRET_KEY: 'SECRET', STORAGE_PREFIX: 'prod' }
+    Object.assign(process.env, env)
+    expect((await call('/api/admin/storage', { cookie: member })).status).toBe(404)
     const st = (await call('/api/admin/storage', { cookie: admin })).data.storage
-    expect(st).toMatchObject({ kind: 's3', bucket: 'dn-files', prefix: 'prod/', has_secret: true })
+    expect(st).toMatchObject({ kind: 's3', type: 'minio', source: 'env', bucket: 'dn-files', prefix: 'prod/', region: 'us-east-1', key_id: 'KEY' })
     expect(JSON.stringify(st)).not.toContain('SECRET')
-    expect(JSON.stringify(db.prepare(`select value from settings where key = 'storage'`).get())).not.toContain('SECRET')
+    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 'disk' } })).status).toBe(404) // no setting it here
 
     const form = new FormData()
     form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: '![x](attachment:s3.png)' }] }))
@@ -548,16 +547,15 @@ describe('diffnotes', () => {
     expect(img.status).toBe(200)
     expect(img.res.headers.get('content-type')).toBe('image/png')
 
-    // blank secret keeps the stored one; the lifecycle rule is a signed bucket-level PUT
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, secret: '' } })).status).toBe(200)
+    // the lifecycle rule is a signed bucket-level PUT
     expect((await call('/api/admin/storage/lifecycle', { cookie: admin, body: {} })).data).toMatchObject({ ok: true, days: 31 })
     expect(seen).toContain('PUT /dn-files/?lifecycle=')
-    // a prefix that would leave the key path, and moving the bucket while files live in it, are refused
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, prefix: 'a#b' } })).status).toBe(400)
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { ...cfg, bucket: 'other-bucket' } })).status).toBe(409)
 
-    // back to disk: files already in the bucket still read, and still get deleted with their PR
-    expect((await call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 'disk' } })).status).toBe(200)
+    // a bucket set up on /admin before the environment: without STORAGE_TYPE its files still read and delete, new ones go to disk
+    for (const k of Object.keys(env)) delete process.env[k]
+    const { seal, setSetting } = await import('./db.ts')
+    setSetting('storage', { kind: 's3', endpoint, region: 'auto', bucket: 'dn-files', key_id: 'KEY', secret: seal('SECRET'), prefix: 'prod/' })
+    expect((await call('/api/admin/storage', { cookie: admin })).data.storage).toMatchObject({ kind: 'disk', source: 'settings', bucket: 'dn-files' })
     expect((await call(`/files/${up.data.id}/s3.png`, { token })).status).toBe(200)
     db.prepare('update pulls set expires_at = ? where id = ?').run('2000-01-01T00:00:00.000Z', up.data.id)
     expect(await purge()).toBe(1)

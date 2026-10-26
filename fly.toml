@@ -21,6 +21,10 @@ primary_region = "fra"
   # GITHUB_CLIENT_ID = "" # sign in with GitHub (docs/accounts.md); its secret: fly secrets set GITHUB_CLIENT_SECRET=…
   # ALLOW_SIGNUP = "1"
   # DEMO_PR = "owner/name#12"
+  # STORAGE_TYPE = "b2" # file storage (docs/storage.md): disk, b2, r2, s3 or minio, with that provider's variables;
+  # B2_REGION = "us-west-004"   # keys as secrets: fly secrets set B2_KEY_ID=… B2_APPLICATION_KEY=…
+  # B2_BUCKET = "diffnotes-files"
+  # STORAGE_PREFIX = "diffnotes/"
   # UMAMI_SCRIPT = ""
   # UMAMI_WEBSITE_ID = ""
 

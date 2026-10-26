@@ -114,8 +114,11 @@ parses notes in an inert `<template>` so no image loads before its URL points at
 
 ## Secrets at rest
 
-The S3 secret key is encrypted (AES-256-GCM) with `ENCRYPTION_KEY` or `DATA_DIR/encryption.key`, so a copy of the
-database alone doesn't reveal it. Keep `/data` (or `ENCRYPTION_KEY`) with your backups.
+The bucket's keys come from the environment (`STORAGE_TYPE` and its provider's variables), never from the web app:
+they are not in the database or its backups, and a stolen super admin session can't point uploads at another bucket
+or make the server probe an address of its choosing. The admin page shows the bucket read-only, never the secret.
+A secret key saved on `/admin` by an older version stays encrypted (AES-256-GCM) with `ENCRYPTION_KEY` or
+`DATA_DIR/encryption.key`, and is used only to read and delete the files stored with it.
 
 ## Headers
 

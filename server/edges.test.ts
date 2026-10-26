@@ -222,21 +222,9 @@ describe('server errors', () => {
 })
 
 describe('super admin', () => {
-  it('refuses unknown users and bad storage settings', async () => {
+  it('refuses unknown users', async () => {
     expect((await call('/api/admin/users/nope', { cookie: admin, method: 'PUT', body: { admin: true } })).status).toBe(404)
-    const put = (body: Record<string, unknown>) => call('/api/admin/storage', { cookie: admin, method: 'PUT', body: { kind: 's3', ...body } })
-    const s3 = { endpoint: 'http://127.0.0.1:1', bucket: 'bucket', key_id: 'k', secret: 's' }
-    expect((await put({ ...s3, endpoint: 'ftp://x' })).data.error).toMatch(/^Endpoint/)
-    expect((await put({ ...s3, bucket: 'B' })).data.error).toMatch(/^Bucket name/)
-    expect((await put({ ...s3, prefix: '../x' })).data.error).toMatch(/^Prefix/)
-    expect((await put({ ...s3, secret: '' })).data.error).toMatch(/required/)
-    expect((await put(s3)).data.error).toMatch(/^Couldn't write to the bucket: /)
     expect((await call('/api/admin/storage/lifecycle', { cookie: admin, method: 'POST' })).data.error).toBe('S3 storage is not configured')
-    // files still in the current bucket pin it
-    setSetting('storage', { kind: 'disk', endpoint: 'http://127.0.0.1:1', bucket: 'old', prefix: '', region: 'auto', key_id: 'k' })
-    const pull = (await call('/api/v1/pulls/o/n/1', { token })).data.id
-    db.prepare(`insert into files (pull_id, name, type, size, backend) values (?, 'x.png', 'image/png', 1, 's3')`).run(pull)
-    expect((await put(s3)).status).toBe(409)
   })
 
   it('manages an account it is not in and sees its counts, never its notes or files', async () => {

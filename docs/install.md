@@ -94,30 +94,38 @@ This table is the one reference for configuration: everything is an environment 
 | `MIN_FREE_DISK_MB` | `100` | uploads to disk storage get `507` once the volume would have less free space |
 | **Security** | | |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
-| `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |
+| `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (only an S3 secret key saved on `/admin` before storage moved to the environment) |
 | `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing). Not with Cloudflare Tunnel, which already hides it |
 | **Integrations** (off unless you set them; nothing is preset) | | |
 | `BUGSINK_DSN` | unset | your own Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | unset | a GitHub OAuth app: **sign in with GitHub** ([accounts](accounts.md#sign-in-with-github)); callback `<PUBLIC_URL>/auth/github/callback` |
 | `DEMO_PR` | unset | `owner/name#12` or the PR's URL: a live demo for visitors. That PR's notes, as a super admin uploaded them, are readable by every signed-in user and never expire; `/demo` explains the steps |
 | `ALLOW_SIGNUP` | unset | `1` with GitHub sign-in: anyone with a GitHub account may sign up and gets a team account of their own |
+| **File storage** ([storage](storage.md)) | | |
+| `STORAGE_TYPE` | `disk` | `disk` (`DATA_DIR/uploads`), `b2` (Backblaze B2), `r2` (Cloudflare R2), `s3` (AWS S3) or `minio` (MinIO or any other S3-compatible service) |
+| `B2_REGION` / `B2_BUCKET` / `B2_KEY_ID` / `B2_APPLICATION_KEY` | unset | with `b2`: the part after `s3.` in the bucket's Endpoint (`us-west-004`), the bucket, an application key's keyID and applicationKey |
+| `R2_ACCOUNT_ID` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | unset | with `r2`: the Cloudflare account ID, the bucket, an R2 API token's access key ID and secret |
+| `AWS_REGION` / `AWS_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | unset | with `s3`: the bucket's region, the bucket, an IAM user's keys |
+| `MINIO_ENDPOINT` / `MINIO_BUCKET` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | unset | with `minio`: the service URL (`https://minio.example.com`), the bucket, the keys |
+| `STORAGE_PREFIX` | unset | a folder inside the bucket, e.g. `diffnotes/` |
+| **Other** | | |
 | `UMAMI_SCRIPT` / `UMAMI_WEBSITE_ID` | unset | your own Umami on the landing page only (e.g. `https://umami.example.com/script.js` and the website id): one page view, never the app's pages |
 
-File storage (disk or an S3-compatible bucket) is not an environment variable: a super admin sets it on `/admin`, see
-[storage](storage.md).
+A missing or malformed storage variable stops the server at start with the variable's name; at start it also writes,
+reads and deletes one object in the bucket and logs `storage: … ok` or what failed.
 
 ## Upgrades and backups
 
 - Upgrade: pull, rebuild, restart. The database migrates itself on start. What changed: [CHANGELOG](../CHANGELOG.md).
 - Back up the whole `/data` volume (Coolify: the app's Backups → add the volume, daily, enable S3). With S3 storage,
-  uploads live in the bucket; the volume still holds the database and the encryption key that unlocks the S3 secret.
+  uploads live in the bucket (its keys live in the environment); the volume still holds the database.
   Archives taken while the app runs can catch the live database mid-write, so the app also writes a consistent copy
   every hour to `/data/backup/diffnotes.db`: restore from that one. Without volume backups, copy it out yourself, e.g.
   daily `docker cp diffnotes:/data/backup/diffnotes.db diffnotes-$(date +%F).db`, plus `encryption.key` once.
 - Restore: stop the app, put the volume back (or only the database: copy `backup/diffnotes.db` over `diffnotes.db` and
   delete `diffnotes.db-wal` and `diffnotes.db-shm`, or SQLite replays the archive's stale log into it), keep `encryption.key` and `session.secret` (or set the same
   `ENCRYPTION_KEY` / `SESSION_SECRET`), start it. Without the old `session.secret` everyone signs in again; without
-  the encryption key, enter the S3 secret again on `/admin`. Agent tokens survive either way.
+  the encryption key, a bucket saved on `/admin` before storage moved to the environment can't be read: set it in the environment. Agent tokens survive either way.
 - An hourly job deletes expired PRs, their files, old sessions and expired invitations.
 
 ## Local development

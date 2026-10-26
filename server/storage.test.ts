@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { expect, test } from 'vitest'
-import { checkS3, sign, storage } from './storage.ts'
+import { checkS3, s3FromEnv, sign, storage } from './storage.ts'
 
 // the "GET Object" example from AWS's Signature V4 docs for S3
 test('signs like the AWS documentation example', () => {
@@ -49,4 +49,23 @@ test('s3 files without a configured bucket read as missing and refuse writes', a
   expect(store.current()).toBe('s3')
   expect(await store.get('s3', 'p', 'a.png')).toBeNull()
   await expect(store.put('s3', 'p', 'a.png', Buffer.from('x'), 'image/png')).rejects.toThrow('not configured')
+})
+
+test('reads the bucket from STORAGE_TYPE and its provider\'s variables, and refuses a half-set or malformed one', () => {
+  expect(s3FromEnv({})).toBeNull()
+  expect(s3FromEnv({ STORAGE_TYPE: 'disk', B2_BUCKET: 'ignored' })).toBeNull()
+  const keys = { bucket: 'dn-files', key_id: 'K', secret: 'S' }
+  expect(s3FromEnv({ STORAGE_TYPE: 'B2', B2_REGION: 'us-west-004', B2_BUCKET: 'dn-files', B2_KEY_ID: 'K', B2_APPLICATION_KEY: 'S', STORAGE_PREFIX: '/dn' }))
+    .toEqual({ endpoint: 'https://s3.us-west-004.backblazeb2.com', region: 'us-west-004', prefix: 'dn/', ...keys })
+  expect(s3FromEnv({ STORAGE_TYPE: 'r2', R2_ACCOUNT_ID: 'a'.repeat(32), R2_BUCKET: 'dn-files', R2_ACCESS_KEY_ID: 'K', R2_SECRET_ACCESS_KEY: 'S' }))
+    .toEqual({ endpoint: `https://${'a'.repeat(32)}.r2.cloudflarestorage.com`, region: 'auto', prefix: '', ...keys })
+  expect(s3FromEnv({ STORAGE_TYPE: 's3', AWS_REGION: 'eu-central-1', AWS_BUCKET: 'dn-files', AWS_ACCESS_KEY_ID: 'K', AWS_SECRET_ACCESS_KEY: 'S' }))
+    .toMatchObject({ endpoint: 'https://s3.eu-central-1.amazonaws.com', region: 'eu-central-1' })
+  const minio = { STORAGE_TYPE: 'minio', MINIO_ENDPOINT: 'https://minio.example.com/', MINIO_BUCKET: 'dn-files', MINIO_ACCESS_KEY: 'K', MINIO_SECRET_KEY: 'S' }
+  expect(s3FromEnv(minio)).toMatchObject({ endpoint: 'https://minio.example.com', region: 'us-east-1' })
+  expect(() => s3FromEnv({ STORAGE_TYPE: 'gcs' })).toThrow('STORAGE_TYPE is disk, b2, r2, s3, minio; not gcs')
+  expect(() => s3FromEnv({ STORAGE_TYPE: 'b2', B2_BUCKET: 'x' })).toThrow('STORAGE_TYPE=b2 needs B2_REGION, B2_KEY_ID, B2_APPLICATION_KEY')
+  expect(() => s3FromEnv({ ...minio, MINIO_ENDPOINT: 'ftp://x' })).toThrow(/^MINIO_ENDPOINT: the service URL/)
+  expect(() => s3FromEnv({ ...minio, MINIO_BUCKET: 'Bad_Bucket' })).toThrow(/^MINIO_BUCKET: 3-63/)
+  expect(() => s3FromEnv({ ...minio, STORAGE_PREFIX: 'a#b' })).toThrow(/^STORAGE_PREFIX/)
 })

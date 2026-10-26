@@ -18,6 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
+- **File storage is set in the environment**: `STORAGE_TYPE` (`disk`, `b2`, `r2`, `s3`, `minio`) and that provider's
+  variables (`B2_*`, `R2_*`, `AWS_*`, `MINIO_*`, `STORAGE_PREFIX`), checked at start. The secret never reaches the
+  database, and a stolen super admin session can't point uploads at another bucket. `/admin` shows it read-only.
+  A bucket saved on `/admin` before still reads and deletes its files; set it in the environment to keep uploading to it.
 - Notes: a link whose URL held an image could put the image's alt words into the link as HTML attributes (`style`, ...).
 - GitHub sign-in: `next=/<tab>/evil.example` redirected off the site after signing in; only a path here is followed now.
 - GitHub sign-in linking a user by email drops the password, sessions and tokens set before: an invitation accepted by
