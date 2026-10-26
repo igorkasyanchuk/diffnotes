@@ -176,8 +176,8 @@ export function newToken(userId: string, name: string) {
 
 
 // Expired pull requests and stale invites/sessions; returns the expired pull ids for the caller to drop with their files.
-export function purgeExpired() {
-  const ids = (db.prepare('select id from pulls where expires_at < ?').all(now()) as { id: string }[]).map((r) => r.id)
+export function purgeExpired(keep = '') { // keep: the live demo's pull request (DEMO_PR), which never expires
+  const ids = (db.prepare('select id from pulls where expires_at < ? and id != ?').all(now(), keep) as { id: string }[]).map((r) => r.id)
   db.prepare('delete from invites where expires_at < ?').run(now())
   db.prepare('delete from sessions where created_at < ?').run(daysFromNow(-30)) // same 30 days currentUser() accepts
   return ids

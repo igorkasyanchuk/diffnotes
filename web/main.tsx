@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
-import { Code, Landing } from './landing.tsx'
+import { BadgePage, Code, DemoPage, Landing } from './landing.tsx'
 import { version } from '../package.json'
 
 declare global {
@@ -165,7 +165,7 @@ function useSubmit(fn: () => Promise<unknown>) {
   return { submit, error, busy }
 }
 
-type SignIn = { github: boolean; signup: boolean } // what /api/me says this server offers besides a password
+type SignIn = { github: boolean; signup: boolean; demo: { repository: string; number: number } | null } // what /api/me says this server offers besides a password
 type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number; has_password: boolean }
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
@@ -174,6 +174,8 @@ const GitHubMark = ({ size = 16 }: { size?: number }) => <svg viewBox="0 0 16 16
 const Footer = () => <footer className="foot">
   <span>diffnotes {version} · self-hosted PR annotations · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
+  <Link to="/demo">demo</Link>
+  <Link to="/badge">badge</Link>
   <Link to="/privacy">privacy</Link>
   <a href={SOURCE} target="_blank" rel="noreferrer">source</a>
 </footer>
@@ -737,7 +739,7 @@ const APP_PATHS = /^\/(dashboard|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$
 
 function App() {
   const [path, setPath] = useState(location.pathname), [me, setMe] = useState<Me | null>(), [n, setN] = useState(0)
-  const [sign, setSign] = useState<SignIn>({ github: false, signup: false })
+  const [sign, setSign] = useState<SignIn>({ github: false, signup: false, demo: null })
   useEffect(() => {
     const on = () => setPath(location.pathname), change = () => setN((x) => x + 1)
     addEventListener('popstate', on)
@@ -749,7 +751,7 @@ function App() {
   useEffect(() => {
     let live = true
     // a failed request keeps who we knew; on the very first load it falls back to signed out instead of a blank page
-    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup }); setMe(r.user ? r as Me : null) } },
+    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup, demo: r.demo }); setMe(r.user ? r as Me : null) } },
       () => { if (live) setMe((x) => x ?? null) })
     return () => { live = false }
   }, [path, n])
@@ -760,7 +762,9 @@ function App() {
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || APP_PATHS.test(path))
     return <PublicLayout signedIn={!!me} signup={sign.signup}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
-      : path === '/privacy' ? <Privacy /> : <Landing signedIn={!!me} signup={sign.signup} />}</PublicLayout>
+      : path === '/privacy' ? <Privacy /> : path === '/badge' ? <BadgePage />
+      : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }} />
+      : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}</PublicLayout>
   }
   let page: ReactNode
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />

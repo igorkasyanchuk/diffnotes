@@ -11,8 +11,8 @@ function Copy({ text }: { text: string }) {
     setTimeout(() => setLabel('copy'), 1500)
   }}>{label}</button>
 }
-export const Code = ({ text, prompt }: { text: string; prompt?: boolean }) =>
-  <div className="code"><pre>{prompt && <span className="prompt">$ </span>}{text}</pre><Copy text={text} /></div>
+export const Code = ({ text, prompt, wrap }: { text: string; prompt?: boolean; wrap?: boolean }) =>
+  <div className={wrap ? 'code wrap' : 'code'}><pre>{prompt && <span className="prompt">$ </span>}{text}</pre><Copy text={text} /></div>
 
 const BENEFITS: [string, string][] = [
   ['review faster', 'Reviewers read why each block changed before reading how. Less back-and-forth, fewer “what does this do?” comments.'],
@@ -26,7 +26,15 @@ const BENEFITS: [string, string][] = [
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 
-export function Landing({ signedIn, signup }: { signedIn: boolean; signup: boolean }) {
+export const STORE = 'https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd'
+const MAIN = 'https://diffnotes.dev' // where the README badge links, from every server
+const ChromeLogo = () => <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+  <path fill="#ea4335" d="M24 24 6.68 14A20 20 0 0 1 41.32 14z" /><path fill="#fbbc04" d="M24 24 41.32 14A20 20 0 0 1 24 44z" />
+  <path fill="#34a853" d="M24 24 24 44A20 20 0 0 1 6.68 14z" /><circle cx="24" cy="24" r="9.5" fill="#fff" /><circle cx="24" cy="24" r="7.5" fill="#4285f4" /></svg>
+export const AddToChrome = ({ primary }: { primary?: boolean }) =>
+  <a href={STORE} className={`btn chrome${primary ? ' primary' : ''}`}><ChromeLogo />add to Chrome</a>
+
+export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup: boolean; demo: boolean }) {
   const origin = location.origin
   // the server adds Umami to this page only when it is configured (UMAMI_SCRIPT); one page view, nothing after.
   // The script is deferred and from another host: it can still be loading when this runs, so wait for it then.
@@ -40,6 +48,12 @@ export function Landing({ signedIn, signup }: { signedIn: boolean; signup: boole
     <section className="lp-hero">
       <div className="lp-tags"><span>free</span><span>self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
       <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
+      <div className="lp-quick">
+        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
+        <AddToChrome primary />
+      </div>
+      <p className="hint">One command installs the skill for Claude Code, Codex, Cursor and other Agent Skills tools.
+        {demo && <> <a href="/demo">See it on a live PR in 30 seconds →</a></>}</p>
     </section>
     <Demo />
     <section className="lp-after">
@@ -69,9 +83,54 @@ export function Landing({ signedIn, signup }: { signedIn: boolean; signup: boole
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
         <p className="hint">Install it from the Chrome Web Store (or load it in Firefox), paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
-        <p><a href="https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd" className="btn">add to Chrome →</a></p>
+        <p><AddToChrome /></p>
       </li>
     </ol>
     <p>{cta}</p>
   </>
+}
+
+// the live demo (DEMO_PR on the server): what a visitor does to see real notes on a real pull request
+export function DemoPage({ signedIn, github, demo }: { signedIn: boolean; github: boolean; demo: { url: string; label: string } | null }) {
+  if (!demo) return <div className="narrow"><h1>live demo</h1><p className="hint">This server has no live demo.</p></div>
+  return <div className="lp-page">
+    <h1>live demo</h1>
+    <p className="lp-lead">A real pull request in DiffNotes' own repository, explained by Claude Code with the DiffNotes skill: plain-language
+      notes on the changed lines, risk levels, before / after screenshots and a demo you can click. Four steps, about a minute:</p>
+    <ol className="lp-install">
+      <li><div className="lp-step"><b>add the browser extension</b></div>
+        <p><AddToChrome primary /> <span className="hint">or Edge, Brave, Arc; Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox">load it from the repo</a></span></p></li>
+      <li><div className="lp-step"><b>{signedIn ? 'you are signed in' : 'make a free account'}</b></div>
+        {signedIn ? <p className="hint">Good, nothing to do here.</p>
+          : github ? <p><a href="/auth/github?next=/demo" className="btn">continue with GitHub</a> <span className="hint">one click, no password</span></p>
+          : <p className="hint">Ask this server's admin for an invitation, then <a href="/login">sign in</a>.</p>}</li>
+      <li><div className="lp-step"><b>connect the extension</b></div>
+        <p className="hint">On <a href="/settings#tokens">settings</a> make a token. Open the extension's popup (pin it from the puzzle icon), enter this
+          server and the token, press <b>Connect</b> and allow access.</p>
+        <Code text={location.origin} /></li>
+      <li><div className="lp-step"><b>open the pull request</b></div>
+        <p><a href={demo.url} className="btn primary" target="_blank" rel="noreferrer">{demo.label} →</a></p>
+        <p className="hint">The summary box sits above the files and the notes next to the changed lines. Press <kbd>?</kbd> for the keys:
+          <kbd>j</kbd> / <kbd>k</kbd> jump between notes, <kbd>n</kbd> hides them.</p></li>
+    </ol>
+    <p className="hint">The demo's notes are readable by everyone signed in to this server. Your own pull requests' notes are visible only
+      to your team.</p>
+  </div>
+}
+
+// "Reviewed with DiffNotes": a badge for READMEs and PR templates, linking to the main site
+export function BadgePage() {
+  const img = `${MAIN}/badge.svg`, alt = 'Reviewed with DiffNotes'
+  return <div className="lp-page">
+    <h1>badge</h1>
+    <p className="lp-lead">Tell contributors your pull requests come with notes: put the badge in your README or your pull request template.</p>
+    <p><a href={MAIN}><img src="/badge.svg" alt={alt} width="150" height="20" /></a></p>
+    <h2>Markdown (README, PR template)</h2>
+    <Code wrap text={`[![${alt}](${img})](${MAIN})`} />
+    <h2>HTML</h2>
+    <Code wrap text={`<a href="${MAIN}"><img src="${img}" alt="${alt}"></a>`} />
+    <h2>pull request template</h2>
+    <p className="hint">In <code>.github/pull_request_template.md</code>, so every PR tells reviewers where the notes are:</p>
+    <Code wrap text={`[![${alt}](${img})](${MAIN}) Notes for reviewers are in the diff: open **Files changed** with the DiffNotes extension.`} />
+  </div>
 }

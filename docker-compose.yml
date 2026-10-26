@@ -35,6 +35,7 @@ services:
       # GITHUB_CLIENT_ID: ""                    # sign in with GitHub (docs/accounts.md)
       # GITHUB_CLIENT_SECRET: ""
       # ALLOW_SIGNUP: 1                         # anyone with GitHub may sign up
+      # DEMO_PR: owner/name#12                  # a live demo PR every signed-in user can read (/demo)
       # UMAMI_SCRIPT: ""
       # UMAMI_WEBSITE_ID: ""
       # S3 storage is not an env var: set it on /admin (docs/storage.md)

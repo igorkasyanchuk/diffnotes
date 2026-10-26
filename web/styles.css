@@ -155,6 +155,10 @@ table.grid tr:hover td { background: var(--panel-2); }
 .code { position: relative; }
 .code pre { padding-right: 76px; }
 .copy { position: absolute; top: 7px; right: 7px; padding: 3px 9px; font-size: 11px; }
+/* a long line scrolls under the copy button: hide it there, fading in from the left */
+.code:not(.wrap) .copy { background: var(--panel); box-shadow: 0 0 0 4px var(--panel); }
+.code:not(.wrap) .copy::before { content: ''; position: absolute; right: calc(100% + 4px); top: -4px; bottom: -4px; width: 28px; background: linear-gradient(to right, transparent, var(--panel)); }
+.code.wrap pre { white-space: pre-wrap; word-break: break-all; }
 .token .code pre { margin: 0 0 6px; background: var(--panel); }
 
 /* the landing page lives in landing.css; these keyframes are shared (.cursor here, .gh-term there) */

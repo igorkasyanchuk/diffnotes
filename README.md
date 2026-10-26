@@ -5,6 +5,9 @@
 <p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
 Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
+<p align="center"><a href="https://diffnotes.dev"><img src="https://diffnotes.dev/badge.svg" alt="Reviewed with DiffNotes"></a>
+· <a href="https://diffnotes.dev/demo">live demo</a> · <a href="https://diffnotes.dev/badge">badge for your repo</a></p>
+
 <p align="center"><img src="docs/images/github-note.png" alt="A DiffNotes note on a GitHub pull request diff" width="860"></p>
 
 ## TL;DR

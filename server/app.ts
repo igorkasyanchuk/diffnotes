@@ -269,7 +269,8 @@ const tokenCount = (userId: string) => (db.prepare('select count(*) as n from to
 // who is signed in, plus what the app layout shows around every page: their accounts and whether they have a token yet
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
-  const signIn = { github: !!github(), signup: signupOpen() }
+  const d = demoPull()
+  const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null }
   if (!user) return c.json({ user: null, ...signIn })
   const { password } = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
   return c.json({ user, accounts: accountsOf(user.id), tokens: tokenCount(user.id), has_password: !!password, ...signIn })
@@ -400,7 +401,7 @@ async function dropPulls(ids: string[]) {
   await store.remove(files)
 }
 export async function purge() {
-  const ids = purgeExpired()
+  const ids = purgeExpired(demoPull()?.id)
   await dropPulls(ids)
   return ids.length
 }
@@ -580,20 +581,34 @@ function pullOut(p: Pull, user: User) {
     .map((f) => ({ ...f, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary, deploy: p.deploy,
-    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files, can_delete: canRemove(p, user),
+    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files, can_delete: isMember(p.account_id, user) && canRemove(p, user),
   }
 }
+
+// DEMO_PR=owner/name#12: the landing page's live demo. That pull request's notes, as a super admin uploaded them, are
+// readable by every signed-in user (anyone can sign up, connect the extension and see them) and never expire.
+export const demoPull = () => {
+  const m = (process.env.DEMO_PR ?? '').match(/^(.+)#(\d+)$/)
+  if (!m) return
+  return db.prepare(`${PULL_SELECT} join users u on u.id = p.user_id where r.full_name = ? and p.number = ? and u.admin = 1
+    order by p.updated_at desc limit 1`).get(repoName(m[1]), Number(m[2])) as Pull | undefined
+}
+// reading notes and files takes a membership: a super admin manages every account but sees only counts of what others wrote
+const isMember = (accountId: string, user: User) => !!memberRole(accountId, user.id)
+const requireMember = (p: Pull, user: User) => { if (!isMember(p.account_id, user)) fail(404, 'No annotations for this pull request') }
 
 // /api/v1/pulls/<repository>/<number>, where the repository is owner/name or host/path (several segments)
 const PULL_PATH = '/api/v1/pulls/:repo{.+}/:number{[0-9]+}'
 const findPull = (user: User, repo: string, number: number) => {
   const full = repoName(repo)
-  // a name can be connected in several accounts: yours only (a super admin's own first, then any), the latest upload
-  // first, the same order repositoryFor() writes in
-  const mine = 'r.account_id in (select account_id from memberships where user_id = ?)'
-  const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ? and (? or ${mine})
-    order by ${mine} desc, p.updated_at desc limit 1`).get(full, number, user.admin, user.id, user.id) as Pull | undefined
-  if (!p) fail(404, 'No annotations for this pull request')
+  // a name can be connected in several accounts: yours only, the latest upload first, the same order repositoryFor() writes in
+  const p = db.prepare(`${PULL_SELECT} where r.full_name = ? and p.number = ?
+    and r.account_id in (select account_id from memberships where user_id = ?) order by p.updated_at desc limit 1`).get(full, number, user.id) as Pull | undefined
+  if (!p) {
+    const demo = demoPull()
+    if (demo && demo.full_name.toLowerCase() === full.toLowerCase() && demo.number === number) return demo
+    fail(404, 'No annotations for this pull request')
+  }
   role(p!.account_id, user)
   return p!
 }
@@ -609,7 +624,11 @@ const pullById = (c: Context<Env>, id = c.req.param('id') ?? '') => {
   role(p!.account_id, c.get('user'))
   return p!
 }
-app.get('/api/pulls/:id', (c) => c.json(pullOut(pullById(c), c.get('user'))))
+app.get('/api/pulls/:id', (c) => {
+  const p = pullById(c)
+  requireMember(p, c.get('user'))
+  return c.json(pullOut(p, c.get('user')))
+})
 const removeAll = async (user: User, p: Pull) => {
   requireRemove(p, user)
   await dropPulls([p.id])
@@ -947,7 +966,7 @@ export const DEMO_CSP = "sandbox allow-scripts; default-src 'none'; script-src '
 app.get('/files/:pull/:name', async (c) => {
   const user = await currentUser(c)
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('pull')) as Pull | undefined
-  if (!user || !p || !(user.admin || memberRole(p.account_id, user.id))) return c.notFound()
+  if (!user || !p || !(isMember(p.account_id, user) || demoPull()?.id === p.id)) return c.notFound()
   const f = db.prepare('select name, type, backend from files where pull_id = ? and name = ?').get(p.id, safeName(c.req.param('name'))) as
     { name: string; type: string; backend: string } | undefined
   const data = f && await store.get(f.backend, p.id, f.name)

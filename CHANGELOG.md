@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Sign in with GitHub** (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`): existing users are found by their verified
   emails, invited people join without a password, and `ALLOW_SIGNUP=1` opens registration (a user and a team account
   of their own). Users made through GitHub can set a password later.
+- **Install in the hero**: the one-command skill install with a copy button and *add to Chrome*, right under the headline.
+- **Live demo** (`DEMO_PR=owner/name#12`): one pull request whose notes every signed-in user can read and that never
+  expires; `/demo` walks a visitor through extension, account, token and the PR.
+- **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
 ## [1.1.0] - 2026-10-26
 

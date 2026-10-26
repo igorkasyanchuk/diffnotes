@@ -237,6 +237,22 @@ describe('super admin', () => {
     db.prepare(`insert into files (pull_id, name, type, size, backend) values (?, 'x.png', 'image/png', 1, 's3')`).run(pull)
     expect((await put(s3)).status).toBe(409)
   })
+
+  it('manages an account it is not in and sees its counts, never its notes or files', async () => {
+    const own = (await call('/api/accounts', { cookie: dev, body: { name: 'Dev team' } })).data.id
+    await call(`/api/accounts/${own}/repositories`, { cookie: dev, body: { full_name: 'dev/app' } })
+    const devToken = (await call('/api/tokens', { cookie: dev, body: {} })).data.token
+    const form = new FormData()
+    form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: 'secret' }] }))
+    form.append('file', new File([png as BlobPart], 'shot.png'))
+    const pull = (await call('/api/v1/pulls/dev/app/1', { token: devToken, form, method: 'PUT' })).data.id
+    expect((await call(`/files/${pull}/shot.png`, { token: devToken })).status).toBe(200)
+    expect((await call('/api/v1/pulls/dev/app/1', { token })).status).toBe(404)
+    expect((await call(`/api/pulls/${pull}`, { cookie: admin })).status).toBe(404)
+    expect((await call(`/files/${pull}/shot.png`, { cookie: admin })).status).toBe(404)
+    expect((await call(`/api/accounts/${own}/overview`, { cookie: admin })).data.totals).toMatchObject({ pulls: 1, annotations: 1, files: 1 })
+    expect((await call(`/api/pulls/${pull}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
+  })
 })
 
 describe('repository rules and the deploy card', () => {
@@ -319,7 +335,7 @@ describe('GitHub sign-in', () => {
   it('is off without an OAuth app', async () => {
     expect((await start()).status).toBe(404)
     expect((await call('/auth/github/callback?code=x&state=y')).status).toBe(404)
-    expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false })
+    expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false, demo: null })
   })
 
   it('signs up, links by email, joins invitations, refuses strangers', async () => {
@@ -330,7 +346,7 @@ describe('GitHub sign-in', () => {
       expect(s.status).toBe(302)
       expect(s.loc.origin + s.loc.pathname).toBe('https://github.com/login/oauth/authorize')
       expect(s.loc.searchParams.get('redirect_uri')).toBe('https://dn.example/auth/github/callback')
-      expect((await call('/api/me')).data).toEqual({ user: null, github: true, signup: false })
+      expect((await call('/api/me')).data).toMatchObject({ user: null, github: true, signup: false })
 
       const octo = { id: 7, login: 'octo', name: null }
       expect((await roundTrip(octo, [mail('octo@example.com')], { state: 'forged' })).to).toContain('expired')
@@ -380,5 +396,46 @@ describe('GitHub sign-in', () => {
     } finally {
       delete process.env.GITHUB_CLIENT_ID; delete process.env.GITHUB_CLIENT_SECRET; delete process.env.ALLOW_SIGNUP
     }
+  })
+})
+
+describe('live demo (DEMO_PR)', () => {
+  it('lets every signed-in user read the demo PR and its files, which never expire', async () => {
+    const { createAccount, createUser, now } = await import('./db.ts')
+    const { purge } = await import('./app.ts')
+    const adminId = (await call('/api/me', { cookie: admin })).data.user.id
+    // the super admin's demo, written straight to the database (this file's tiny quotas are used up by now)
+    const acc = createAccount('Demo', adminId), past = '2000-01-01T00:00:00.000Z'
+    db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run('demo-repo', acc, 'acme/demo', now())
+    db.prepare(`insert into pulls (id, repository_id, number, title, user_id, created_at, updated_at, expires_at)
+      values ('demo-pull', 'demo-repo', 5, 'Demo', ?, ?, ?, ?)`).run(adminId, now(), now(), past)
+    db.prepare(`insert into annotations (pull_id, path, body) values ('demo-pull', 'a.ts', 'why')`).run()
+    db.prepare(`insert into files (pull_id, name, type, size) values ('demo-pull', 'shot.png', 'image/png', 16)`).run()
+    fs.mkdirSync(path.join(process.env.DATA_DIR!, 'uploads', 'demo-pull'), { recursive: true })
+    fs.writeFileSync(path.join(process.env.DATA_DIR!, 'uploads', 'demo-pull', 'shot.png'), png())
+    // a stranger: a user of their own account only
+    const stranger = createUser('stranger@example.com', 'stranger-pass')
+    createAccount('Elsewhere', stranger)
+    const cookie = await login('stranger@example.com', 'stranger-pass')
+    const tok = (await call('/api/tokens', { cookie, body: {} })).data.token
+
+    expect((await call('/api/v1/pulls/acme/demo/5', { token: tok })).status).toBe(404) // off
+    process.env.DEMO_PR = 'https://github.com/acme/demo#5'
+    try {
+      const r = await call('/api/v1/pulls/acme/demo/5', { token: tok })
+      expect(r.status).toBe(200)
+      expect(r.data).toMatchObject({ annotations: [{ body: 'why' }], can_delete: false })
+      expect((await call(r.data.files[0].url, { token: tok })).status).toBe(200)
+      expect((await call('/api/v1/pulls/acme/demo/6', { token: tok })).status).toBe(404) // only that PR
+      expect((await call('/api/v1/pulls/acme/demo/5', { token: tok, method: 'DELETE' })).status).toBe(404) // read only
+      expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
+      await purge()
+      expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeTruthy() // expired, kept
+      // only a super admin's upload is the demo: the same name in a stranger's account isn't
+      db.prepare("update pulls set user_id = ? where id = 'demo-pull'").run(stranger)
+      expect((await call('/api/me', { cookie })).data.demo).toBeNull()
+    } finally { delete process.env.DEMO_PR }
+    await purge()
+    expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeUndefined()
   })
 })
