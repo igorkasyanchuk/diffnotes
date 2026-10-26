@@ -170,6 +170,7 @@ type Me = SignIn & { user: User; accounts: { id: string; name: string; role: str
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
 const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
+const GitHubMark = ({ size = 16 }: { size?: number }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
 const Footer = () => <footer className="foot">
   <span>diffnotes {version} · self-hosted PR annotations · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
@@ -178,16 +179,16 @@ const Footer = () => <footer className="foot">
 </footer>
 
 // public pages: landing, sign in, invitations
-function PublicLayout({ signedIn, children }: { signedIn: boolean; children: ReactNode }) {
+function PublicLayout({ signedIn, signup, children }: { signedIn: boolean; signup: boolean; children: ReactNode }) {
   return <>
     <header className="top">
       <Brand />
       <nav>
         <a href={SOURCE} target="_blank" rel="noreferrer" className="btn gh" aria-label="DiffNotes on GitHub">
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
+          <GitHubMark />
           <span>GitHub</span>
         </a>
-        {signedIn ? <Link to="/dashboard" className="btn primary">dashboard →</Link> : <Link to="/login" className="btn primary">sign in</Link>}
+        {signedIn ? <Link to="/dashboard" className="btn primary">dashboard →</Link> : <Link to="/login" className="btn primary">sign in{signup && <span className="wide"> / sign up</span>}</Link>}
       </nav>
     </header>
     <main>{children}</main>
@@ -225,7 +226,7 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
 }
 
 const GitHubButton = ({ next, children }: { next?: string; children: ReactNode }) =>
-  <a className="btn" href={`/auth/github${next ? `?next=${encodeURIComponent(next)}` : ''}`}>{children}</a>
+  <a className="btn gh-signin" href={`/auth/github${next ? `?next=${encodeURIComponent(next)}` : ''}`}><GitHubMark size={18} />{children}</a>
 
 function Login({ sign }: { sign: SignIn }) {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
@@ -237,12 +238,12 @@ function Login({ sign }: { sign: SignIn }) {
     if (location.pathname === '/login') go('/dashboard')
   })
   return <div className="narrow">
-    <h1>sign in</h1>
+    <h1>{sign.signup ? 'sign in or create an account' : 'sign in'}</h1>
     {sign.github && <div className="stack">
-      <GitHubButton next={location.pathname === '/login' ? undefined : location.pathname + location.search}>
-        {sign.signup ? 'sign in or sign up with GitHub' : 'sign in with GitHub'}</GitHubButton>
+      <GitHubButton next={location.pathname === '/login' ? undefined : location.pathname + location.search}>continue with GitHub</GitHubButton>
+      {sign.signup && <p className="hint"><b>No account yet?</b> This button creates one for free: your user and a team account, in one step.</p>}
       {back && <div className="error">{back}</div>}
-      <p className="hint">{sign.signup ? 'New here? GitHub makes your user and a team account in one step.' : 'or with your email:'}</p>
+      <div className="or">or with email</div>
     </div>}
     <form className="stack" onSubmit={submit}>
       <label>email<input autoFocus autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
@@ -758,8 +759,8 @@ function App() {
     const invite = m(/^\/invite\/([\w-]+)$/)
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || APP_PATHS.test(path))
-    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
-      : path === '/privacy' ? <Privacy /> : <Landing signedIn={!!me} />}</PublicLayout>
+    return <PublicLayout signedIn={!!me} signup={sign.signup}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
+      : path === '/privacy' ? <Privacy /> : <Landing signedIn={!!me} signup={sign.signup} />}</PublicLayout>
   }
   let page: ReactNode
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />

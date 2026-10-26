@@ -26,7 +26,7 @@ const BENEFITS: [string, string][] = [
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 
-export function Landing({ signedIn }: { signedIn: boolean }) {
+export function Landing({ signedIn, signup }: { signedIn: boolean; signup: boolean }) {
   const origin = location.origin
   // the server adds Umami to this page only when it is configured (UMAMI_SCRIPT); one page view, nothing after.
   // The script is deferred and from another host: it can still be loading when this runs, so wait for it then.
@@ -35,7 +35,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     if (w.umami) w.umami.track()
     else document.querySelector('script[data-website-id]')?.addEventListener('load', () => w.umami?.track(), { once: true })
   }, [])
-  const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">sign in →</a>
+  const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">{signup ? 'create a free account →' : 'sign in →'}</a>
   return <>
     <section className="lp-hero">
       <div className="lp-tags"><span>free</span><span>self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>

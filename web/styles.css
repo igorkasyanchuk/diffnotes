@@ -70,6 +70,8 @@ h2::before { content: '// '; color: var(--soft); }
 .top nav { display: flex; gap: 2px; margin-left: auto; align-items: center; font-size: 13px; flex-wrap: wrap; }
 .top .gh { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
 @media (max-width: 480px) { .top .gh span { display: none; } }
+.top nav .btn { white-space: nowrap; }
+@media (max-width: 360px) { .top .wide { display: none; } }
 main { width: 100%; max-width: 1000px; margin: 0 auto; padding: 32px 24px 64px; flex: 1; }
 .narrow { max-width: 420px; }
 
@@ -78,6 +80,12 @@ button, .btn {
   border: 1px solid var(--line-2); background: var(--panel); color: var(--ink);
 }
 button:hover, .btn:hover { border-color: var(--accent); text-decoration: none; }
+.btn.gh-signin { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 11px 14px; font-size: 14px; font-weight: 700;
+  background: #f0f6fc; color: #0d1117; border-color: #f0f6fc; }
+.btn.gh-signin:hover { background: #fff; border-color: var(--accent); }
+@media (prefers-color-scheme: light) { .btn.gh-signin { background: #24292f; color: #fff; border-color: #24292f; } .btn.gh-signin:hover { background: #32383f; } }
+.or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 0 2px; }
+.or::before, .or::after { content: ''; flex: 1; border-top: 1px solid var(--line-2); }
 button.primary, .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 button.primary:hover, .btn.primary:hover { filter: brightness(1.08); }
 button.link { border: 0; background: none; padding: 0; color: var(--link); font-size: 13px; }
