@@ -74,7 +74,7 @@
     return box
   }
 
-  // Removing notes: the uploader and account admins see "remove" (the server says so with can_delete and checks again).
+  // Removing notes: a note's author and account admins see "remove" (the server says so with can_delete and checks again).
   // A click asks inline first; only real clicks count, so a script on the page can't press them.
   const RISKS = ['high', 'medium', 'low']
   const confirming = (question, action) => (e) => {
@@ -349,9 +349,13 @@
       return open
     })
     const removes = pull.pulls.filter((p) => p.can_delete).map((p) => {
-      const b = el('button', 'dn-link dn-remove', many ? `remove notes on ${new URL(p.server).host}` : 'remove all notes')
+      // an admin removes everything; an author only their own notes and files (older servers: no can_delete_all, all of it)
+      const everything = p.can_delete_all ?? true, mine = p.annotations.filter((a) => a.can_delete).length
+      const b = el('button', 'dn-link dn-remove', `${everything ? 'remove all notes' : 'remove my notes'}${many ? ` on ${new URL(p.server).host}` : ''}`)
       b.type = 'button'
-      b.addEventListener('click', confirming(`Remove all ${p.annotations.length} notes and files of this PR for everyone?`,
+      // an author may have only files here (no notes of theirs): no count then
+      b.addEventListener('click', confirming(everything ? `Remove all ${p.annotations.length} notes and files of this PR for everyone?`
+        : `Remove your ${mine ? `${mine} ` : ''}notes and files of this PR?`,
         () => removeNotes(p.server, `/api/v1/pulls/${p.repo}/${p.number}?id=${p.id}`)))
       return b
     })
@@ -674,7 +678,7 @@
     if (current !== key) return
     if (res?.pulls?.length) {
       const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
-      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: p.can_delete,
+      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: a.can_delete ?? p.can_delete,
         fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')),
         anchor: hash([key, p.server, a.path, a.side, a.line].join('\n')) }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')

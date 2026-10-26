@@ -31,7 +31,7 @@ Objects are written as `<prefix>pulls/<pull id>/<file name>`, path-style, signed
 Files expire with their PR, `RETENTION_DAYS` (30) after its last upload:
 
 1. **The server deletes them**: an hourly job removes expired PRs and deletes their files from disk or from the bucket.
-   Re-uploading a PR replaces its files right away.
+   Re-uploading a PR replaces the uploader's files right away.
 2. **A bucket rule as a safety net**: **set the expiry rule on the bucket** adds a lifecycle rule that deletes everything
    under the prefix after `RETENTION_DAYS + 1` days (each re-upload writes new objects, so their age restarts). It
    replaces the bucket's existing lifecycle rules: use a bucket only for DiffNotes. Where the provider doesn't accept

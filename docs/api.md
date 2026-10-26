@@ -7,9 +7,9 @@ session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can
 
 | Method | Path | |
 |---|---|---|
-| `PUT` | `/api/v1/pulls/<repository>/<number>` | replace a PR's notes and files (see below) |
+| `PUT` | `/api/v1/pulls/<repository>/<number>` | replace your notes and files on a PR (see below) |
 | `GET` | `/api/v1/pulls/<repository>/<number>` | the PR's notes, summary and files; `404` when none or not your account's |
-| `DELETE` | `/api/v1/pulls/<repository>/<number>` | delete the notes and files now |
+| `DELETE` | `/api/v1/pulls/<repository>/<number>` | delete your notes and files now (an owner or admin: everyone's) |
 | `DELETE` | `/api/pulls/:id` | the same by PR id (web app's **delete notes**); the extension adds `?id=<pull id>` to the route above, `409` if the PR changed |
 | `DELETE` | `/api/v1/annotations/:id` | remove one note (the extension's **remove note**); the PR and its files stay |
 | `GET` | `/api/v1/me` | who the token belongs to |
@@ -49,15 +49,21 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - In `body` and `summary`: ` ```mermaid ` flowcharts are drawn as diagrams, and two adjacent images named
   `…-before` / `…-after` (or captioned Before / After) become one image with a drag handle. An image whose file is an
   `.mp4` or `.webm` (`![caption](attachment:flow.webm)`) plays inline as a muted video with controls.
-- Each PUT replaces the previous notes and files and restarts the expiry.
+- Every note and file has its author. Each PUT replaces the caller's own notes and files on the PR (teammates' stay)
+  and restarts the expiry. Title, `head_sha`, summary and deploy card are the PR's: the latest upload sets them, and
+  while teammates' notes are there a blank one keeps what it was. Limits per PR (`MAX_ANNOTATIONS`, `MAX_FILES`) count
+  everyone's notes and files.
 - A repository is looked up in the uploader's accounts (the same name can be connected in several accounts). Not
   connected in any of them: it is connected to the account the uploader owns or administers; a member gets `403`.
 - Files: up to `MAX_FILE_MB` each (1 MB), `.mp4` / `.webm` recordings up to `MAX_VIDEO_MB` (2 MB), `MAX_FILES` files
   (30) and `MAX_PULL_MB` (20 MB) per request; a JSON body up to `MAX_BODY_KB` (1024). Defaults in brackets, see [install](install.md).
 - Account limits: `MAX_PULLS` live PRs and `MAX_ACCOUNT_MB` of files (see [install](install.md)); over them, `413`.
+  Disk storage below `MIN_FREE_DISK_MB` free: `507`.
 
-`GET` returns the stored notes with their `id` and `risk`, plus `can_delete`: whether you may remove them. Removing
-(one note or all) is for the PR's uploader and the account's owner and admins; other members get `403`.
+`GET` returns the stored notes with their `id`, `risk`, `mine` (yours: what your next upload replaces) and `can_delete`,
+the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove) and `can_delete_all`. A note is removed by its author or an
+account owner or admin; `DELETE` of the PR removes everything for an owner or admin, your own notes and files for anyone
+else (the PR goes with the last of them; `403` with none of yours).
 
 Response: `{"id", "url", "annotations", "files"}`. Errors: `400` bad payload, `401` bad token, `403` repository not
 connected and you're only a member, `413` too many / too big / account full, `415` file type not allowed (see [security](security.md)), `422` the

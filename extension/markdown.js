@@ -4,13 +4,15 @@
 ;(() => {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
   // `/\\host` is no relative path: browsers read it as //host
-  const safeUrl = (u) => (/^(https?:\/\/|\/(?![\/\\]))/i.test(u) ? u : '')
+  // and never one holding a \u0000n\u0000 placeholder: restore() would put that tag's attributes inside href="…"
+  const safeUrl = (u) => (!u.includes('\u0000') && /^(https?:\/\/|\/(?![\/\\]))/i.test(u) ? u : '')
 
   function inline(text, resolve) {
     // code spans and tags with attributes are swapped for \u0000n\u0000 so later passes never rewrite inside them
     const held = [], hold = (html) => `\u0000${held.push(html) - 1}\u0000`
     let s = esc(text.replace(/\u0000/g, '')).replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`))
-    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, text, url) => {
+      const alt = text.replace(/\u0000\d+\u0000/g, '') // it lands inside an attribute: no held tags in it
       const u = safeUrl(url.replace(/&amp;/g, '&'))
       if (/^https?:/i.test(u)) return `${hold(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">`)}${alt || 'image'} ↗</a>`
       // a screen recording (.mp4 / .webm) plays inline; the alt text is its caption

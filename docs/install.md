@@ -90,6 +90,8 @@ This table is the one reference for configuration: everything is an environment 
 | `MAX_ANNOTATIONS` | `500` | notes per PR |
 | `MAX_BODY_KB` | `1024` | JSON request bodies |
 | `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
+| `MAX_ACCOUNTS` | `10` | accounts one user may own (with `ALLOW_SIGNUP=1`, each one is more quota) |
+| `MIN_FREE_DISK_MB` | `100` | uploads to disk storage get `507` once the volume would have less free space |
 | **Security** | | |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (the S3 secret key) |

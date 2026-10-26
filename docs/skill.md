@@ -33,12 +33,13 @@ Open the PR's branch in your agent and ask: **“annotate this PR with diffnotes
 3. adds screenshots when the change is visible (for responsive UI: the same screen at mobile and desktop width, in one note → a gallery);
 4. uploads everything in one request and reports the link.
 
-Re-running after a push replaces the previous notes and files, so it is safe to repeat. Before every upload the agent
+Re-running after a push replaces your previous notes and files (teammates' stay), so it is safe to repeat. Before every upload the agent
 checks each note against the current diff (a small script in the skill: the file must be changed in the PR and the
 lines inside one changed block) and only uploads what is true at the PR's head commit. After new commits it reads the
 stored notes, keeps and fixes the ones that still hold and drops the rest; with nothing left to say it deletes them
-(`DELETE /api/v1/pulls/…`). People can delete a PR's notes from its page with **delete notes**, and the uploader or an admin can remove single
-notes right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
+(`DELETE /api/v1/pulls/…`; with an admin's token and teammates' notes on the PR, it uploads an empty set instead, so
+theirs stay). People can delete their notes on a PR from its page (admins: all of them), and a note's author or an admin can remove
+it right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
 after image pairs (shown with a drag handle), short screen recordings and Mermaid flowcharts (drawn as diagrams).
 When shipping the PR takes more than a merge (a migration, a new env var, a flag, steps in order), the agent adds a
 **deploy card**, pinned at the top of the summary. A repository's [rules](accounts.md#repository-rules) can require

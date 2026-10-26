@@ -35,6 +35,8 @@ it('migrates an older database', () => {
   expect(repos).toContain('unique (account_id, full_name)')
   expect(db.prepare('select id from repositories').all()).toEqual([{ id: 'r' }])
   db.prepare("insert into annotations (pull_id, path, risk) values ('p', 'a.ts', 'high')").run()
+  // notes and files from before have their PR's uploader (here: none) as their author
+  expect(db.prepare('select user_id from annotations').all()).toEqual([{ user_id: null }])
   expect(db.prepare('select name, type, size from files order by name').all()).toEqual([
     { name: 'notes.bin', type: 'application/octet-stream', size: 1 }, { name: 'shot.png', type: 'image/png', size: 4 }])
 })

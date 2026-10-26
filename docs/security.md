@@ -4,9 +4,11 @@
 
 ## Access
 
-- **Invite-only.** The first admin is created on first boot; everyone else needs an invitation link (7 days, one use).
-- **Per account.** A PR's notes and files are visible only to members of the account that owns its repository (and
-  super admins included). Other users get `404`, so they can't even tell a PR is annotated.
+- **Invite-only** by default. The first admin is created on first boot; everyone else needs an invitation link (7 days,
+  one use), unless GitHub sign-in runs with `ALLOW_SIGNUP=1` ([accounts](accounts.md#sign-in-with-github)).
+- **Per account.** A PR's notes and files are visible only to members of the account that owns its repository (super
+  admins too only where they are members; the one exception is the `DEMO_PR` live demo, readable by every signed-in
+  user). Other users get `404`, so they can't even tell a PR is annotated.
 - **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind `https://` `PUBLIC_URL`), valid 30
   days. Changing your password signs out every other session.
 - **Tokens** (skill, MCP clients, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on
@@ -31,13 +33,20 @@
   only from the note's server, so no outside service learns who opens the app or reads a note. The one opt-in
   exception: with `UMAMI_SCRIPT` set, the landing page (`/` only) loads that Umami script and counts one page view;
   every link from it into the app is a full page load, so the script never runs on the app's pages.
-- **Removing notes** (one, or a whole PR) is for the PR's uploader and the account's owner and admins; the server
-  checks it on every request, the extension only offers it to them and asks for a confirmation, and ignores clicks that
-  a page script fakes (`isTrusted`). Any member may still replace a PR's notes by uploading a new set (that's how a
-  teammate's agent refreshes them after pushing to the same PR); the upload then counts as theirs.
+- **Every note and file has its author**: an upload replaces only the uploader's own, so a member can't wipe a
+  teammate's notes by uploading over them. A note is removed by its author or an account owner or admin, a whole PR by
+  an owner or admin; the server checks it on every request, the extension only offers it to them and asks for a
+  confirmation, and ignores clicks that a page script fakes (`isTrusted`).
+- **GitHub sign-in and invitations**: an invitation doesn't check that whoever accepts it owns the email. So when GitHub
+  sign-in first links a user found by email (a verified one on GitHub), the password, sessions and tokens set before
+  are dropped: the GitHub owner of the address keeps the user alone (and can set a new password). After sign-in it
+  returns only to a path on this site.
+- **Super admins** manage every account but read notes and files only in the ones they belong to; outside them they
+  can't see or make invitations either, so they can't join to read.
 - **Least privilege**: the Docker image runs the app as the unprivileged `node` user; the container starts as root
   only to give `/data` to it.
-- **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk.
+- **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk;
+  `MAX_ACCOUNTS` accounts per user (open sign-up can't multiply the quota), and no uploads to disk below `MIN_FREE_DISK_MB` free.
 
 ## Uploads
 

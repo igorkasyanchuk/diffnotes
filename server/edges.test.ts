@@ -16,6 +16,7 @@ process.env.MAX_PULLS = '2'
 process.env.MAX_FILE_MB = '0.008' // 8388 bytes
 process.env.MAX_VIDEO_MB = '0.012' // 12582 bytes: over the account quota, so that one still shows
 process.env.MAX_FILES = '3'
+process.env.MAX_ACCOUNTS = '3'
 process.env.MAX_ANNOTATIONS = 'many' // not a number: the default (500), never "no limit"
 process.env.BUGSINK_DSN = 'https://key@bugs.example/9'
 process.env.UMAMI_SCRIPT = 'https://stats.example/script.js'
@@ -251,6 +252,20 @@ describe('super admin', () => {
     expect((await call(`/api/pulls/${pull}`, { cookie: admin })).status).toBe(404)
     expect((await call(`/files/${pull}/shot.png`, { cookie: admin })).status).toBe(404)
     expect((await call(`/api/accounts/${own}/overview`, { cookie: admin })).data.totals).toMatchObject({ pulls: 1, annotations: 1, files: 1 })
+    // no way in through an invitation: none to see, none to make
+    await call(`/api/accounts/${own}/invites`, { cookie: dev, body: { email: 'x@example.com' } })
+    expect((await call(`/api/accounts/${own}`, { cookie: admin })).data.invites).toEqual([])
+    expect((await call(`/api/accounts/${own}/invites`, { cookie: admin, body: { email: 'admin@example.com' } })).status).toBe(403)
+    // a user owns MAX_ACCOUNTS accounts at most; a nearly full disk takes no more files
+    for (const name of ['Second', 'Third']) expect((await call('/api/accounts', { cookie: dev, body: { name } })).status).toBe(200)
+    expect((await call('/api/accounts', { cookie: dev, body: { name: 'Fourth' } })).data.error).toMatch(/^You own 3 accounts/)
+    const full = vi.spyOn(fs, 'statfsSync').mockReturnValue({ bavail: 10, bsize: 4096 } as fs.StatsFs)
+    try {
+      const again = new FormData()
+      again.set('payload', JSON.stringify({ annotations: [] }))
+      again.append('file', new File([png() as BlobPart], 'shot.png'))
+      expect((await call('/api/v1/pulls/dev/app/1', { token: devToken, form: again, method: 'PUT' })).status).toBe(507)
+    } finally { full.mockRestore() }
     expect((await call(`/api/pulls/${pull}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
   })
 })
@@ -358,11 +373,23 @@ describe('GitHub sign-in', () => {
       expect((await call(`/auth/github/callback?code=c&state=${d.loc.searchParams.get('state')}`, { headers: { cookie: d.cookie } })).res.headers.get('location')).toContain('did%20not%20answer')
       down.mockRestore()
 
-      // an existing user: found by a verified (here: secondary) email, then by the GitHub id
-      const a = await roundTrip({ id: 8, login: 'boss' }, [mail('boss@gh.example'), mail('admin@example.com', false)], { next: '?next=/settings' })
-      expect(a.to).toBe('/settings')
-      expect((await call('/api/me', { cookie: a.cookie })).data.user.email).toBe('admin@example.com')
-      expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')])).cookie).not.toBe('')
+      // an existing user: found by a verified (here: secondary) email, then by the GitHub id. Whoever accepted its
+      // invitation may not own the address: the first link drops the password, sessions and tokens they set
+      const boss = await invite(accountId, 'boss@example.com', 'boss-password')
+      const bossToken = (await call('/api/tokens', { cookie: boss.cookie, body: {} })).data.token
+      const a = await roundTrip({ id: 8, login: 'boss' }, [mail('boss@gh.example'), mail('boss@example.com', false)], { next: '?next=/%09/evil.example' })
+      expect(a.to).toBe('/dashboard') // /\t/evil.example is //evil.example to a browser
+      expect((await call('/api/me', { cookie: a.cookie })).data).toMatchObject({ user: { email: 'boss@example.com' }, has_password: false, tokens: 0 })
+      expect((await call('/api/me', { cookie: boss.cookie })).data.user).toBeNull()
+      expect((await call('/api/v1/me', { token: bossToken })).status).toBe(401)
+      expect((await call('/api/login', { body: { email: 'boss@example.com', password: 'boss-password' } })).status).toBe(401)
+      // later sign-ins find it by the GitHub id and drop nothing
+      await call('/api/password', { cookie: a.cookie, method: 'PUT', body: { password: 'new-boss-password' } })
+      expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')], { next: '?next=/settings' })).to).toBe('/settings')
+      expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')], { next: '?next=/.//evil.example' })).to).toBe('/dashboard') // dot segments: //evil.example
+      expect((await call('/api/me', { cookie: a.cookie })).data.has_password).toBe(true)
+      // linked: another GitHub account with the same email (moved to it on GitHub) doesn't get in
+      expect((await roundTrip({ id: 80 }, [mail('boss@example.com')])).to).toContain('another%20GitHub%20account')
 
       // an invitation for one of the GitHub emails: the user is made without an account, then joins without a password
       const { token: inv } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { email: 'joiner@example.com' } })).data
@@ -409,8 +436,8 @@ describe('live demo (DEMO_PR)', () => {
     db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run('demo-repo', acc, 'acme/demo', now())
     db.prepare(`insert into pulls (id, repository_id, number, title, user_id, created_at, updated_at, expires_at)
       values ('demo-pull', 'demo-repo', 5, 'Demo', ?, ?, ?, ?)`).run(adminId, now(), now(), past)
-    db.prepare(`insert into annotations (pull_id, path, body) values ('demo-pull', 'a.ts', 'why')`).run()
-    db.prepare(`insert into files (pull_id, name, type, size) values ('demo-pull', 'shot.png', 'image/png', 16)`).run()
+    db.prepare(`insert into annotations (pull_id, path, body, user_id) values ('demo-pull', 'a.ts', 'why', ?)`).run(adminId)
+    db.prepare(`insert into files (pull_id, name, type, size, user_id) values ('demo-pull', 'shot.png', 'image/png', 16, ?)`).run(adminId)
     fs.mkdirSync(path.join(process.env.DATA_DIR!, 'uploads', 'demo-pull'), { recursive: true })
     fs.writeFileSync(path.join(process.env.DATA_DIR!, 'uploads', 'demo-pull', 'shot.png'), png())
     // a stranger: a user of their own account only
@@ -433,9 +460,14 @@ describe('live demo (DEMO_PR)', () => {
       expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
       await purge()
       expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeTruthy() // expired, kept
-      // only a super admin's upload is the demo: the same name in a stranger's account isn't
+      // only what super admins wrote is the demo: a teammate's last upload (its summary, title) keeps it private
       db.prepare("update pulls set user_id = ? where id = 'demo-pull'").run(stranger)
       expect((await call('/api/me', { cookie })).data.demo).toBeNull()
+      db.prepare("update pulls set user_id = ? where id = 'demo-pull'").run(adminId)
+      // and so does one note by anyone else
+      db.prepare(`insert into annotations (pull_id, path, body, user_id) values ('demo-pull', 'b.ts', 'private', ?)`).run(stranger)
+      expect((await call('/api/me', { cookie })).data.demo).toBeNull()
+      expect((await call('/api/v1/pulls/acme/demo/5', { token: tok })).status).toBe(404)
     } finally { delete process.env.DEMO_PR }
     await purge()
     expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeUndefined()

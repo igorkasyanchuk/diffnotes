@@ -2,7 +2,7 @@
 
 ← [README](../README.md)
 
-DiffNotes is invite-only. People belong to **accounts** (teams); repositories belong to one account, and everything about
+DiffNotes is invite-only (unless [GitHub sign-up](#sign-in-with-github) is open). People belong to **accounts** (teams); repositories belong to one account, and everything about
 a PR is visible only to members of the account that owns its repository. Anyone else gets `404`.
 
 ## Roles
@@ -11,7 +11,7 @@ a PR is visible only to members of the account that owns its repository. Anyone 
 |---|---|
 | **owner** | everything an admin can, plus delete the account. One per account (who made it); can't be removed or demoted |
 | **admin** | invite people (as admin or member), change roles, remove members, add and delete repositories, rename the account, remove any PR's notes |
-| **member** | read the account's notes, upload notes with the skill, remove the notes they uploaded |
+| **member** | read the account's notes, upload notes with the skill (each upload replaces only their own), remove their own notes |
 
 A repository is connected to an account on its first upload by an owner or admin (a member's first upload is refused
 until an admin connects it), or added by an admin on the account's **repositories** tab: `owner/name` for GitHub, `host/path` for GitLab
@@ -54,7 +54,8 @@ homepage `https://reviews.company.com`, callback URL `https://reviews.company.co
 **Generate a new client secret** and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` ([install](install.md#environment)).
 
 - The login page gets a **sign in with GitHub** button. It finds the user by their GitHub account, or by any of its
-  verified emails (an existing user is linked on the first GitHub sign-in).
+  verified emails (an existing user is linked on the first GitHub sign-in; its password, sessions and tokens are then
+  dropped, since an invitation never proved who owns the email: set a new password on Settings, make new tokens).
 - Strangers are refused unless an invitation waits for one of their verified emails, or `ALLOW_SIGNUP=1`: then anyone
   with a GitHub account gets a user and a team account they own (open registration; lower `MAX_ACCOUNT_MB` and
   `MAX_PULLS` to taste).

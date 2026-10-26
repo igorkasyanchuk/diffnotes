@@ -26,6 +26,8 @@ services:
       # MAX_BODY_KB: 1024
       # MAX_ACCOUNT_MB: 1024
       # MAX_PULLS: 1000
+      # MAX_ACCOUNTS: 10
+      # MIN_FREE_DISK_MB: 100
       # security
       # SESSION_SECRET: ""                      # default: random, kept in /data
       # ENCRYPTION_KEY: ""                      # default: random, kept in /data

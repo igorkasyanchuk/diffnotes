@@ -34,7 +34,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
 - Access: everything about a PR is visible only to members of the account that owns its repository; other
   accounts' rows answer 404. Tokens are stored as sha256 only.
 - Roles per account (`memberships.role`): `owner` (made it; can't be removed or demoted; deletes the account),
-  `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes the notes it uploaded). `users.admin` = super
+  `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes its own notes;
+  every note and file has its author, `annotations.user_id` / `files.user_id`, and an upload replaces only the uploader's own). `users.admin` = super
   admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account,
   but reads notes and files (`isMember()`) only in accounts it belongs to.
   The first user (bootstrap) is a super admin.

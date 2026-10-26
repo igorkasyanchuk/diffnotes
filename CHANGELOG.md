@@ -16,6 +16,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   expires; `/demo` walks a visitor through extension, account, token and the PR.
 - **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
+### Security
+
+- Notes: a link whose URL held an image could put the image's alt words into the link as HTML attributes (`style`, ...).
+- GitHub sign-in: `next=/<tab>/evil.example` redirected off the site after signing in; only a path here is followed now.
+- GitHub sign-in linking a user by email drops the password, sessions and tokens set before: an invitation accepted by
+  someone who doesn't own the address can no longer be used to read the real owner's accounts later.
+- Super admins read notes and files only in accounts they belong to, and can't see or make invitations in others.
+- Every note and file has its author: an upload replaces only the uploader's own (teammates' stay), so a member can no
+  longer wipe someone else's notes by uploading over them. A note is removed by its author or an admin; *remove my
+  notes* / *delete my notes* for authors, *remove all notes* for admins. `GET` adds `mine` and `can_delete` per note.
+- `MAX_ACCOUNTS` (10) accounts per user and `MIN_FREE_DISK_MB` (100): open sign-up can't fill the disk.
+
 ### Fixed
 
 - Extension: the dock's ↑ (and *summary*) used a box GitHub had already re-rendered away, so ↑ did nothing; it

@@ -136,11 +136,48 @@ describe('diffnotes', () => {
     expect((await call(`/api/v1/annotations/${stale.id}`, { token, method: 'DELETE' })).status).toBe(200)
     expect((await call(`/api/v1/annotations/${stale.id}`, { token, method: 'DELETE' })).status).toBe(404)
     expect((await call('/api/v1/pulls/acme/web/78', { token })).data.annotations.map((a: { body: string }) => a.body)).toEqual(['keep'])
-    // a member who uploads the notes is their uploader, and may remove them
-    expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body: { annotations: [{ path: 'a.ts', body: 'mine' }] } })).status).toBe(200)
-    const mine = (await call('/api/v1/pulls/acme/web/78', { cookie: member })).data
-    expect(mine.can_delete).toBe(true)
-    expect((await call(`/api/v1/annotations/${mine.annotations[0].id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    // every note has its author: a member's upload replaces only their own, teammates' notes and the summary stay
+    await call('/api/v1/pulls/acme/web/78', { token, method: 'PUT', body: { summary: 'by admin', annotations: [{ path: 'a.ts', body: 'keep' }] } })
+    const body = { annotations: [{ path: 'a.ts', body: 'mine' }] }
+    expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })).status).toBe(200)
+    expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })).status).toBe(200)
+    const both = (await call('/api/v1/pulls/acme/web/78', { cookie: member })).data
+    expect(both).toMatchObject({ summary: 'by admin', can_delete: true, can_delete_all: false })
+    expect(both.annotations.map((a: { body: string; can_delete: boolean }) => [a.body, a.can_delete])).toEqual([['keep', false], ['mine', true]])
+    expect((await call(`/api/v1/annotations/${both.annotations[0].id}`, { cookie: member, method: 'DELETE' })).status).toBe(403)
+    expect((await call(`/api/v1/annotations/${both.annotations[1].id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    // nothing of theirs left: "remove" is an admin's only
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).data.error).toMatch(/you have none/)
+    // "remove all" of an author takes their own notes; the PR goes with the last of them
+    await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })
+    expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    expect((await call('/api/v1/pulls/acme/web/78', { token })).data.annotations.map((a: { body: string }) => a.body)).toEqual(['keep'])
+    const solo = new FormData()
+    solo.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: '![s](attachment:solo.png)' }] }))
+    solo.append('file', new File([png()], 'solo.png'))
+    const alone = await call('/api/v1/pulls/acme/web/79', { cookie: member, form: solo, method: 'PUT' })
+    expect((await call(`/api/pulls/${alone.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/pulls/${alone.data.id}`, { cookie: admin })).status).toBe(404)
+    expect(fs.existsSync(path.join(process.env.DATA_DIR!, 'uploads', alone.data.id, 'solo.png'))).toBe(false) // its bytes too
+    // a PR uploaded with a summary only (no notes, no files) is its uploader's to remove
+    const bare = await call('/api/v1/pulls/acme/web/80', { cookie: member, method: 'PUT', body: { summary: 'only this', annotations: [] } })
+    expect((await call(`/api/pulls/${bare.data.id}`, { cookie: member })).data.can_delete).toBe(true)
+    expect((await call(`/api/pulls/${bare.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/pulls/${bare.data.id}`, { cookie: admin })).status).toBe(404)
+    // files too: a teammate's upload keeps the other's, even under the same name
+    const shot = (cookie: string, text: string) => {
+      const form = new FormData()
+      form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: `${text} ![s](attachment:shot.png)` }] }))
+      form.append('file', new File([png(16 + text.length)], 'shot.png'))
+      return call('/api/v1/pulls/acme/web/78', { cookie, form, method: 'PUT' })
+    }
+    await shot(admin, 'admin'); await shot(member, 'member'); await shot(member, 'member again')
+    const files = (await call('/api/v1/pulls/acme/web/78', { token })).data
+    expect(files.files.map((f: { mine: boolean }) => f.mine).sort()).toEqual([false, true]) // the token is the admin's
+    for (const a of files.annotations) {
+      const url = a.body.match(/\/files\/[^)]+/)[0]
+      expect((await call(url, { cookie: admin })).data.length).toBe(16 + a.body.split(' !')[0].length)
+    }
     expect((await call(`/api/pulls/${put.data.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
   })
 
@@ -153,7 +190,9 @@ describe('diffnotes', () => {
     expect((await call(`/api/pulls/${put.data.id}`, { cookie: stranger, method: 'DELETE' })).status).toBe(404)
     // an uploader who has left the account is outside it like anyone else
     const [note] = (await call('/api/v1/pulls/acme/web/77', { token })).data.annotations
-    db.prepare('update pulls set user_id = ? where id = ?').run((await call('/api/me', { cookie: stranger })).data.user.id, put.data.id)
+    const strangerId = (await call('/api/me', { cookie: stranger })).data.user.id
+    db.prepare('update pulls set user_id = ? where id = ?').run(strangerId, put.data.id)
+    db.prepare('update annotations set user_id = ? where id = ?').run(strangerId, note.id) // the note's author, too
     expect((await call(`/api/v1/annotations/${note.id}`, { cookie: stranger, method: 'DELETE' })).status).toBe(404)
     // a member who didn't upload them reads but can't remove; the uploader (or an admin) can
     expect((await call(`/api/pulls/${put.data.id}`, { cookie: member })).data.can_delete).toBe(false)

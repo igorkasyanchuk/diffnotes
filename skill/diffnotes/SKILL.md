@@ -132,8 +132,8 @@ never write it into files or commits.
    python3 check.py diffnotes.json "$BASE"   # check.py: the script under “Check script” below
    ```
    It only proves the places exist; you still reread each note against the code at those lines.
-6. **Upload** (replaces everything uploaded for this PR before: notes you leave out are deleted, so always send the
-   full, current set):
+6. **Upload** (replaces everything you uploaded for this PR before: your notes you leave out are deleted, so always
+   send your full, current set; teammates' notes stay, never re-send them):
    ```bash
    H=${DIFFNOTES_URL:-{{HOST}}}
    curl -sS --fail-with-body -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
@@ -144,10 +144,11 @@ never write it into files or commits.
    `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
    account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
    isn't allowed or doesn't match its extension; `422` = the repository's rules ask for more (a risk on every note, a
-   deploy card, a screenshot or recording for some paths): the message says what, so add it and upload again. A new repository is connected to the account you own or administer on
+   deploy card, a screenshot or recording for some paths): the message says what, so add it and upload again; `507` =
+   the server is low on disk space (tell the user, its admin has to free some). A new repository is connected to the account you own or administer on
    its first upload.
 7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
-   was stored; the `annotations` count must match what you wrote.
+   was stored; the count of `annotations` with `"mine": true` must match what you wrote (teammates' are listed too).
 
 ## After new commits: keep the notes true
 
@@ -156,10 +157,11 @@ push to an annotated PR (or are asked to refresh its notes):
 
 1. Fetch what is stored: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" > old.json`
    (`404` = nothing stored yet).
-2. Read the new diff (workflow step 2) and go through every stored note: keep it only if its file is still changed,
+2. Read the new diff (workflow step 2) and go through every stored note with `"mine": true` (the others are
+   teammates': leave them out of your upload, they stay as they are): keep it only if its file is still changed,
    its block still exists (fix moved line numbers) and its words still describe the code. Rewrite what changed,
-   drop what no longer applies, add notes for new blocks. Keep the attachments that still show the current state
-   (re-upload them with the payload; old files are replaced too).
+   drop what no longer applies, add notes for new blocks. Keep the attachments (`"mine": true` in `files`) that still
+   show the current state (re-upload them with the payload; your old files are replaced too).
 3. Run the check (step 5) and upload the full set (step 6). Notes you drop disappear for reviewers right away.
 
 **Remove all notes** of a PR when none of them holds any more and you have nothing new to say, when the PR is closed
@@ -169,9 +171,11 @@ without merging, or when the user asks:
 curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"   # → {"ok":true}
 ```
 
-`403` = a teammate uploaded these notes and you are only a member: ask them or an account admin to remove them.
+For an account admin that removes everyone's notes; for anyone else only their own (`403` = none of them are yours:
+ask their author or an account admin). So when `old.json` holds notes or files with `"mine": false` (a teammate's) and
+only yours are to go, upload an empty set instead (step 6 with `{"annotations": []}`): yours go, theirs stay.
 
-The PR's uploader and account admins can also remove single notes or all of them right in the diff (**remove note**,
+A note's author and account admins can also remove it right in the diff (**remove note**, **remove my notes** /
 **remove all notes**) or with **delete notes** on the PR's page in DiffNotes; a re-run must not bring removed notes
 back unless they are true again.
 

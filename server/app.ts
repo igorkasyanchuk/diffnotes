@@ -30,6 +30,8 @@ const MAX_ANNOTATIONS = limit('MAX_ANNOTATIONS', 500) // per pull request
 const RISKS = ['low', 'medium', 'high'] // an annotation's optional risk: where reviewers should look hardest
 const MAX_ACCOUNT = limit('MAX_ACCOUNT_MB', 1024) * MB // files of all of an account's pull requests
 const MAX_PULLS = limit('MAX_PULLS', 1000) // live pull requests per account
+const MAX_ACCOUNTS = limit('MAX_ACCOUNTS', 10) // accounts one user owns: with open sign-up, each one more quota
+const MIN_FREE_DISK = limit('MIN_FREE_DISK_MB', 100) * MB // uploads to disk stop before the volume is full
 const INVITE_DAYS = 7
 const ROOT = path.resolve(import.meta.dirname, '..')
 // without PUBLIC_URL the Host header decides, and it lands in install.sh (shell) and HTML: only a plain host[:port] passes
@@ -189,7 +191,8 @@ app.post('/api/login', async (c) => {
   const email = str(body.email).toLowerCase(), keys = loginKeys(c, email)
   if (throttled(keys)) return c.json({ error: 'Too many attempts, wait a bit' }, 429)
   const row = db.prepare('select id, password from users where email = ?').get(email) as { id: string; password: string } | undefined
-  if (!verifyPassword(String(body.password ?? ''), row?.password ?? DUMMY_HASH) || !row) {
+  // || not ??: a GitHub user without a password ('') costs the same scrypt as a stranger, so timing tells neither apart
+  if (!verifyPassword(String(body.password ?? ''), row?.password || DUMMY_HASH) || !row) {
     failed(keys)
     return c.json({ error: 'Wrong email or password' }, 401)
   }
@@ -212,12 +215,17 @@ const github = () => (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_
 const signupOpen = () => !!github() && process.env.ALLOW_SIGNUP === '1'
 const GH_COOKIE = { httpOnly: true, sameSite: 'Lax', path: '/auth/github', maxAge: 600, secure: (process.env.PUBLIC_URL ?? '').startsWith('https://') } as const
 
+// only a path on this site to come back to: parsed like a browser does (it drops tabs and newlines, so /\t/evil.example
+// is //evil.example) and handed back as parsed; dot segments can leave // in front too (/.//evil.example), never followed
+const localPath = (next: string) => {
+  const u = URL.parse(next, 'http://local'), ok = next.startsWith('/') && u?.origin === 'http://local' && !u.pathname.startsWith('//')
+  return ok ? `${u.pathname}${u.search}${u.hash}` : '/dashboard'
+}
 app.get('/auth/github', async (c) => {
   const gh = github()
   if (!gh) return c.notFound()
   const state = randomBytes(16).toString('base64url'), next = c.req.query('next') ?? ''
-  // only a path on this site to come back to, never //evil.example
-  await setSignedCookie(c, 'gh', JSON.stringify({ state, next: /^\/(?![/\\])/.test(next) ? next : '/dashboard' }), SECRET, GH_COOKIE)
+  await setSignedCookie(c, 'gh', JSON.stringify({ state, next: localPath(next) }), SECRET, GH_COOKIE)
   const q = new URLSearchParams({ client_id: gh.id, redirect_uri: `${host(c)}/auth/github/callback`, scope: 'user:email', state })
   return c.redirect(`https://github.com/login/oauth/authorize?${q}`)
 })
@@ -248,9 +256,22 @@ app.get('/auth/github/callback', async (c) => {
   // the primary email first: that's the one a new user gets
   const verified = (Array.isArray(emails) ? emails : []).filter((e) => e.verified).sort((a, b) => Number(b.primary) - Number(a.primary)).map((e) => e.email)
   if (!profile?.id || !verified.length) return back('Your GitHub account needs a verified email')
-  const ghId = String(profile.id), byEmail = db.prepare('select id from users where email = ?')
+  const ghId = String(profile.id), byEmail = db.prepare('select id, github_id from users where email = ?')
   let userId = (db.prepare('select id from users where github_id = ?').get(ghId) as { id: string } | undefined)?.id
-    ?? verified.map((e) => (byEmail.get(e) as { id: string } | undefined)?.id).find(Boolean)
+  if (!userId) {
+    const found = verified.map((e) => byEmail.get(e) as { id: string; github_id: string | null } | undefined).find(Boolean)
+    // linked already, to another GitHub account (not this id, or the lookup above found it): that one signs it in
+    if (found?.github_id) return back('That DiffNotes user signs in with another GitHub account')
+    userId = found?.id
+    // An email match proves only that someone made this user with that address: an invitation checks no email, so its
+    // password may be a stranger's who invited the address to their own account. GitHub verified it: on this first link
+    // the user is GitHub's alone, and the password, sessions and tokens anyone else set go.
+    if (found) {
+      db.prepare(`update users set password = '' where id = ?`).run(found.id)
+      db.prepare('delete from sessions where user_id = ?').run(found.id)
+      db.prepare('delete from tokens where user_id = ?').run(found.id)
+    }
+  }
   if (!userId) {
     const invited = verified.find((e) => db.prepare('select 1 from invites where email = ? and expires_at > ?').get(e, now()))
     if (!invited && !signupOpen()) return back('No DiffNotes user for this GitHub account: ask a teammate for an invitation')
@@ -416,8 +437,10 @@ app.get('/api/dashboard', (c) => {
 })
 
 app.post('/api/accounts', async (c) => {
-  const name = str((await json(c)).name, 80) || fail(400, 'Name is required')
-  return c.json({ id: createAccount(name, c.get('user').id) })
+  const name = str((await json(c)).name, 80) || fail(400, 'Name is required'), user = c.get('user')
+  if ((db.prepare(`select count(*) as n from memberships where user_id = ? and role = 'owner'`).get(user.id) as { n: number }).n >= MAX_ACCOUNTS)
+    fail(409, `You own ${MAX_ACCOUNTS} accounts, the most one user can; delete one first`)
+  return c.json({ id: createAccount(name, user.id) })
 })
 
 app.get('/api/accounts/:id', (c) => {
@@ -427,7 +450,8 @@ app.get('/api/accounts/:id', (c) => {
     where m.account_id = ? order by u.email`).all(id)
   const repositories = (db.prepare(`select r.id, r.full_name, r.rules, (select count(*) from pulls p where p.repository_id = r.id) as pulls
     from repositories r where r.account_id = ? order by r.full_name`).all(id) as { rules: string }[]).map((r) => ({ ...r, rules: JSON.parse(r.rules) }))
-  const invites = canManage(my)
+  // a super admin outside the account manages it but can't see or make invitations: one would let them join and read
+  const invites = canManage(my) && memberRole(id, user.id)
     ? db.prepare('select token, email, role, expires_at from invites where account_id = ? order by created_at desc').all(id) : []
   return c.json({ account, role: my, members, repositories, invites })
 })
@@ -487,6 +511,7 @@ app.delete('/api/accounts/:id', async (c) => {
 app.post('/api/accounts/:id/invites', async (c) => {
   const id = c.req.param('id'), user = c.get('user'), body = await json(c)
   requireAdmin(id, user)
+  if (!memberRole(id, user.id)) fail(403, 'Super admins invite people only into accounts they belong to')
   const email = str(body.email).toLowerCase()
   if (!/^[^@\s]+@[^@\s]+$/.test(email)) fail(400, 'Enter an email address')
   const token = randomBytes(24).toString('base64url')
@@ -569,28 +594,42 @@ type Pull = { id: string; number: number; title: string; head_sha: string; summa
 const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.deploy, p.updated_at, p.expires_at, r.full_name, r.account_id, p.user_id
   from pulls p join repositories r on r.id = p.repository_id`
 
-// Removing notes is for whoever uploaded them (the PR's author, through their agent) and the account's owner and admins;
-// other members read. can_delete tells the extension and the web app whether to offer it. role() first, always: an
-// uploader who has left the account gets 404 like anyone else outside it.
-const canRemove = (p: Pull, user: User) => canManage(role(p.account_id, user)) || p.user_id === user.id
-const requireRemove = (p: Pull, user: User) => { if (!canRemove(p, user)) fail(403, 'Only the PR\'s uploader or an account admin can remove its notes') }
+// Every note and file has its author. Authors replace and remove their own; the account's owner and admins remove any,
+// or the whole PR; other members read. can_delete (per note, and on the PR: anything of it to remove) tells the extension
+// and the web app what to offer. role() first, always: an author who has left the account gets 404 like anyone else outside it.
+const isAdminOf = (p: Pull, user: User) => canManage(role(p.account_id, user))
+// any note or file on the PR (by that author, or by anyone)
+const holds = (pull: string, author: string | null = null) => !!db.prepare(`select 1 from annotations where pull_id = ?1 and (?2 is null or user_id = ?2)
+  union all select 1 from files where pull_id = ?1 and (?2 is null or user_id = ?2) limit 1`).get(pull, author)
+// yours: notes or files you wrote, or a PR you uploaded with neither (a summary, a deploy card only)
+const owns = (p: Pull, user: User) => holds(p.id, user.id) || (p.user_id === user.id && !holds(p.id))
 
 function pullOut(p: Pull, user: User) {
-  const annotations = db.prepare('select id, path, line, end_line, side, title, body, risk from annotations where pull_id = ? order by position').all(p.id)
-  const files = (db.prepare('select name, type, size from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number }[])
-    .map((f) => ({ ...f, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
+  const member = isMember(p.account_id, user), admin = member && isAdminOf(p, user)
+  // mine: what your next upload replaces; teammates' notes and files stay
+  const annotations = (db.prepare('select id, path, line, end_line, side, title, body, risk, user_id from annotations where pull_id = ? order by position, id')
+    .all(p.id) as { user_id: string | null }[]).map(({ user_id, ...a }) => ({ ...a, mine: user_id === user.id, can_delete: admin || (member && user_id === user.id) }))
+  const files = (db.prepare('select name, type, size, user_id from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number; user_id: string | null }[])
+    .map(({ user_id, ...f }) => ({ ...f, mine: user_id === user.id, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary, deploy: p.deploy,
-    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files, can_delete: isMember(p.account_id, user) && canRemove(p, user),
+    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
+    can_delete: admin || (member && owns(p, user)), can_delete_all: admin,
   }
 }
 
 // DEMO_PR=owner/name#12 (or the PR's URL, for env files that read # as a comment): the landing page's live demo. That pull request's notes, as a super admin uploaded them, are
 // readable by every signed-in user (anyone can sign up, connect the extension and see them) and never expire.
 export const demoPull = () => {
-  const m = (process.env.DEMO_PR ?? '').trim().match(/^(.+?)(?:#|\/pull\/|\/-\/merge_requests\/|\/pull-requests\/)(\d+)\/?$/)
+  // a URL may go on past the number (…/pull/12/files, …/merge_requests/12/diffs)
+  const m = (process.env.DEMO_PR ?? '').trim().match(/^(.+?)(?:#|\/pull\/|\/-\/merge_requests\/|\/pull-requests\/)(\d+)(?:[/?#].*)?$/)
   if (!m) return
-  return db.prepare(`${PULL_SELECT} join users u on u.id = p.user_id where r.full_name = ? and p.number = ? and u.admin = 1
+  // a PR whose last upload (title, summary, deploy card) and every note and file a super admin wrote: a teammate's upload
+  // there would turn public otherwise
+  const byAdmin = (t: string) => `not exists (select 1 from ${t} x left join users u on u.id = x.user_id where x.pull_id = p.id and u.admin is not 1)`
+  return db.prepare(`${PULL_SELECT} join users pu on pu.id = p.user_id where r.full_name = ? and p.number = ? and pu.admin = 1
+    and ${byAdmin('annotations')} and ${byAdmin('files')}
+    and exists (select 1 from annotations a join users u on u.id = a.user_id where a.pull_id = p.id and u.admin = 1)
     order by p.updated_at desc limit 1`).get(repoName(m[1]), Number(m[2])) as Pull | undefined
 }
 // reading notes and files takes a membership: a super admin manages every account but sees only counts of what others wrote
@@ -629,9 +668,15 @@ app.get('/api/pulls/:id', (c) => {
   requireMember(p, c.get('user'))
   return c.json(pullOut(p, c.get('user')))
 })
+// an admin removes the whole PR; an author their own notes and files (the PR goes with the last of them)
 const removeAll = async (user: User, p: Pull) => {
-  requireRemove(p, user)
-  await dropPulls([p.id])
+  if (isAdminOf(p, user)) { await dropPulls([p.id]); return { ok: true } }
+  if (!owns(p, user)) fail(403, 'Only an account admin can remove teammates\' notes: you have none on this PR')
+  const files = db.prepare('select pull_id as pull, name, backend from files where pull_id = ? and user_id = ?').all(p.id, user.id) as { pull: string; name: string; backend: string }[]
+  db.prepare('delete from annotations where pull_id = ? and user_id = ?').run(p.id, user.id)
+  db.prepare('delete from files where pull_id = ? and user_id = ?').run(p.id, user.id)
+  if (!holds(p.id)) await dropPulls([p.id]) // its rows of yours are gone already: your bytes go below either way
+  await store.remove(files)
   return { ok: true }
 }
 // "delete notes" (web app): by id, so it's always the PR on the page even when its name is connected in several accounts
@@ -639,8 +684,9 @@ app.delete('/api/pulls/:id', async (c) => c.json(await removeAll(c.get('user'), 
 // one note, from the extension's "remove" on GitHub, GitLab or Bitbucket; the PR and its files stay
 app.delete('/api/v1/annotations/:id{[0-9]+}', (c) => {
   const id = Number(c.req.param('id'))
-  const a = db.prepare('select pull_id from annotations where id = ?').get(id) as { pull_id: string } | undefined
-  requireRemove(pullById(c, a?.pull_id ?? ''), c.get('user'))
+  const a = db.prepare('select pull_id, user_id from annotations where id = ?').get(id) as { pull_id: string; user_id: string | null } | undefined
+  const p = pullById(c, a?.pull_id ?? ''), user = c.get('user')
+  if (!isAdminOf(p, user) && a!.user_id !== user.id) fail(403, 'Only the note\'s author or an account admin can remove it')
   db.prepare('delete from annotations where id = ?').run(id)
   return c.json({ ok: true })
 })
@@ -691,7 +737,7 @@ function repositoryFor(fullName: string, number: number, user: User): { id: stri
   return { id: null, account_id: acc?.account_id ?? fail(403, `${fullName} is not connected to your account yet: ask an account admin to connect it in DiffNotes`) }
 }
 
-// Replaces the pull request's annotations and files: re-running the skill after a push is idempotent.
+// Replaces the uploader's own annotations and files on the pull request (teammates' stay): re-running the skill after a push is idempotent.
 // Body: JSON, or multipart with a `payload` JSON field plus `file` fields; `attachment:<name>` in Markdown becomes the file's URL.
 app.put(PULL_PATH, async (c) => {
   let payload: unknown, files: Upload[] = []
@@ -760,6 +806,12 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
 
   const fullName = repoName(repo), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
   const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoFound, number) as { id: string } | undefined
+  // an upload replaces the uploader's own notes and files; teammates' stay, and count towards the PR's limits
+  // (taken: their file names, which this upload's files don't get)
+  const theirNotes = existing ? (db.prepare('select count(*) as n from annotations where pull_id = ? and user_id is not ?').get(existing.id, user.id) as { n: number }).n : 0
+  const taken = existing ? (db.prepare('select name from files where pull_id = ? and user_id is not ?').all(existing.id, user.id) as { name: string }[]).map((f) => f.name) : []
+  if (theirNotes + list.length > MAX_ANNOTATIONS) fail(413, `At most ${MAX_ANNOTATIONS} annotations per pull request, teammates' included`)
+  if (taken.length + files.length > MAX_FILES) fail(413, `At most ${MAX_FILES} files per pull request, teammates' included`)
   const deploy = str(payload.deploy, 20_000) // blank or not a string: no card
   const notes = list.map((a, i) => ({ path: str(a.path, 500) || fail(400, `annotations[${i}].path is required`), risk: RISKS.includes(a.risk as string) ? a.risk as string : null }))
   const rules = repoFound ? JSON.parse((db.prepare('select rules from repositories where id = ?').get(repoFound) as { rules: string }).rules) as Rules : {}
@@ -769,8 +821,13 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   if (!existing && (db.prepare('select count(*) as n from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').get(accountId) as { n: number }).n >= MAX_PULLS)
     fail(413, `This account has ${MAX_PULLS} pull requests with notes, the most it can; delete some or wait for them to expire`)
   const used = (db.prepare(`select coalesce(sum(f.size), 0) as n from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id
-    where r.account_id = ? and p.id is not ?`).get(accountId, existing?.id ?? null) as { n: number }).n
-  if (used + datas.reduce((n, d) => n + d.length, 0) > MAX_ACCOUNT) fail(413, `This account's files are over ${MAX_ACCOUNT / MB}MB; delete some pull requests or wait for them to expire`)
+    where r.account_id = ? and not (p.id is ? and f.user_id is ?)`).get(accountId, existing?.id ?? null, user.id) as { n: number }).n
+  const bytes = datas.reduce((n, d) => n + d.length, 0)
+  if (bytes && store.current() === 'disk') {
+    const disk = fs.statfsSync(DATA_DIR)
+    if (disk.bavail * disk.bsize - bytes < MIN_FREE_DISK) fail(507, 'The server is low on disk space: ask its admin')
+  }
+  if (used + bytes > MAX_ACCOUNT) fail(413, `This account's files are over ${MAX_ACCOUNT / MB}MB; delete some pull requests or wait for them to expire`)
   // connected only now: a refused upload leaves nothing behind
   const repoId = repoFound ?? randomUUID()
   if (!repoFound) db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run(repoId, accountId, fullName, now())
@@ -779,7 +836,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const names = new Map<string, string>(), stored: string[] = []
   for (const f of files) {
     let name = safeName(f.name)
-    while (stored.includes(name)) name = `${randomBytes(2).toString('hex')}-${name.slice(-95)}`
+    while (stored.includes(name) || taken.includes(name)) name = `${randomBytes(2).toString('hex')}-${name.slice(-95)}`
     stored.push(name)
     if (!names.has(f.name)) names.set(f.name, name)
   }
@@ -787,30 +844,37 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
     names.has(n) ? `/files/${id}/${encodeURIComponent(names.get(n)!)}` : m)
 
   const summaryMd = link(String(payload.summary ?? '').slice(0, 20_000)), deployMd = link(deploy)
+  // after teammates' notes, so each author's stay together and in their own order
+  const base = existing ? (db.prepare('select coalesce(max(position), -1) + 1 as n from annotations where pull_id = ? and user_id is not ?').get(id, user.id) as { n: number }).n : 0
   const rows = list.map((a, i) => {
     const line = Number.isInteger(a.line) && (a.line as number) > 0 ? a.line as number : null
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
-    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), i, notes[i].risk] as const
+    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk] as const
   })
   // the previous upload's files go once the new rows are in, then the new files are written under the current backend
-  const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ?').all(id) as { pull: string; name: string; backend: string }[]
+  const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ? and user_id is ?').all(id, user.id) as { pull: string; name: string; backend: string }[]
   const backend = store.current()
   db.exec('begin')
   try {
     if (existing) {
-      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, deploy = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
-        .run(str(payload.title, 300), str(payload.head_sha, 64), summaryMd, deployMd, user.id, now(), daysFromNow(RETENTION_DAYS), id)
-      db.prepare('delete from annotations where pull_id = ?').run(id)
+      // the PR's own fields (title, commit, summary, deploy card) are the latest upload's; while teammates' notes or
+      // files are there, a blank one keeps what it was (their upload may have set it, and its summary link their files)
+      const keep = theirNotes + taken.length > 0 ? 1 : 0
+      db.prepare(`update pulls set title = iif(? and ? = '', title, ?), head_sha = iif(? and ? = '', head_sha, ?),
+        summary = iif(? and ? = '', summary, ?), deploy = iif(? and ? = '', deploy, ?), user_id = ?, updated_at = ?, expires_at = ? where id = ?`)
+        .run(...[str(payload.title, 300), str(payload.head_sha, 64), summaryMd, deployMd].flatMap((v) => [keep, v, v]),
+          user.id, now(), daysFromNow(RETENTION_DAYS), id)
+      db.prepare('delete from annotations where pull_id = ? and user_id is ?').run(id, user.id)
     } else {
       db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, user_id, created_at, updated_at, expires_at)
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload.title, 300), str(payload.head_sha, 64),
         summaryMd, deployMd, user.id, now(), now(), daysFromNow(RETENTION_DAYS))
     }
-    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    for (const r of rows) ins.run(...r)
-    db.prepare('delete from files where pull_id = ?').run(id)
-    const add = db.prepare('insert into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, ?)')
-    for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend)
+    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    for (const r of rows) ins.run(...r, user.id)
+    db.prepare('delete from files where pull_id = ? and user_id is ?').run(id, user.id)
+    const add = db.prepare('insert into files (pull_id, name, type, size, backend, user_id) values (?, ?, ?, ?, ?, ?)')
+    for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend, user.id)
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }
   // ponytail: rows commit before the bytes land; a failed write shows as a missing image until the next upload.
@@ -836,14 +900,15 @@ const TOOLS = [
     name: 'get_notes', title: 'Read DiffNotes notes',
     description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, annotations (path, line, end_line, side, title, body, risk) and attached files. ' +
       'Use it before re-annotating after new commits, to keep what still applies. Bodies, the summary and the deploy card link files as /files/…: ' +
-      'every upload replaces all files, so to keep one, attach it again and write it as attachment:<name>. ' +
+      'mine marks your own notes and files: your next upload replaces those, teammates\' stay, so never re-send theirs. ' +
+      'To keep one of your files, attach it again and write it as attachment:<name>. ' +
       'Errors with "No annotations" when the PR has none.',
     inputSchema: { type: 'object', properties: target, required: ['repo', 'number'] },
   },
   {
     name: 'upload_notes', title: 'Annotate a pull request',
     description: 'Upload plain-language notes on a pull request (GitHub PR, GitLab MR, Bitbucket PR) for its reviewers; they see them inside the diff ' +
-      'through the DiffNotes browser extension. Nothing is posted to GitHub, GitLab or Bitbucket. Replaces all of the PR\'s notes and files: ' +
+      'through the DiffNotes browser extension. Nothing is posted to GitHub, GitLab or Bitbucket. Replaces all of your notes and files on the PR (teammates\' stay): ' +
       'send the full set every time (re-running after a push is safe).\n' +
       'Rules: notes describe the PR\'s current head commit only (set head_sha to it; re-upload after new commits). One note per changed block ' +
       '(a function, a hunk), not per line and not one per file; path and line / end_line in the new file (side RIGHT), side LEFT only for removed lines. ' +
@@ -897,7 +962,8 @@ const TOOLS = [
   },
   {
     name: 'delete_notes', title: 'Remove DiffNotes notes',
-    description: 'Removes all notes and files of a pull request, e.g. when they no longer apply. Only their uploader or an account admin can.',
+    description: 'Removes your notes and files on a pull request, e.g. when they no longer apply; an account admin removes everyone\'s ' +
+      '(to remove only yours while teammates\' notes stay, call upload_notes with an empty annotations list instead).',
     inputSchema: { type: 'object', properties: target, required: ['repo', 'number'] },
   },
 ]

@@ -88,6 +88,17 @@ for (const sql of ['alter table annotations add column risk text', "alter table 
   "alter table repositories add column rules text not null default '{}'", 'alter table users add column github_id text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 db.exec('create unique index if not exists users_github on users(github_id)')
+// every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's
+// last uploader's (each upload replaced everything); filled once, as the column is added, in one transaction (a stop
+// in between would leave the column there and the rows authorless for good)
+for (const t of ['annotations', 'files']) {
+  db.exec('begin')
+  try {
+    db.exec(`alter table ${t} add column user_id text references users(id) on delete set null`)
+    db.exec(`update ${t} set user_id = (select p.user_id from pulls p where p.id = ${t}.pull_id)`)
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
+}
 
 export const now = () => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
@@ -186,7 +197,8 @@ export function purgeExpired(keep = '') { // keep: the live demo's pull request 
 // Files written before the files table existed: one row per file found on disk, once (on later boots a file without a
 // row is a leftover of an interrupted replace or delete, not an attachment)
 if (!getSetting('files_migrated')) {
-  const add = db.prepare(`insert or ignore into files (pull_id, name, type, size, backend) values (?, ?, ?, ?, 'disk')`)
+  // their author is the PR's uploader, like the rows the user_id column was filled for above
+  const add = db.prepare(`insert or ignore into files (pull_id, name, type, size, backend, user_id) values (?1, ?2, ?3, ?4, 'disk', (select user_id from pulls where id = ?1))`)
   for (const pull of fs.readdirSync(UPLOADS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
     if (!db.prepare('select 1 from pulls where id = ?').get(pull)) continue
     for (const f of fs.readdirSync(path.join(UPLOADS, pull), { withFileTypes: true }).filter((e) => e.isFile())) {

@@ -14,7 +14,7 @@ declare global {
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -442,7 +442,8 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
     </div>
     {err && <div className="error">{err}</div>}
     <p className="hint">owner: made the account · admin: invites people, manages members and repositories · member: reads and uploads notes</p>
-    {admin && <>
+    {/* a super admin outside the account manages it but can't invite (the server refuses) */}
+    {admin && data.members.some((m) => m.id === user.id) && <>
       <h2>invitations</h2>
       {!!data.invites.length && <div className="list">
         {data.invites.map((i) => <div key={i.token}>
@@ -536,7 +537,8 @@ function PullPage({ id }: { id: string }) {
     <h1>{data.title || 'untitled pull request'}</h1>
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
       {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
-        'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.')}>delete notes</button>}</p>
+        data.can_delete_all ? 'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.'
+          : 'Delete your notes and files on this pull request? Teammates\' notes stay.')}>{data.can_delete_all ? 'delete notes' : 'delete my notes'}</button>}</p>
     {data.deploy && <div className="card deploy"><h3>deploy</h3><Md text={data.deploy} /></div>}
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
     {risky.length > 0 && <div className="card risks">

@@ -48,6 +48,9 @@ describe('dnMarkdown', () => {
     expect(md('[ok](https://a.example/?a=1&b=2)')).toBe('<p><a href="https://a.example/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">ok</a></p>')
     expect(md('`**not bold**`')).toBe('<p><code>**not bold**</code></p>')
     expect(md('a\u0000b')).toBe('<p>ab</p>')
+    // a URL holding an image that's already rendered would put that tag's alt words inside href="…" as attributes
+    expect(md('[x](/![a onmouseover=alert(1) b](/y.png))')).toBe('<p>[x](/<img alt="a onmouseover=alert(1) b" src="/y.png" data-dn-src="/y.png">)</p>')
+    expect(md('![a `b`](/y.png)')).toBe('<p><img alt="a " src="/y.png" data-dn-src="/y.png"></p>')
   })
 
   it('loads images only from the note server and resolves /files/ paths', () => {
