@@ -35,7 +35,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
   accounts' rows answer 404. Tokens are stored as sha256 only.
 - Roles per account (`memberships.role`): `owner` (made it; can't be removed or demoted; deletes the account),
   `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes the notes it uploaded). `users.admin` = super
-  admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account.
+  admin: runs the server, sees `/admin` (`/api/admin/*`, 404 for others) and may open and manage any account,
+  but reads notes and files (`isMember()`) only in accounts it belongs to.
   The first user (bootstrap) is a super admin.
 - Annotation Markdown is untrusted: render it only through `dnMarkdown` (escapes everything, keeps http(s) and relative URLs).
 - `/files/*` is served with `CSP: sandbox` + `nosniff`; text uploads as `text/plain`. `.html` demos are the exception:

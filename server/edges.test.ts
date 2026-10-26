@@ -244,7 +244,7 @@ describe('super admin', () => {
     const devToken = (await call('/api/tokens', { cookie: dev, body: {} })).data.token
     const form = new FormData()
     form.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: 'secret' }] }))
-    form.append('file', new File([png as BlobPart], 'shot.png'))
+    form.append('file', new File([png() as BlobPart], 'shot.png'))
     const pull = (await call('/api/v1/pulls/dev/app/1', { token: devToken, form, method: 'PUT' })).data.id
     expect((await call(`/files/${pull}/shot.png`, { token: devToken })).status).toBe(200)
     expect((await call('/api/v1/pulls/dev/app/1', { token })).status).toBe(404)

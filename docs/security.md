@@ -6,7 +6,7 @@
 
 - **Invite-only.** The first admin is created on first boot; everyone else needs an invitation link (7 days, one use).
 - **Per account.** A PR's notes and files are visible only to members of the account that owns its repository (and
-  super admins). Other users get `404`, so they can't even tell a PR is annotated.
+  super admins included). Other users get `404`, so they can't even tell a PR is annotated.
 - **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind `https://` `PUBLIC_URL`), valid 30
   days. Changing your password signs out every other session.
 - **Tokens** (skill, MCP clients, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on

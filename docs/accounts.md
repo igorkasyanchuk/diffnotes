@@ -72,6 +72,7 @@ storage per repository, and the latest uploads with who uploaded them.
 The first user (created on first boot) is a **super admin**: the person who runs the server. Super admins see
 **server admin** (`/admin`): users, accounts, PRs, notes, uploads in the last 24 h / 7 days, files, upload and database
 size, free disk; they can open and manage every account, make other users super admins, and choose where files are
-stored ([storage](storage.md)). Nobody can change their own super admin flag, so the server always keeps one.
+stored ([storage](storage.md)). In an account they are not a member of they see counts and PR titles, never the
+notes or files themselves (`404`), and they can still delete a PR's notes. Nobody can change their own super admin flag, so the server always keeps one.
 
 <img src="images/server-admin.png" alt="Server admin" width="700">
