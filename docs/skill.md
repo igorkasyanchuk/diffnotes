@@ -9,7 +9,7 @@ reads is [`skill/diffnotes/SKILL.md`](../skill/diffnotes/SKILL.md), also served 
 ## Install
 
 ```bash
-curl -fsSL https://reviews.company.com/install.sh | sh
+curl -fsSL https://reviews.example.com/install.sh | sh
 ```
 
 It writes the skill to `~/.claude/skills/diffnotes`, `~/.agents/skills/diffnotes` and, when Cursor is installed,
@@ -17,7 +17,7 @@ It writes the skill to `~/.claude/skills/diffnotes`, `~/.agents/skills/diffnotes
 your shell profile:
 
 ```bash
-export DIFFNOTES_URL=https://reviews.company.com
+export DIFFNOTES_URL=https://reviews.example.com
 export DIFFNOTES_TOKEN=dn_…
 ```
 
@@ -101,20 +101,20 @@ better notes (it checks every note against the diff before uploading), so prefer
 
 ```bash
 # Claude Code
-claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
+claude mcp add --transport http diffnotes https://reviews.example.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
 ```
 
 Cursor, `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 
 ```json
-{ "mcpServers": { "diffnotes": { "url": "https://reviews.company.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
+{ "mcpServers": { "diffnotes": { "url": "https://reviews.example.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
 ```
 
 Codex, `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.diffnotes]
-url = "https://reviews.company.com/mcp"
+url = "https://reviews.example.com/mcp"
 bearer_token_env_var = "DIFFNOTES_TOKEN"
 ```
 

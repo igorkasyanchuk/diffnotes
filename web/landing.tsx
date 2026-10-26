@@ -22,7 +22,7 @@ const BENEFITS: [string, string][] = [
   ['diagrams in the diff', 'A flow or a state change drawn right above the code that implements it, from a Mermaid flowchart the agent writes. No library, no network.'],
   ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones, and reviewers see what changed since their last visit.'],
   ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
-  ['your server, your data', 'Self-hosted: code context never leaves your infrastructure. Notes expire on their own (after 30 days by default).'],
+  ['your server, your data', 'Run your own server and code context never leaves your infrastructure (or try it on diffnotes.dev). Notes expire on their own (after 30 days by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 
@@ -72,13 +72,13 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>run the server</b></div>
         <p className="hint">One container with a volume. Free and open source (MIT), also for commercial use.</p>
-        <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com diffnotes'} />
-        <p className="hint">Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs.</p>
+        <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
+        <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs.</p>
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>give your agent the skill</b></div>
         <p className="hint">Installs for Claude Code, Codex, Cursor and other Agent Skills tools. Then make a token in settings.</p>
-        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
+        <Code prompt text={'curl -fsSL https://reviews.example.com/install.sh | sh'} />
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>

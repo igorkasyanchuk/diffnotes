@@ -90,7 +90,7 @@ never write it into files or commits.
    git remote get-url origin   # tells you the host
    # GitHub
    gh pr view --json number,title,headRefOid,url,baseRefName
-   REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)                        # owner/name
+   REPO=$(gh pr view --json url -q '.url | split("/")[3:5] | join("/")')   # owner/name of the PR's repository (in a fork too)
    # GitLab (glab, or ask for the MR URL: …/-/merge_requests/<number>); the number is the MR's !iid
    glab mr view --output json   # iid, title, sha, target_branch
    # Bitbucket: ask for the PR URL (bitbucket.org/<team>/<repo>/pull-requests/<number>)
@@ -100,7 +100,8 @@ never write it into files or commits.
    A full URL also works as `$REPO` once its `https://` is dropped. Ask the user for the number if no CLI tells you.
 2. **Read the change from git, not from memory.**
    ```bash
-   BASE=$(git merge-base origin/<baseRefName> HEAD)
+   git fetch origin <baseRefName>                             # a stale origin/ gives the wrong base; in a fork use the
+   BASE=$(git merge-base origin/<baseRefName> HEAD)           # remote of the PR's repository (often upstream) in both lines
    git diff $BASE HEAD --name-status                          # A = new, M = edited, R = renamed, D = deleted
    git diff $BASE HEAD -U0 -- . ':!spec' ':!test' ':!*.test.*' # each hunk header @@ -old,n +new,m @@ ≈ one block
    ```
@@ -141,12 +142,14 @@ never write it into files or commits.
    # JSON only, no files: -H 'content-type: application/json' --data-binary @diffnotes.json
    # → {"id":"…","url":"…/pulls/<id>","annotations":3,"files":2}
    ```
-   `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
+   Title, `head_sha`, summary and deploy card belong to the PR: your upload replaces a teammate's. With teammates'
+   notes on the PR, leave `summary` and `deploy` empty to keep theirs.
+   `400` = bad JSON, repository name, or a note without `path`; `401` = bad token; `403` = the repository isn't connected to your account and you are only a member there (ask an
    account admin to connect it); `413` = too many or too big files, or the account is full; `415` = a file type that
    isn't allowed or doesn't match its extension; `422` = the repository's rules ask for more (a risk on every note, a
    deploy card, a screenshot or recording for some paths): the message says what, so add it and upload again; `507` =
-   the server is low on disk space (tell the user, its admin has to free some). A new repository is connected to the account you own or administer on
-   its first upload.
+   the server is low on disk space (tell the user, its admin has to free some). A new repository is connected on its first upload to an account you own, before one you
+   administer. If you belong to more than one account, ask an admin to connect the repository in the right one first.
 7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
    was stored; the count of `annotations` with `"mine": true` must match what you wrote (teammates' are listed too).
 
@@ -161,7 +164,9 @@ push to an annotated PR (or are asked to refresh its notes):
    teammates': leave them out of your upload, they stay as they are): keep it only if its file is still changed,
    its block still exists (fix moved line numbers) and its words still describe the code. Rewrite what changed,
    drop what no longer applies, add notes for new blocks. Keep the attachments (`"mine": true` in `files`) that still
-   show the current state (re-upload them with the payload; your old files are replaced too).
+   show the current state: download each one (`curl -fsS "$H<url>" -H "authorization: Bearer $DIFFNOTES_TOKEN" -o <name>`),
+   change `/files/…/<name>` in the old bodies back to `attachment:<name>` and attach the file again (your old files
+   are replaced too).
 3. Run the check (step 5) and upload the full set (step 6). Notes you drop disappear for reviewers right away.
 
 **Remove all notes** of a PR when none of them holds any more and you have nothing new to say, when the PR is closed
@@ -187,14 +192,21 @@ the PR's diff or whose lines are not inside one changed block on its side.
 ```python
 import json, re, subprocess, sys
 pay, base = json.load(open(sys.argv[1])), sys.argv[2]
-diff = subprocess.run(['git', 'diff', '-M', '-U0', '--no-color', base, 'HEAD'], capture_output=True, text=True, check=True).stdout
-files, old, new = {}, None, None
+git = lambda *a: subprocess.run(['git', '-c', 'core.quotePath=false', *a], capture_output=True, text=True, check=True).stdout
+diff = git('diff', '-M', '-U0', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', base, 'HEAD')
+# every changed file, also a pure rename, a binary or a mode change (no ---/+++ lines): a file note on them is fine
+files = {p: {'LEFT': [], 'RIGHT': []} for p in git('diff', '-M', '--name-only', base, 'HEAD').splitlines()}
+old, new, head = None, None, False
 for l in diff.splitlines():
-    if l.startswith('--- '): old = None if l == '--- /dev/null' else l[6:]
-    elif l.startswith('+++ '):
-        new = None if l == '+++ /dev/null' else l[6:]
-        files[new or old] = {'LEFT': [], 'RIGHT': []}
+    if l.startswith('diff --git '): head = True
+    # ---/+++ name the file only in its header (in a hunk they are a removed `-- …` or an added `++ …` line);
+    # git ends the name with a tab when it has a space in it
+    elif head and l.startswith('--- '): old = None if l == '--- /dev/null' else l[6:].rstrip('\t')
+    elif head and l.startswith('+++ '):
+        new = None if l == '+++ /dev/null' else l[6:].rstrip('\t')
+        files.setdefault(new or old, {'LEFT': [], 'RIGHT': []})
     elif (m := re.match(r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', l)):
+        head = False
         o, oc, n, nc = int(m[1]), int(m[2] or 1), int(m[3]), int(m[4] or 1)
         if oc: files[new or old]['LEFT'].append((o, o + oc - 1))
         if nc: files[new or old]['RIGHT'].append((n, n + nc - 1))

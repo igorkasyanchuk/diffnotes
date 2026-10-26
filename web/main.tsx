@@ -236,8 +236,8 @@ function Login({ sign }: { sign: SignIn }) {
   // api() fires dn:change, so App reloads /api/me and shows the app page in place (a deep link opened signed out);
   // only /login needs to move on, to the dashboard
   const { submit, error, busy } = useSubmit(async () => {
-    await api('/api/login', { email, password })
-    if (location.pathname === '/login') go('/dashboard')
+    const r = await api<{ next?: string }>('/api/login', { email, password })
+    if (location.pathname === '/login') go(r.next ?? '/dashboard') // next: a GitHub sign-in's (an invitation) the password just linked
   })
   return <div className="narrow">
     <h1>{sign.signup ? 'sign in or create an account' : 'sign in'}</h1>
@@ -291,7 +291,8 @@ function Privacy() {
         access token you paste for each, plus which notes you folded, whether notes are switched off, and, for pull requests with notes you
         opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token.</li>
       <li>It talks only to the servers you connect. On a GitHub, GitLab or Bitbucket pull request page it sends that server the
-        repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.</li>
+        repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.
+        When you remove a note (only offered to its author and account admins), it asks that server to delete it.</li>
       <li>It reads the pull request page only to place notes next to the changed lines. It does not send page contents, code, your
         browsing history or anything else anywhere.</li>
       <li>It has no analytics, no tracking, no ads and no third-party code, and it sells or shares nothing.</li>
@@ -301,7 +302,8 @@ function Privacy() {
       <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub),
         sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (30 days by default).
         Its operator decides where it runs and who can access it.</li>
-      <li>Notes and files are visible only to members of the account that owns the repository.</li>
+      <li>Notes and files are visible only to members of the account that owns the repository, except a live-demo pull request
+        the server's operator may set (<code>DEMO_PR</code>), readable by everyone signed in to that server.</li>
       <li>The app's pages load nothing from third parties. The operator may enable Umami analytics on the landing page (<code>/</code>) only:
         one anonymous page view, never on the app's pages. Errors may be reported to the operator's own error tracker with the route pattern only.</li>
     </ul>
@@ -412,7 +414,7 @@ function AccountOverview({ id }: { id: string }) {
         <td>{p.uploader ?? '—'}</td><td className="num">{p.annotations}</td><td className="num">{p.files}</td><td className="num">{bytes(p.bytes)}</td>
         <td>{fmt(p.updated_at)}</td><td>{fmt(p.expires_at)}</td>
       </tr>)}</tbody>
-    </table></div> : <div className="list"><div className="empty">no uploads yet</div></div>}
+    </table></div> : <div className="list"><div className="empty">{t.pulls ? 'shown to the account\'s members only' : 'no uploads yet'}</div></div>}
   </>
 }
 
@@ -441,7 +443,7 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
       </div>)}
     </div>
     {err && <div className="error">{err}</div>}
-    <p className="hint">owner: made the account · admin: invites people, manages members and repositories · member: reads and uploads notes</p>
+    <p className="hint">owner: made the account · admin: invites people, manages members and repositories · member: reads, uploads and removes their own notes</p>
     {/* a super admin outside the account manages it but can't invite (the server refuses) */}
     {admin && data.members.some((m) => m.id === user.id) && <>
       <h2>invitations</h2>
@@ -667,12 +669,14 @@ function Admin({ user }: { user: User }) {
     </table></div>
     <h2>users</h2>
     <div className="scroll"><table className="grid">
-      <thead><tr><th>user</th><th className="num">accounts</th><th>joined</th><th>last sign-in</th><th>token used</th><th>super admin</th></tr></thead>
+      <thead><tr><th>user</th><th className="num">accounts</th><th>joined</th><th>last sign-in</th><th>token used</th><th>super admin</th><th></th></tr></thead>
       <tbody>{data.users.map((u) => <tr key={u.id}>
         <td>{u.email} <span className="hint">{u.name}</span></td><td className="num">{u.accounts}</td><td>{fmt(u.created_at)}</td>
         <td>{fmt(u.signed_in_at)}</td><td>{fmt(u.token_used_at)}</td>
         <td>{u.id === user.id ? <span className="chip hot">you</span>
           : <input type="checkbox" style={{ width: 'auto' }} checked={!!u.admin} onChange={(e) => flag(u.id, e.target.checked)} aria-label={`super admin: ${u.email}`} />}</td>
+        <td>{u.id !== user.id && !u.admin && <button className="link danger" onClick={() => del(`/api/admin/users/${u.id}`, reload,
+          `Delete ${u.email} with the accounts they own and everything in them? Their notes in other accounts stay.`)}>delete</button>}</td>
       </tr>)}</tbody>
     </table></div>
     {err && <div className="error">{err}</div>}
@@ -684,8 +688,6 @@ type StorageCfg = { kind: 'disk' | 's3'; type: string; source?: 'env' | 'setting
 // read only: STORAGE_TYPE and its provider's variables in the server's environment (docs/storage.md)
 function StorageSettings() {
   const { data } = useLoad<{ storage: StorageCfg; counts: { backend: string; files: number; bytes: number }[]; retention_days: number }>('/api/admin/storage')
-  const [ok, setOk] = useState('')
-  const rule = useSubmit(async () => { const r = await api('/api/admin/storage/lifecycle', {}); setOk(`bucket rule set: files under the prefix expire after ${r.days} days`) })
   if (!data) return null
   const st = data.storage
   return <>
@@ -695,18 +697,12 @@ function StorageSettings() {
       {data.counts.map((c) => ` ${c.backend}: ${c.files} files, ${bytes(c.bytes)}.`)}</p>
     <div className="card">
       <p>new uploads: <strong>{st.kind === 's3' ? `${st.type} bucket` : 'disk (DATA_DIR/uploads)'}</strong></p>
-      {st.bucket && <p className="hint">{st.source === 'settings' && 'Set up on this page before the environment; its files still read and delete. '}
+      {st.bucket && <p className="hint">{st.source === 'settings' && 'Saved on this page by an older version; its files still read and delete. New uploads go to disk until STORAGE_TYPE is set. '}
         endpoint <code>{st.endpoint}</code> · region <code>{st.region}</code> · bucket <code>{st.bucket}</code>
         {st.prefix && <> · prefix <code>{st.prefix}</code></>} · key <code>{st.key_id}</code></p>}
     </div>
-    {st.bucket && <div className="card" style={{ marginTop: 12 }}>
-      <p>Files are deleted from the bucket when their PR expires ({data.retention_days} days after the last upload). As a safety net, add a bucket
-        rule that expires everything under the prefix after {data.retention_days + 1} days. It replaces the bucket's lifecycle rules: use a bucket
-        just for DiffNotes. Some providers (Backblaze B2) only accept rules in their console.</p>
-      <button type="button" onClick={() => rule.submit()} disabled={rule.busy}>set the expiry rule on the bucket</button>
-      {rule.error && <div className="error">{rule.error}</div>}
-      {ok && <div className="ok">{ok}</div>}
-    </div>}
+    {st.bucket && <p className="hint" style={{ marginTop: 12 }}>Files are deleted from the bucket with their PR ({data.retention_days} days after
+      its last upload), by the server every hour. Don't add a bucket rule that expires files by age: a PR outlives its oldest files.</p>}
   </>
 }
 

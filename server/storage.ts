@@ -1,17 +1,18 @@
 import { createHash, createHmac } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 // Where uploaded files live: on disk under DATA_DIR/uploads (default) or in an S3-compatible bucket (AWS S3, R2, B2,
-// MinIO…) set by STORAGE_TYPE and its provider's environment variables. Each file row remembers its backend, so switching keeps old
-// files readable. Keys are `<prefix>pulls/<pull id>/<name>`; names are already reduced to [A-Za-z0-9._-].
+// MinIO…) set by STORAGE_TYPE and its provider's environment variables. Each file row remembers its backend, so moving from disk
+// to a bucket keeps old files readable (not back: without STORAGE_TYPE there are no keys for the bucket). Keys are `<prefix>pulls/<pull id>/<name>`; names are already reduced to [A-Za-z0-9._-].
 
 // endpoint without a trailing slash, prefix '' or `a/b/`: s3FromEnv() normalizes both
 export type S3Config = { endpoint: string; region: string; bucket: string; key_id: string; secret: string; prefix: string }
 
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
 
-// AWS Signature V4 for one path-style request. query: already sorted `k=v&…` pairs with encoded values, or ''.
+// AWS Signature V4 for one path-style request; its query (if any) comes from url.searchParams.
 export function sign(method: string, url: URL, headers: Record<string, string>, date: Date, keyId: string, secret: string, region: string, service = 's3') {
   const amzDate = date.toISOString().replace(/[-:]|\.\d{3}/g, '')
   const scope = `${amzDate.slice(0, 8)}/${region}/${service}/aws4_request`
@@ -27,12 +28,23 @@ export function sign(method: string, url: URL, headers: Record<string, string>, 
   return { ...h, authorization: `AWS4-HMAC-SHA256 Credential=${keyId}/${scope}, SignedHeaders=${names.join(';')}, Signature=${signature}` }
 }
 
-export async function s3(cfg: S3Config, method: string, key: string, body?: Buffer, extra: Record<string, string> = {}, query = '') {
-  const url = new URL(`${cfg.endpoint}/${cfg.bucket}/${key}${query ? `?${query}` : ''}`)
-  const payload = body ?? Buffer.alloc(0)
-  const headers = sign(method, url, { 'x-amz-content-sha256': sha(payload), ...extra }, new Date(), cfg.key_id, cfg.secret, cfg.region || 'auto')
-  delete (headers as Record<string, string>).host
-  const res = await fetch(url, { method, headers, body: body && method !== 'GET' ? new Uint8Array(body) : undefined, signal: AbortSignal.timeout(30_000) })
+// A 5xx (but 501, which is for good), a 429 or a dropped connection is tried again, 3 tries in all: B2 and S3 answer a
+// busy node with 500 / 503, R2 a key written again within a second with 429, and ask clients to retry (production saw a
+// B2 `500 InternalError` on one PUT of three).
+// A timeout isn't: a bucket that hangs fails after 30 s, not 90.
+export async function s3(cfg: S3Config, method: string, key: string, body?: Buffer, extra: Record<string, string> = {}) {
+  const url = new URL(`${cfg.endpoint}/${cfg.bucket}/${key}`)
+  const hash = sha(body ?? Buffer.alloc(0)), bytes = body && method !== 'GET' ? new Uint8Array(body) : undefined
+  let res: Response | null
+  for (let attempt = 1; ; attempt++) {
+    const headers = sign(method, url, { 'x-amz-content-sha256': hash, ...extra }, new Date(), cfg.key_id, cfg.secret, cfg.region || 'auto')
+    delete (headers as Record<string, string>).host
+    const last = attempt === 3
+    res = await fetch(url, { method, headers, body: bytes, signal: AbortSignal.timeout(30_000) }).catch((e) => { if (last || e?.name === 'TimeoutError') throw e; return null })
+    if (res && (last || (res.status < 500 && res.status !== 429) || res.status === 501)) break
+    try { await res?.body?.cancel() } catch {} // a body that broke off rejects its cancel
+    await sleep(250 * (attempt + 1))
+  }
   if (!res.ok && !(method === 'DELETE' && res.status === 404)) {
     // only the S3 error code, never the body: the endpoint is admin-set and could be any internal service
     const code = (await res.text()).match(/<Code>(\w{1,64})<\/Code>/)?.[1]
@@ -68,7 +80,7 @@ export function s3FromEnv(env: Record<string, string | undefined>): S3Config | n
   const place = v(p.vars.place), bucket = v(p.vars.bucket), prefix = v('STORAGE_PREFIX').replace(/^\/+/, '').replace(/([^/])$/, '$1/')
   if (!p.place.test(place)) throw new Error(`${p.vars.place}: ${p.hint}`)
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error(`${p.vars.bucket}: 3-63 lowercase letters, digits, dots and dashes`)
-  // the prefix goes into URLs and the lifecycle XML: `#`, `?` or `..` would point every key somewhere else
+  // the prefix goes into URLs: `#`, `?` or `..` would point every key somewhere else
   if (!/^([\w-][\w.-]*\/)*$/.test(prefix)) throw new Error('STORAGE_PREFIX: folders of letters, digits, dots, dashes and underscores, e.g. diffnotes/')
   return { endpoint: p.endpoint(place), region: p.region(place), bucket, key_id: v(p.vars.key_id), secret: v(p.vars.secret), prefix }
 }
@@ -112,15 +124,8 @@ export function storage(uploads: string, config: () => S3Config | null, useS3: (
 }
 const need = (cfg: S3Config | null) => cfg ?? (() => { throw new Error('S3 storage is not configured') })()
 
-// Safety net besides the server's own purge: a bucket lifecycle rule that expires everything under the prefix a day
-// after the retention period (every re-upload writes new objects, so their age restarts). Replaces the bucket's rules.
-export async function applyLifecycle(cfg: S3Config, days: number) {
-  const prefix = `${cfg.prefix}pulls/`
-  const xml = `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>diffnotes-expire</ID><Filter><Prefix>${prefix}</Prefix></Filter>` +
-    `<Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration></Rule></LifecycleConfiguration>`
-  const body = Buffer.from(xml)
-  await s3(cfg, 'PUT', '', body, { 'content-md5': createHash('md5').update(body).digest('base64'), 'content-type': 'application/xml' }, 'lifecycle=')
-}
+// No bucket expiry rule by age: a file's age says nothing about its PR's (a teammate's upload extends the PR without
+// rewriting your files, the live demo never expires). The hourly purge deletes files with their PR.
 
 // put, read back and delete one object: proves the endpoint, bucket and keys work (logged at start)
 export async function checkS3(cfg: S3Config) {

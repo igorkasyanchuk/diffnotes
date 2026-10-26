@@ -157,6 +157,8 @@ describe('uploads', () => {
   })
 
   it('refuses bad payloads and anything over the limits', async () => {
+    // a multipart payload is held to MAX_BODY_KB like a JSON body
+    expect((await upload(1, { annotations: [{ path: 'a.ts', body: 'x'.repeat(2000) }] })).data.error).toBe('payload is over 1 KB')
     const form = new FormData()
     form.set('payload', '{nope')
     expect((await call('/api/v1/pulls/o/n/1', { token, form, method: 'PUT' })).data.error).toBe('payload is not JSON')
@@ -222,9 +224,20 @@ describe('server errors', () => {
 })
 
 describe('super admin', () => {
-  it('refuses unknown users', async () => {
+  it('refuses unknown users, and deletes another user with the accounts it owns', async () => {
     expect((await call('/api/admin/users/nope', { cookie: admin, method: 'PUT', body: { admin: true } })).status).toBe(404)
-    expect((await call('/api/admin/storage/lifecycle', { cookie: admin, method: 'POST' })).data.error).toBe('S3 storage is not configured')
+    const { createAccount, createUser } = await import('./db.ts')
+    const adminId = (await call('/api/me', { cookie: admin })).data.user.id
+    const squat = createUser('squat@example.com', 'squat-pass'), own = createAccount('Squat team', squat)
+    expect((await call(`/api/admin/users/${adminId}`, { cookie: admin, method: 'DELETE' })).status).toBe(400) // yourself: Settings
+    expect((await call('/api/admin/users/nope', { cookie: admin, method: 'DELETE' })).status).toBe(404)
+    expect((await call(`/api/admin/users/${squat}`, { cookie: dev, method: 'DELETE' })).status).toBe(404) // super admins only
+    await call(`/api/admin/users/${squat}`, { cookie: admin, method: 'PUT', body: { admin: true } })
+    expect((await call(`/api/admin/users/${squat}`, { cookie: admin, method: 'DELETE' })).data.error).toMatch(/super admin flag first/)
+    await call(`/api/admin/users/${squat}`, { cookie: admin, method: 'PUT', body: { admin: false } })
+    expect((await call(`/api/admin/users/${squat}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
+    expect(db.prepare('select 1 from users where id = ?').get(squat)).toBeUndefined()
+    expect(db.prepare('select 1 from accounts where id = ?').get(own)).toBeUndefined()
   })
 
   it('manages an account it is not in and sees its counts, never its notes or files', async () => {
@@ -239,7 +252,9 @@ describe('super admin', () => {
     expect((await call('/api/v1/pulls/dev/app/1', { token })).status).toBe(404)
     expect((await call(`/api/pulls/${pull}`, { cookie: admin })).status).toBe(404)
     expect((await call(`/files/${pull}/shot.png`, { cookie: admin })).status).toBe(404)
-    expect((await call(`/api/accounts/${own}/overview`, { cookie: admin })).data.totals).toMatchObject({ pulls: 1, annotations: 1, files: 1 })
+    const view = (await call(`/api/accounts/${own}/overview`, { cookie: admin })).data
+    expect(view.totals).toMatchObject({ pulls: 1, annotations: 1, files: 1 })
+    expect(view.recent).toEqual([]) // no titles or uploaders
     // no way in through an invitation: none to see, none to make
     await call(`/api/accounts/${own}/invites`, { cookie: dev, body: { email: 'x@example.com' } })
     expect((await call(`/api/accounts/${own}`, { cookie: admin })).data.invites).toEqual([])
@@ -253,6 +268,9 @@ describe('super admin', () => {
       again.set('payload', JSON.stringify({ annotations: [] }))
       again.append('file', new File([png() as BlobPart], 'shot.png'))
       expect((await call('/api/v1/pulls/dev/app/1', { token: devToken, form: again, method: 'PUT' })).status).toBe(507)
+      // notes alone too: they go into the database on the same volume; an empty upload only removes yours, so it passes
+      expect((await call('/api/v1/pulls/dev/app/1', { token: devToken, method: 'PUT', body: { annotations: [{ path: 'a.ts', body: 'x' }] } })).status).toBe(507)
+      expect((await call('/api/v1/pulls/dev/app/1', { token: devToken, method: 'PUT', body: { annotations: [] } })).status).toBe(200)
     } finally { full.mockRestore() }
     expect((await call(`/api/pulls/${pull}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
   })
@@ -306,6 +324,9 @@ describe('repository rules and the deploy card', () => {
     const ok = await put({ deploy: 'Run `migrate`, then flip **express**.', annotations: [{ path: 'web/a.tsx', body: 'x', risk: 'high' }] }, [['shot.png', png()]])
     expect(ok.status).toBe(200)
     expect((await call('/api/v1/pulls/ruled/app/1', { token })).data.deploy).toBe('Run `migrate`, then flip **express**.')
+    // a teammate's empty upload (removing only their notes) keeps that card, and the kept card meets the rule
+    const mate = await invite(acc, 'mate@example.com', 'mate-password')
+    expect((await call('/api/v1/pulls/ruled/app/1', { cookie: mate.cookie, method: 'PUT', body: { annotations: [] } })).status).toBe(200)
     const mcpBad = await mcp('tools/call', { name: 'upload_notes', arguments: { repo: 'ruled/app', number: 1, payload: { annotations: [{ path: 'a', body: 'x' }] } } }, token)
     expect(JSON.stringify(mcpBad.data)).toContain('rules ask for')
 
@@ -321,7 +342,7 @@ describe('GitHub sign-in', () => {
     return { status: r.status, loc: new URL(r.res.headers.get('location') ?? 'x:'), cookie: r.res.headers.get('set-cookie')?.split(';')[0] ?? '' }
   }
   // the whole round trip: our redirect, then GitHub sending the browser back, with GitHub's API answered by the stubs
-  const roundTrip = async (profile: object, emails: Email[], { next = '', token = 'gho_x', state = '' } = {}) => {
+  const roundTrip = async (profile: object, emails: Email[], { next = '', token = 'gho_x', state = '', session = '' } = {}) => {
     const s = await start(next)
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (u) => {
       const url = String(u)
@@ -329,8 +350,9 @@ describe('GitHub sign-in', () => {
       return Response.json(url.endsWith('/user') ? profile : emails)
     })
     try {
-      const r = await call(`/auth/github/callback?code=c1&state=${state || s.loc.searchParams.get('state')}`, { headers: { cookie: s.cookie } })
-      return { to: r.res.headers.get('location') ?? '', cookie: r.res.headers.get('set-cookie')?.match(/sid=[^;]+/)?.[0] ?? '' }
+      const r = await call(`/auth/github/callback?code=c1&state=${state || s.loc.searchParams.get('state')}`, { headers: { cookie: [s.cookie, session].filter(Boolean).join('; ') } })
+      const set = r.res.headers.get('set-cookie') ?? ''
+      return { to: r.res.headers.get('location') ?? '', cookie: set.match(/sid=[^;]+/)?.[0] ?? '', link: set.match(/ghlink=[^;]+/)?.[0] ?? '' }
     } finally { spy.mockRestore() }
   }
   const mail = (email: string, primary = true, verified = true) => ({ email, primary, verified })
@@ -361,21 +383,29 @@ describe('GitHub sign-in', () => {
       expect((await call(`/auth/github/callback?code=c&state=${d.loc.searchParams.get('state')}`, { headers: { cookie: d.cookie } })).res.headers.get('location')).toContain('did%20not%20answer')
       down.mockRestore()
 
-      // an existing user: found by a verified (here: secondary) email, then by the GitHub id. Whoever accepted its
-      // invitation may not own the address: the first link drops the password, sessions and tokens they set
+      // an existing user found by a verified (here: secondary) email. Whoever accepted its invitation may not own the
+      // address, so a user with a password links GitHub only after signing in with that password once
       const boss = await invite(accountId, 'boss@example.com', 'boss-password')
+      const gh = [mail('boss@gh.example'), mail('boss@example.com', false)]
+      const a = await roundTrip({ id: 8, login: 'boss' }, gh, { next: '?next=/%09/evil.example' })
+      expect([a.to, a.cookie]).toEqual([`/login?error=${encodeURIComponent('Sign in with your DiffNotes password once: then this GitHub account is linked to it')}`, ''])
+      // the wrong password links nothing; a link meant for another user isn't taken either
+      expect((await call('/api/login', { body: { email: 'boss@example.com', password: 'nope-nope' }, headers: { cookie: a.link } })).status).toBe(401)
+      expect((await call('/api/login', { body: { email: 'admin@example.com', password: 'admin-pass' }, headers: { cookie: a.link } })).status).toBe(200)
+      expect((await roundTrip({ id: 8 }, gh)).cookie).toBe('')
+      // the password proves it: linked, nothing dropped (password, tokens, accounts)
       const bossToken = (await call('/api/tokens', { cookie: boss.cookie, body: {} })).data.token
-      const a = await roundTrip({ id: 8, login: 'boss' }, [mail('boss@gh.example'), mail('boss@example.com', false)], { next: '?next=/%09/evil.example' })
-      expect(a.to).toBe('/dashboard') // /\t/evil.example is //evil.example to a browser
-      expect((await call('/api/me', { cookie: a.cookie })).data).toMatchObject({ user: { email: 'boss@example.com' }, has_password: false, tokens: 0 })
-      expect((await call('/api/me', { cookie: boss.cookie })).data.user).toBeNull()
-      expect((await call('/api/v1/me', { token: bossToken })).status).toBe(401)
-      expect((await call('/api/login', { body: { email: 'boss@example.com', password: 'boss-password' } })).status).toBe(401)
-      // later sign-ins find it by the GitHub id and drop nothing
-      await call('/api/password', { cookie: a.cookie, method: 'PUT', body: { password: 'new-boss-password' } })
-      expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')], { next: '?next=/settings' })).to).toBe('/settings')
+      await new Promise((r) => setTimeout(r, 1100)) // the login throttle: one wrong password per second per email
+      // and the sign-in goes on where it was headed (/\t/evil.example is //evil.example to a browser: the dashboard)
+      expect((await call('/api/login', { body: { email: 'boss@example.com', password: 'boss-password' }, headers: { cookie: a.link } })).data).toEqual({ ok: true, next: '/dashboard' })
+      const b = await roundTrip({ id: 8 }, [mail('renamed@gh.example')], { next: '?next=/settings' })
+      expect(b.to).toBe('/settings')
+      expect((await call('/api/me', { cookie: b.cookie })).data).toMatchObject({ user: { email: 'boss@example.com' }, has_password: true, accounts: [{ id: accountId }] })
+      expect((await call('/api/v1/me', { token: bossToken })).status).toBe(200)
       expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')], { next: '?next=/.//evil.example' })).to).toBe('/dashboard') // dot segments: //evil.example
-      expect((await call('/api/me', { cookie: a.cookie })).data.has_password).toBe(true)
+      // signed in already as that user: linked right away
+      const chief = await invite(accountId, 'chief@example.com', 'chief-password')
+      expect((await roundTrip({ id: 11, login: 'chief' }, [mail('chief@example.com')], { session: chief.cookie })).cookie).not.toBe('')
       // linked: another GitHub account with the same email (moved to it on GitHub) doesn't get in
       expect((await roundTrip({ id: 80 }, [mail('boss@example.com')])).to).toContain('another%20GitHub%20account')
 
@@ -422,8 +452,8 @@ describe('live demo (DEMO_PR)', () => {
     // the super admin's demo, written straight to the database (this file's tiny quotas are used up by now)
     const acc = createAccount('Demo', adminId), past = '2000-01-01T00:00:00.000Z'
     db.prepare('insert into repositories (id, account_id, full_name, created_at) values (?, ?, ?, ?)').run('demo-repo', acc, 'acme/demo', now())
-    db.prepare(`insert into pulls (id, repository_id, number, title, user_id, created_at, updated_at, expires_at)
-      values ('demo-pull', 'demo-repo', 5, 'Demo', ?, ?, ?, ?)`).run(adminId, now(), now(), past)
+    db.prepare(`insert into pulls (id, repository_id, number, title, user_id, created_at, updated_at, expires_at, fields_by)
+      values ('demo-pull', 'demo-repo', 5, 'Demo', ?, ?, ?, ?, ?)`).run(adminId, now(), now(), past, adminId)
     db.prepare(`insert into annotations (pull_id, path, body, user_id) values ('demo-pull', 'a.ts', 'why', ?)`).run(adminId)
     db.prepare(`insert into files (pull_id, name, type, size, user_id) values ('demo-pull', 'shot.png', 'image/png', 16, ?)`).run(adminId)
     fs.mkdirSync(path.join(process.env.DATA_DIR!, 'uploads', 'demo-pull'), { recursive: true })
@@ -448,10 +478,19 @@ describe('live demo (DEMO_PR)', () => {
       expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
       await purge()
       expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeTruthy() // expired, kept
+      // hidden for now (a teammate's field kept), still not deleted for good
+      db.prepare("update pulls set fields_by = null where id = 'demo-pull'").run()
+      await purge()
+      expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeTruthy()
+      db.prepare("update pulls set fields_by = ? where id = 'demo-pull'").run(adminId)
       // only what super admins wrote is the demo: a teammate's last upload (its summary, title) keeps it private
       db.prepare("update pulls set user_id = ? where id = 'demo-pull'").run(stranger)
       expect((await call('/api/me', { cookie })).data.demo).toBeNull()
       db.prepare("update pulls set user_id = ? where id = 'demo-pull'").run(adminId)
+      // and a title, summary or deploy card a super admin's blank upload kept from a teammate (fields_by null)
+      db.prepare("update pulls set fields_by = null where id = 'demo-pull'").run()
+      expect((await call('/api/me', { cookie })).data.demo).toBeNull()
+      db.prepare("update pulls set fields_by = ? where id = 'demo-pull'").run(adminId)
       // and so does one note by anyone else
       db.prepare(`insert into annotations (pull_id, path, body, user_id) values ('demo-pull', 'b.ts', 'private', ?)`).run(stranger)
       expect((await call('/api/me', { cookie })).data.demo).toBeNull()

@@ -29,6 +29,7 @@ What to paste into the Chrome Web Store developer dashboard for `extension/`. Pa
 > • a floating dock and one switch to hide every note
 > • a deploy card: migrations, env vars, flags and rollback, pinned on top
 > • keyboard: j / k between notes, n to hide them, ? for the keys
+> • authors and admins remove notes right in the diff
 >
 > Nothing is posted to the pull request: no bot comments, no notifications. Notes live on a DiffNotes server you or your
 > company runs (free, open source, MIT) and are visible only to your team.
@@ -71,7 +72,7 @@ screen stretched to the viewport, controls hidden, one scene per shot (scene dot
 |---|---|
 | `storage` | Keeps the DiffNotes servers the user connected and their access tokens, which notes the user folded, whether notes are switched off, and, for pull requests with notes opened in the last 60 days, their repository and number with hashes of the notes shown (to mark notes changed since the last visit). Stored locally in the browser only. |
 | Host `https://github.com/*`, `https://gitlab.com/*`, `https://bitbucket.org/*` | The content script runs on pull request pages of these sites to draw the notes next to the changed lines of the diff. It only reads the page to find files and line numbers. |
-| Optional host `https://*/*` | Requested at runtime for exactly one origin, the DiffNotes server the user types in the popup (each team runs its own server, so the address isn't known in advance). Used to fetch that server's notes and files with the user's token. Removed again when the user removes the server. |
+| Optional host `https://*/*` | Requested at runtime for exactly one origin, the DiffNotes server the user types in the popup (each team runs its own server, so the address isn't known in advance). Used to fetch that server's notes and files with the user's token, and to remove notes when the user asks (authors and admins only). Removed again when the user removes the server. |
 | Optional host `http://localhost/*`, `http://127.0.0.1/*` | The same, for a DiffNotes server running on the user's own machine (development and trials). Plain `http://` is allowed only for these. |
 | Content scripts | See the host permissions above: GitHub, GitLab and Bitbucket pull request pages only. |
 | `web_accessible_resources` (`demo.html`) | A sandboxed extension page (manifest `sandbox`, no network, opaque origin) that runs a note's HTML demo inside the diff, so untrusted demo code never runs in the site's page. Exposed with `use_dynamic_url` so sites can't detect the extension. |

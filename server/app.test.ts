@@ -143,6 +143,8 @@ describe('diffnotes', () => {
     expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })).status).toBe(200)
     const both = (await call('/api/v1/pulls/acme/web/78', { cookie: member })).data
     expect(both).toMatchObject({ summary: 'by admin', can_delete: true, can_delete_all: false })
+    // the admin's summary kept by the member's blank upload: the PR's fields have no single author now (the demo checks it)
+    expect(db.prepare('select fields_by from pulls where id = ?').get(put.data.id)).toEqual({ fields_by: null })
     expect(both.annotations.map((a: { body: string; can_delete: boolean }) => [a.body, a.can_delete])).toEqual([['keep', false], ['mine', true]])
     expect((await call(`/api/v1/annotations/${both.annotations[0].id}`, { cookie: member, method: 'DELETE' })).status).toBe(403)
     expect((await call(`/api/v1/annotations/${both.annotations[1].id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
@@ -520,6 +522,7 @@ describe('diffnotes', () => {
       req.on('data', (d) => chunks.push(d)).on('end', () => {
         seen.push(`${req.method} ${req.url}`)
         if (!String(req.headers.authorization).startsWith('AWS4-HMAC-SHA256 Credential=KEY/')) { res.statusCode = 403; return res.end('unsigned') }
+        if (req.method === 'PUT' && req.url!.includes('broken')) { res.statusCode = 500; return res.end() }
         if (req.method === 'PUT') objects.set(req.url!, Buffer.concat(chunks))
         if (req.method === 'DELETE') objects.delete(req.url!)
         if (req.method === 'GET' && !objects.has(req.url!)) res.statusCode = 404
@@ -546,10 +549,13 @@ describe('diffnotes', () => {
     const img = await call(`/files/${up.data.id}/s3.png`, { token })
     expect(img.status).toBe(200)
     expect(img.res.headers.get('content-type')).toBe('image/png')
-
-    // the lifecycle rule is a signed bucket-level PUT
-    expect((await call('/api/admin/storage/lifecycle', { cookie: admin, body: {} })).data).toMatchObject({ ok: true, days: 31 })
-    expect(seen).toContain('PUT /dn-files/?lifecycle=')
+    // a write that still fails after its retries: the uploader's previous file goes anyway (no row points at it any more)
+    const broken = new FormData()
+    broken.set('payload', JSON.stringify({ annotations: [] }))
+    broken.append('file', new File([png(32)], 'broken.png'))
+    expect((await call('/api/v1/pulls/acme/web/44', { token, form: broken, method: 'PUT' })).status).toBe(500)
+    expect(objects.has(key)).toBe(false)
+    expect((await call('/api/v1/pulls/acme/web/44', { token, form, method: 'PUT' })).status).toBe(200)
 
     // a bucket set up on /admin before the environment: without STORAGE_TYPE its files still read and delete, new ones go to disk
     for (const k of Object.keys(env)) delete process.env[k]

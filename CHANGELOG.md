@@ -13,7 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   of their own). Users made through GitHub can set a password later.
 - **Install in the hero**: the one-command skill install with a copy button and *add to Chrome*, right under the headline.
 - **Live demo** (`DEMO_PR=owner/name#12`): one pull request whose notes every signed-in user can read and that never
-  expires; `/demo` walks a visitor through extension, account, token and the PR.
+  expires, while its last upload and every note and file on it are by super admins; `/demo` walks a visitor through extension, account, token and the PR.
 - **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
 ### Security
@@ -22,18 +22,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   variables (`B2_*`, `R2_*`, `AWS_*`, `MINIO_*`, `STORAGE_PREFIX`), checked at start. The secret never reaches the
   database, and a stolen super admin session can't point uploads at another bucket. `/admin` shows it read-only.
   A bucket saved on `/admin` before still reads and deletes its files; set it in the environment to keep uploading to it.
+- The **set the expiry rule on the bucket** button is gone: an age rule deleted files a PR still showed (a teammate's
+  upload keeps the PR alive without rewriting yours; the live demo never expires). The hourly purge deletes files with
+  their PR; on Backblaze B2 set *Keep only the last version*. Remove an age rule you added before.
 - Notes: a link whose URL held an image could put the image's alt words into the link as HTML attributes (`style`, ...).
 - GitHub sign-in: `next=/<tab>/evil.example` redirected off the site after signing in; only a path here is followed now.
-- GitHub sign-in linking a user by email drops the password, sessions and tokens set before: an invitation accepted by
-  someone who doesn't own the address can no longer be used to read the real owner's accounts later.
-- Super admins read notes and files only in accounts they belong to, and can't see or make invitations in others.
+- GitHub sign-in finds a user with a password by email but links it only after one sign-in with that password (or
+  while already signed in as it): an invitation accepted by someone who doesn't own the address can no longer be used
+  to read the real owner's accounts or catch their uploads later. Nothing is dropped for the real owner.
+- Super admins can delete another user on `/admin` (with the accounts it owns): the way back in for someone whose
+  address a stranger squatted through an invitation.
+- Super admins read notes and files only in accounts they belong to, and can't see or make invitations in others;
+  their overview of such an account shows counts, no PR titles or uploaders.
+- The live demo shows a PR only while a super admin wrote its title, summary and deploy card too.
+- A multipart `payload` is held to `MAX_BODY_KB`, and `MIN_FREE_DISK_MB` applies to every upload with notes or files (the database shares the volume).
 - Every note and file has its author: an upload replaces only the uploader's own (teammates' stay), so a member can no
   longer wipe someone else's notes by uploading over them. A note is removed by its author or an admin; *remove my
-  notes* / *delete my notes* for authors, *remove all notes* for admins. `GET` adds `mine` and `can_delete` per note.
+  notes* / *delete my notes* for authors, *remove all notes* for admins. `GET` adds `mine` and `can_delete` per note, `mine` per file, and `can_delete` / `can_delete_all` on the PR.
 - `MAX_ACCOUNTS` (10) accounts per user and `MIN_FREE_DISK_MB` (100): open sign-up can't fill the disk.
 
 ### Fixed
 
+- S3 storage: a `5xx`, a `429` or a dropped connection is tried again (3 tries), and a re-upload writes the new files before it
+  deletes the old ones, so a file re-uploaded under its name keeps its previous version when the write still fails
+  instead of going missing (seen once on B2).
 - Extension: the dock's ↑ (and *summary*) used a box GitHub had already re-rendered away, so ↑ did nothing; it
   now scrolls to the live box, clear of the sticky header.
 

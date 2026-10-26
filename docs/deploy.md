@@ -30,7 +30,7 @@ docker compose logs | grep "first admin"
 
 ## Coolify
 
-New resource → your Git repository (a fork, or this one once it's public) → build pack **Dockerfile**, port `3000`, a
+New resource → your Git repository (this one, or your fork) → build pack **Dockerfile**, port `3000`, a
 volume at `/data`, environment `PUBLIC_URL` and `ADMIN_EMAIL`, your domain. Pushing to the branch redeploys (about a
 minute). The first admin password is in the first deployment's Runtime Logs.
 
@@ -44,7 +44,7 @@ Backups: the app's Backups → add the `/data` volume, daily, to S3 ([what to re
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/igorkasyanchuk/diffnotes)
 
 The button reads [`render.yaml`](../render.yaml): one Docker web service, a 1 GB disk at `/data`, health check
-`/healthz`. It works only once the repository is public; until then (or for your fork) use
+`/healthz`. For your fork use
 `https://render.com/deploy?repo=<your repository URL>`, or Dashboard → New → Blueprint. Render asks for `PUBLIC_URL`
 (e.g. `https://diffnotes.onrender.com`, or your custom domain) and `ADMIN_EMAIL`, and sets `PORT` itself.
 

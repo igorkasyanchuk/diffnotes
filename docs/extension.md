@@ -14,7 +14,7 @@ Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
-3. Pin **DiffNotes**, open its popup, enter your server (`https://reviews.company.com`) and a token from the server's
+3. Pin **DiffNotes**, open its popup, enter your server (`https://reviews.example.com`) and a token from the server's
    **Settings**, press **Connect** and allow access to that server. The token goes with every request, so the server
    must be `https://` (plain `http://` only for `localhost`).
 

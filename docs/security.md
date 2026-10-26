@@ -38,15 +38,17 @@
   an owner or admin; the server checks it on every request, the extension only offers it to them and asks for a
   confirmation, and ignores clicks that a page script fakes (`isTrusted`).
 - **GitHub sign-in and invitations**: an invitation doesn't check that whoever accepts it owns the email. So when GitHub
-  sign-in first links a user found by email (a verified one on GitHub), the password, sessions and tokens set before
-  are dropped: the GitHub owner of the address keeps the user alone (and can set a new password). After sign-in it
+  sign-in finds a user with a password by email (a verified one on GitHub), it links GitHub only after one sign-in with
+  that password, or while the browser is signed in as that user already. The real owner keeps everything; a stranger
+  who squatted the address through an invitation gets nothing from the owner's GitHub sign-in (the owner's way in: a super
+  admin deletes the squatted user on `/admin`, with the accounts it owns). A user linked to another GitHub account is refused. After sign-in it
   returns only to a path on this site.
 - **Super admins** manage every account but read notes and files only in the ones they belong to; outside them they
   can't see or make invitations either, so they can't join to read.
 - **Least privilege**: the Docker image runs the app as the unprivileged `node` user; the container starts as root
   only to give `/data` to it.
 - **Quotas**: `MAX_ACCOUNT_MB` of files and `MAX_PULLS` PRs per account, so one leaked token can't fill the disk;
-  `MAX_ACCOUNTS` accounts per user (open sign-up can't multiply the quota), and no uploads to disk below `MIN_FREE_DISK_MB` free.
+  `MAX_ACCOUNTS` accounts per user (open sign-up can't multiply the quota), and no uploads of notes or files at all (notes go into the database on the same volume) below `MIN_FREE_DISK_MB` free.
 
 ## Uploads
 
@@ -129,4 +131,4 @@ from the server (the sandboxed demos), `frame-ancestors 'none'`, `object-src 'no
 reported to a Sentry-compatible DSN (yours, from `BUGSINK_DSN`; none is built in) with the route pattern only, never the URL or body. An S3 error shows only the
 bucket's error code, never its reply.
 
-Found a problem? Please report it privately to the maintainer rather than in a public issue.
+Found a problem? Please report it privately, as [SECURITY.md](../SECURITY.md) describes, rather than in a public issue.

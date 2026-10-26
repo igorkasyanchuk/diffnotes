@@ -91,11 +91,13 @@ db.exec('create unique index if not exists users_github on users(github_id)')
 // every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's
 // last uploader's (each upload replaced everything); filled once, as the column is added, in one transaction (a stop
 // in between would leave the column there and the rows authorless for good)
-for (const t of ['annotations', 'files']) {
+// pulls.fields_by: who wrote the PR's title, summary and deploy card (null: several people), so the live demo shows only a super admin's
+for (const [t, col, fill] of [['annotations', 'user_id', '(select p.user_id from pulls p where p.id = annotations.pull_id)'],
+  ['files', 'user_id', '(select p.user_id from pulls p where p.id = files.pull_id)'], ['pulls', 'fields_by', 'user_id']]) {
   db.exec('begin')
   try {
-    db.exec(`alter table ${t} add column user_id text references users(id) on delete set null`)
-    db.exec(`update ${t} set user_id = (select p.user_id from pulls p where p.id = ${t}.pull_id)`)
+    db.exec(`alter table ${t} add column ${col} text references users(id) on delete set null`)
+    db.exec(`update ${t} set ${col} = ${fill}`)
     db.exec('commit')
   } catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
 }

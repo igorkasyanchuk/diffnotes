@@ -50,12 +50,13 @@ can also **continue with GitHub** when the invited email is one of their GitHub 
 ## Sign in with GitHub
 
 Off unless the server has an OAuth app. On GitHub: Settings → Developer settings → **OAuth Apps** → **New OAuth App**,
-homepage `https://reviews.company.com`, callback URL `https://reviews.company.com/auth/github/callback`; then
+homepage `https://reviews.example.com`, callback URL `https://reviews.example.com/auth/github/callback`; then
 **Generate a new client secret** and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` ([install](install.md#environment)).
 
 - The login page gets a **sign in with GitHub** button. It finds the user by their GitHub account, or by any of its
-  verified emails (an existing user is linked on the first GitHub sign-in; its password, sessions and tokens are then
-  dropped, since an invitation never proved who owns the email: set a new password on Settings, make new tokens).
+  verified emails. A user who has a password is linked on its first GitHub sign-in only after signing in with that
+  password once (the login page asks), since an invitation never proved who owns the email; nothing else changes.
+  A DiffNotes user already linked to another GitHub account is refused.
 - Strangers are refused unless an invitation waits for one of their verified emails, or `ALLOW_SIGNUP=1`: then anyone
   with a GitHub account gets a user and a team account they own (open registration; lower `MAX_ACCOUNT_MB` and
   `MAX_PULLS` to taste).
@@ -72,8 +73,9 @@ storage per repository, and the latest uploads with who uploaded them.
 
 The first user (created on first boot) is a **super admin**: the person who runs the server. Super admins see
 **server admin** (`/admin`): users, accounts, PRs, notes, uploads in the last 24 h / 7 days, files, upload and database
-size, free disk; they can open and manage every account, make other users super admins, and see where files are
-stored ([storage](storage.md), set in the server's environment). In an account they are not a member of they see counts and PR titles, never the
-notes or files themselves (`404`), and they can still delete a PR's notes. Nobody can change their own super admin flag, so the server always keeps one.
+size, free disk; they can open and manage every account, make other users super admins, delete other users
+(with the accounts they own; a super admin loses the flag first), and see where files are
+stored ([storage](storage.md), set in the server's environment). In an account they are not a member of they see counts only, never PR titles, the
+notes or files themselves (`404`), can't see or make invitations there, and they can still delete the account. Nobody can change their own super admin flag, so the server always keeps one.
 
 <img src="images/server-admin.png" alt="Server admin" width="700">

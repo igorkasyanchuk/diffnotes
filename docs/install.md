@@ -11,7 +11,7 @@ git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
 docker build -t diffnotes .
 docker run -d --name diffnotes -p 3000:3000 -v diffnotes:/data \
   -e ADMIN_EMAIL=you@company.com \
-  -e PUBLIC_URL=https://reviews.company.com \
+  -e PUBLIC_URL=https://reviews.example.com \
   diffnotes
 ```
 
@@ -88,10 +88,10 @@ This table is the one reference for configuration: everything is an environment 
 | `MAX_FILES` | `30` | files per PR (one upload) |
 | `MAX_PULL_MB` | `20` | all files of one PR |
 | `MAX_ANNOTATIONS` | `500` | notes per PR |
-| `MAX_BODY_KB` | `1024` | JSON request bodies |
+| `MAX_BODY_KB` | `1024` | JSON request bodies, and the notes JSON (`payload`) of a multipart upload or of MCP's `upload_notes` |
 | `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
 | `MAX_ACCOUNTS` | `10` | accounts one user may own (with `ALLOW_SIGNUP=1`, each one is more quota) |
-| `MIN_FREE_DISK_MB` | `100` | uploads to disk storage get `507` once the volume would have less free space |
+| `MIN_FREE_DISK_MB` | `100` | uploads with notes or files get `507` once the data volume (database, and files on disk storage) would have less free space (an empty one, which only removes yours, passes) |
 | **Security** | | |
 | `SESSION_SECRET` | random, in `DATA_DIR` | signs session cookies |
 | `ENCRYPTION_KEY` | random, in `DATA_DIR` | encrypts stored secrets (only an S3 secret key saved on `/admin` before storage moved to the environment) |
@@ -99,7 +99,7 @@ This table is the one reference for configuration: everything is an environment 
 | **Integrations** (off unless you set them; nothing is preset) | | |
 | `BUGSINK_DSN` | unset | your own Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | unset | a GitHub OAuth app: **sign in with GitHub** ([accounts](accounts.md#sign-in-with-github)); callback `<PUBLIC_URL>/auth/github/callback` |
-| `DEMO_PR` | unset | `owner/name#12` or the PR's URL: a live demo for visitors. That PR's notes, as a super admin uploaded them, are readable by every signed-in user and never expire; `/demo` explains the steps |
+| `DEMO_PR` | unset | `owner/name#12` or the PR's URL: a live demo for visitors. That PR's notes are readable by every signed-in user and never expire, as long as its last upload, its title, summary and deploy card and every note and file on it are by super admins (a teammate's upload there turns it off); `/demo` explains the steps |
 | `ALLOW_SIGNUP` | unset | `1` with GitHub sign-in: anyone with a GitHub account may sign up and gets a team account of their own |
 | **File storage** ([storage](storage.md)) | | |
 | `STORAGE_TYPE` | `disk` | `disk` (`DATA_DIR/uploads`), `b2` (Backblaze B2), `r2` (Cloudflare R2), `s3` (AWS S3) or `minio` (MinIO or any other S3-compatible service) |

@@ -69,3 +69,28 @@ test('reads the bucket from STORAGE_TYPE and its provider\'s variables, and refu
   expect(() => s3FromEnv({ ...minio, MINIO_BUCKET: 'Bad_Bucket' })).toThrow(/^MINIO_BUCKET: 3-63/)
   expect(() => s3FromEnv({ ...minio, STORAGE_PREFIX: 'a#b' })).toThrow(/^STORAGE_PREFIX/)
 })
+
+test('tries a 5xx, a 429 or a dropped connection again, up to 3 times', async () => {
+  let puts = 0, gets = 0, busy = 0, refused = 0, drops = 0
+  const server = http.createServer((req, res) => {
+    req.resume().on('end', () => {
+      if (req.url!.includes('flaky') && req.method === 'PUT' && puts++ < 1) { res.statusCode = 500; return res.end('<Error><Code>InternalError</Code></Error>') }
+      if (req.url!.includes('flaky') && req.method === 'GET' && gets++ < 1) { res.statusCode = 429; return res.end('<Error><Code>TooManyRequests</Code></Error>') }
+      if (req.url!.includes('down')) { busy++; res.statusCode = 503; return res.end('<Error><Code>SlowDown</Code></Error>') }
+      if (req.url!.includes('never')) { refused++; res.statusCode = 501; return res.end('<Error><Code>NotImplemented</Code></Error>') }
+      if (req.url!.includes('drop')) { drops++; return req.socket.destroy() }
+      res.end(req.method === 'GET' ? 'ok' : '')
+    })
+  }).listen(0)
+  try {
+    const cfg = { endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`, region: '', bucket: 'b', key_id: 'k', secret: 's', prefix: 'flaky/' }
+    await checkS3(cfg)
+    expect([puts, gets]).toEqual([2, 2]) // one 500 and one 429, then the retries passed
+    await expect(checkS3({ ...cfg, prefix: 'down/' })).rejects.toThrow(/^S3 PUT 503: SlowDown$/)
+    expect(busy).toBe(3)
+    await expect(checkS3({ ...cfg, prefix: 'never/' })).rejects.toThrow(/^S3 PUT 501: NotImplemented$/)
+    expect(refused).toBe(1) // 501 is for good: asked once
+    await expect(checkS3({ ...cfg, prefix: 'drop/' })).rejects.toThrow()
+    expect(drops).toBe(3)
+  } finally { server.close() }
+})

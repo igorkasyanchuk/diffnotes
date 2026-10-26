@@ -13,7 +13,7 @@ import {
   DATA_DIR, DB_FILE, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
   sessionSecret, sha256, unseal, verifyPassword,
 } from './db.ts'
-import { applyLifecycle, s3FromEnv, storage } from './storage.ts'
+import { s3FromEnv, storage } from './storage.ts'
 import type { S3Config } from './storage.ts'
 import type { User } from './db.ts'
 
@@ -31,7 +31,7 @@ const RISKS = ['low', 'medium', 'high'] // an annotation's optional risk: where 
 const MAX_ACCOUNT = limit('MAX_ACCOUNT_MB', 1024) * MB // files of all of an account's pull requests
 const MAX_PULLS = limit('MAX_PULLS', 1000) // live pull requests per account
 const MAX_ACCOUNTS = limit('MAX_ACCOUNTS', 10) // accounts one user owns: with open sign-up, each one more quota
-const MIN_FREE_DISK = limit('MIN_FREE_DISK_MB', 100) * MB // uploads to disk stop before the volume is full
+const MIN_FREE_DISK = limit('MIN_FREE_DISK_MB', 100) * MB // uploads stop before the data volume is full
 const INVITE_DAYS = 7
 const ROOT = path.resolve(import.meta.dirname, '..')
 // without PUBLIC_URL the Host header decides, and it lands in install.sh (shell) and HTML: only a plain host[:port] passes
@@ -196,8 +196,15 @@ app.post('/api/login', async (c) => {
     failed(keys)
     return c.json({ error: 'Wrong email or password' }, 401)
   }
+  // the GitHub account a sign-in found this user by (callback below): linked now that the password proved it
+  const link = JSON.parse((await getSignedCookie(c, SECRET, 'ghlink')) || 'null') as { user: string; gh: string; next: string } | null
+  if (link) {
+    deleteCookie(c, 'ghlink', { path: '/api/login' })
+    if (link.user === row.id) db.prepare('update users set github_id = ? where id = ? and github_id is null and not exists (select 1 from users where github_id = ?)').run(link.gh, row.id, link.gh)
+  }
   await startSession(c, row.id)
-  return c.json({ ok: true })
+  // where the GitHub sign-in was headed (an invitation, /demo): a path here, checked by localPath() when it began
+  return c.json({ ok: true, ...(link?.user === row.id && { next: link.next }) })
 })
 
 app.post('/api/logout', async (c) => {
@@ -256,21 +263,21 @@ app.get('/auth/github/callback', async (c) => {
   // the primary email first: that's the one a new user gets
   const verified = (Array.isArray(emails) ? emails : []).filter((e) => e.verified).sort((a, b) => Number(b.primary) - Number(a.primary)).map((e) => e.email)
   if (!profile?.id || !verified.length) return back('Your GitHub account needs a verified email')
-  const ghId = String(profile.id), byEmail = db.prepare('select id, github_id from users where email = ?')
+  const ghId = String(profile.id), byEmail = db.prepare('select id, github_id, password from users where email = ?')
   let userId = (db.prepare('select id from users where github_id = ?').get(ghId) as { id: string } | undefined)?.id
   if (!userId) {
-    const found = verified.map((e) => byEmail.get(e) as { id: string; github_id: string | null } | undefined).find(Boolean)
+    const found = verified.map((e) => byEmail.get(e) as { id: string; github_id: string | null; password: string } | undefined).find(Boolean)
     // linked already, to another GitHub account (not this id, or the lookup above found it): that one signs it in
     if (found?.github_id) return back('That DiffNotes user signs in with another GitHub account')
-    userId = found?.id
     // An email match proves only that someone made this user with that address: an invitation checks no email, so its
-    // password may be a stranger's who invited the address to their own account. GitHub verified it: on this first link
-    // the user is GitHub's alone, and the password, sessions and tokens anyone else set go.
-    if (found) {
-      db.prepare(`update users set password = '' where id = ?`).run(found.id)
-      db.prepare('delete from sessions where user_id = ?').run(found.id)
-      db.prepare('delete from tokens where user_id = ?').run(found.id)
+    // password may be a stranger's who invited the address to their own account to catch its notes later. So a user
+    // with a password links GitHub only after signing in with that password once (or while signed in already): the
+    // real owner keeps everything, a stranger's squatted user gets nothing from the owner's GitHub sign-in.
+    if (found?.password && (await currentUser(c))?.id !== found.id) {
+      await setSignedCookie(c, 'ghlink', JSON.stringify({ user: found.id, gh: ghId, next: saved.next }), SECRET, { ...GH_COOKIE, path: '/api/login' })
+      return back('Sign in with your DiffNotes password once: then this GitHub account is linked to it')
     }
+    userId = found?.id
   }
   if (!userId) {
     const invited = verified.find((e) => db.prepare('select 1 from invites where email = ? and expires_at > ?').get(e, now()))
@@ -351,13 +358,18 @@ app.delete('/api/me', async (c) => {
   checkPassword(user, body.password, 'Password is wrong')
   if (user.admin && (db.prepare('select count(*) as n from users where admin = 1').get() as { n: number }).n === 1)
     fail(400, 'You are the only super admin: make another user super admin first, or nobody can run this server')
-  const owned = db.prepare(`select account_id from memberships where user_id = ? and role = 'owner'`).all(user.id) as { account_id: string }[]
-  const dropped = owned.map((o) => dropAccount(o.account_id))
-  db.prepare('delete from users where id = ?').run(user.id)
+  const dropped = deleteUser(user.id)
   deleteCookie(c, 'sid', { path: '/' })
-  await Promise.all(dropped)
+  await dropped
   return c.json({ ok: true })
 })
+// a user with the accounts it owns and everything in them; its sessions, tokens and memberships cascade
+function deleteUser(id: string) {
+  const owned = db.prepare(`select account_id from memberships where user_id = ? and role = 'owner'`).all(id) as { account_id: string }[]
+  const dropped = owned.map((o) => dropAccount(o.account_id))
+  db.prepare('delete from users where id = ?').run(id)
+  return Promise.all(dropped)
+}
 
 app.put('/api/password', async (c) => {
   const body = await json(c), user = c.get('user')
@@ -416,7 +428,7 @@ const s3Config = () => s3FromEnv(process.env) ?? legacyS3()
 const store = storage(UPLOADS, s3Config, () => !!s3FromEnv(process.env))
 
 // Deletes pull requests and then their files (rows first, so a failed delete in the bucket never leaves a live PR without
-// files; the bucket's lifecycle rule catches anything left over).
+// files).
 async function dropPulls(ids: string[]) {
   if (!ids.length) return
   const marks = ids.map(() => '?').join(',')
@@ -425,7 +437,7 @@ async function dropPulls(ids: string[]) {
   await store.remove(files)
 }
 export async function purge() {
-  const ids = purgeExpired(demoPull()?.id)
+  const ids = purgeExpired(demoPull()?.id ?? demoTarget()?.id)
   await dropPulls(ids)
   return ids.length
 }
@@ -461,8 +473,8 @@ app.get('/api/accounts/:id', (c) => {
 
 // what the account holds: people, repositories, annotated PRs, files and bytes on disk, latest uploads
 app.get('/api/accounts/:id/overview', (c) => {
-  const id = c.req.param('id')
-  role(id, c.get('user'))
+  const id = c.req.param('id'), user = c.get('user')
+  role(id, user)
   const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, u.email as uploader,
     (select count(*) from annotations n where n.pull_id = p.id) as annotations,
     (select count(*) from files f where f.pull_id = p.id) as files, (select coalesce(sum(f.size), 0) from files f where f.pull_id = p.id) as bytes
@@ -485,7 +497,8 @@ app.get('/api/accounts/:id/overview', (c) => {
       annotations: byRepo.reduce((n, r) => n + r.annotations, 0), files: byRepo.reduce((n, r) => n + r.files, 0),
       bytes: byRepo.reduce((n, r) => n + r.bytes, 0), expiring_soon: pulls.filter((p) => p.expires_at < soon).length,
     },
-    retention_days: RETENTION_DAYS, repositories: byRepo, recent: pulls.slice(0, 10),
+    // titles and uploaders only for members: a super admin outside the account sees counts
+    retention_days: RETENTION_DAYS, repositories: byRepo, recent: isMember(id, user) ? pulls.slice(0, 10) : [],
   })
 })
 
@@ -623,14 +636,23 @@ function pullOut(p: Pull, user: User) {
 
 // DEMO_PR=owner/name#12 (or the PR's URL, for env files that read # as a comment): the landing page's live demo. That pull request's notes, as a super admin uploaded them, are
 // readable by every signed-in user (anyone can sign up, connect the extension and see them) and never expire.
+// DEMO_PR as [repository, number]; a URL may go on past the number (…/pull/12/files, …/merge_requests/12/diffs)
+const demoName = () => (process.env.DEMO_PR ?? '').trim().match(/^(.+?)(?:#|\/pull\/|\/-\/merge_requests\/|\/pull-requests\/)(\d+)(?:[/?#].*)?$/)
+// the newest PR by that name a super admin uploaded to last, shown or not: the purge spares it, so a teammate's upload
+// that hides the demo for now doesn't also get it deleted for good
+const demoTarget = () => {
+  const m = demoName()
+  return m ? db.prepare(`${PULL_SELECT} join users pu on pu.id = p.user_id where r.full_name = ? and p.number = ? and pu.admin = 1
+    order by p.updated_at desc limit 1`).get(repoName(m[1]), Number(m[2])) as Pull | undefined : undefined
+}
 export const demoPull = () => {
-  // a URL may go on past the number (…/pull/12/files, …/merge_requests/12/diffs)
-  const m = (process.env.DEMO_PR ?? '').trim().match(/^(.+?)(?:#|\/pull\/|\/-\/merge_requests\/|\/pull-requests\/)(\d+)(?:[/?#].*)?$/)
+  const m = demoName()
   if (!m) return
-  // a PR whose last upload (title, summary, deploy card) and every note and file a super admin wrote: a teammate's upload
-  // there would turn public otherwise
+  // a PR whose last upload, title, summary and deploy card (fields_by: null once a blank upload kept a teammate's) and
+  // every note and file a super admin wrote: a teammate's content there would turn public otherwise
   const byAdmin = (t: string) => `not exists (select 1 from ${t} x left join users u on u.id = x.user_id where x.pull_id = p.id and u.admin is not 1)`
   return db.prepare(`${PULL_SELECT} join users pu on pu.id = p.user_id where r.full_name = ? and p.number = ? and pu.admin = 1
+    and exists (select 1 from users fu where fu.id = p.fields_by and fu.admin = 1)
     and ${byAdmin('annotations')} and ${byAdmin('files')}
     and exists (select 1 from annotations a join users u on u.id = a.user_id where a.pull_id = p.id and u.admin = 1)
     order by p.updated_at desc limit 1`).get(repoName(m[1]), Number(m[2])) as Pull | undefined
@@ -740,6 +762,9 @@ function repositoryFor(fullName: string, number: number, user: User): { id: stri
   return { id: null, account_id: acc?.account_id ?? fail(403, `${fullName} is not connected to your account yet: ask an account admin to connect it in DiffNotes`) }
 }
 
+// the notes JSON of a multipart PUT or an MCP upload_notes: MAX_BODY_KB, like a JSON body (json() above)
+const capPayload = (bytes: number) => { if (bytes > MAX_BODY) fail(413, `payload is over ${MAX_BODY / 1024} KB`) }
+
 // Replaces the uploader's own annotations and files on the pull request (teammates' stay): re-running the skill after a push is idempotent.
 // Body: JSON, or multipart with a `payload` JSON field plus `file` fields; `attachment:<name>` in Markdown becomes the file's URL.
 app.put(PULL_PATH, async (c) => {
@@ -747,6 +772,7 @@ app.put(PULL_PATH, async (c) => {
   if ((c.req.header('content-type') ?? '').startsWith('multipart/')) {
     const form = await c.req.formData()
     const raw = form.get('payload') // curl -F payload=@file.json sends a file, -F payload='{…}' a string
+    capPayload(raw instanceof File ? raw.size : Buffer.byteLength(String(raw ?? '')))
     try { payload = JSON.parse(raw instanceof File ? await raw.text() : String(raw ?? '{}')) } catch { fail(400, 'payload is not JSON') }
     // all files together can't pass MAX_PULL: bodyLimit on /api/* already refuses a bigger request
     files = await Promise.all(form.getAll('file').filter((f): f is File => f instanceof File)
@@ -756,6 +782,7 @@ app.put(PULL_PATH, async (c) => {
 })
 
 type Upload = { name: string; data: Buffer }
+type Fields = { title: string; head_sha: string; summary: string; deploy: string } // a PR's own, set by its latest upload
 type Rules = { risk?: boolean; deploy?: boolean; screenshots?: string }
 // a path glob: ** any directories, * and ? within one name; matched against the whole path. A table, not a RegExp:
 // *a*a*a*b as a regex backtracks for minutes on a long path, and any account owner can set one (the server would stall)
@@ -808,7 +835,8 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   if (datas.some((d, i) => d.length > (types[i].startsWith('video/') ? MAX_VIDEO : MAX_FILE))) fail(413, `Files up to ${MAX_FILE / MB}MB each, videos (mp4, webm) up to ${MAX_VIDEO / MB}MB`)
 
   const fullName = repoName(repo), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
-  const existing = db.prepare('select id from pulls where repository_id = ? and number = ?').get(repoFound, number) as { id: string } | undefined
+  const existing = db.prepare('select id, title, head_sha, summary, deploy, fields_by from pulls where repository_id = ? and number = ?')
+    .get(repoFound, number) as (Fields & { id: string; fields_by: string | null }) | undefined
   // an upload replaces the uploader's own notes and files; teammates' stay, and count towards the PR's limits
   // (taken: their file names, which this upload's files don't get)
   const theirNotes = existing ? (db.prepare('select count(*) as n from annotations where pull_id = ? and user_id is not ?').get(existing.id, user.id) as { n: number }).n : 0
@@ -818,7 +846,11 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const deploy = str(payload.deploy, 20_000) // blank or not a string: no card
   const notes = list.map((a, i) => ({ path: str(a.path, 500) || fail(400, `annotations[${i}].path is required`), risk: RISKS.includes(a.risk as string) ? a.risk as string : null }))
   const rules = repoFound ? JSON.parse((db.prepare('select rules from repositories where id = ?').get(repoFound) as { rules: string }).rules) as Rules : {}
-  const missing = unmet(rules, deploy, notes, types)
+  // the PR's own fields (title, commit, summary, deploy card) are the latest upload's; while teammates' notes or files
+  // are there, a blank one keeps what it was (their upload may have set it, and its summary link their files). A kept
+  // deploy card meets the rule: removing only your notes (an empty upload) needn't re-send a teammate's card
+  const keep = theirNotes + taken.length > 0
+  const missing = unmet(rules, deploy || (keep ? existing!.deploy : ''), notes, types)
   if (missing.length) fail(422, `${fullName}'s rules ask for ${missing.join('; ')}. Add it and upload again.`)
   // account quotas, so one leaked token can't fill the disk: live pull requests, and file bytes (this PR's old files don't count)
   if (!existing && (db.prepare('select count(*) as n from pulls p join repositories r on r.id = p.repository_id where r.account_id = ?').get(accountId) as { n: number }).n >= MAX_PULLS)
@@ -826,10 +858,10 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const used = (db.prepare(`select coalesce(sum(f.size), 0) as n from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id
     where r.account_id = ? and not (p.id is ? and f.user_id is ?)`).get(accountId, existing?.id ?? null, user.id) as { n: number }).n
   const bytes = datas.reduce((n, d) => n + d.length, 0)
-  if (bytes && store.current() === 'disk') {
-    const disk = fs.statfsSync(DATA_DIR)
-    if (disk.bavail * disk.bsize - bytes < MIN_FREE_DISK) fail(507, 'The server is low on disk space: ask its admin')
-  }
+  // every upload that adds something, also notes without files: they go into the database on the same volume. An empty
+  // one only removes yours (what the skill does to clear them), so it passes and frees space
+  const disk = list.length || files.length ? fs.statfsSync(DATA_DIR) : null
+  if (disk && disk.bavail * disk.bsize - (store.current() === 'disk' ? bytes : 0) < MIN_FREE_DISK) fail(507, 'The server is low on disk space: ask its admin')
   if (used + bytes > MAX_ACCOUNT) fail(413, `This account's files are over ${MAX_ACCOUNT / MB}MB; delete some pull requests or wait for them to expire`)
   // connected only now: a refused upload leaves nothing behind
   const repoId = repoFound ?? randomUUID()
@@ -846,7 +878,14 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const link = (md: string) => md.replace(/attachment:([^\s)"']+)/g, (m, n: string) =>
     names.has(n) ? `/files/${id}/${encodeURIComponent(names.get(n)!)}` : m)
 
-  const summaryMd = link(String(payload.summary ?? '').slice(0, 20_000)), deployMd = link(deploy)
+  const given: Fields = { title: str(payload.title, 300), head_sha: str(payload.head_sha, 64), summary: link(String(payload.summary ?? '').slice(0, 20_000)), deploy: link(deploy) }
+  // a blank field keeps what it was (keep, above); fields_by: who wrote the PR's fields, null once a kept one may be someone else's
+  const fields = { ...given }
+  let by: string | null = user.id
+  if (keep) for (const k of Object.keys(given) as (keyof Fields)[]) if (!given[k] && existing![k]) {
+    fields[k] = existing![k]
+    if (k !== 'head_sha' && existing!.fields_by !== user.id) by = null
+  }
   // after teammates' notes, so each author's stay together and in their own order
   const base = existing ? (db.prepare('select coalesce(max(position), -1) + 1 as n from annotations where pull_id = ? and user_id is not ?').get(id, user.id) as { n: number }).n : 0
   const rows = list.map((a, i) => {
@@ -854,24 +893,19 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
     return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk] as const
   })
-  // the previous upload's files go once the new rows are in, then the new files are written under the current backend
+  // the uploader's previous files: their rows go with the new rows in, their bytes after the new ones are written (below)
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ? and user_id is ?').all(id, user.id) as { pull: string; name: string; backend: string }[]
   const backend = store.current()
   db.exec('begin')
   try {
     if (existing) {
-      // the PR's own fields (title, commit, summary, deploy card) are the latest upload's; while teammates' notes or
-      // files are there, a blank one keeps what it was (their upload may have set it, and its summary link their files)
-      const keep = theirNotes + taken.length > 0 ? 1 : 0
-      db.prepare(`update pulls set title = iif(? and ? = '', title, ?), head_sha = iif(? and ? = '', head_sha, ?),
-        summary = iif(? and ? = '', summary, ?), deploy = iif(? and ? = '', deploy, ?), user_id = ?, updated_at = ?, expires_at = ? where id = ?`)
-        .run(...[str(payload.title, 300), str(payload.head_sha, 64), summaryMd, deployMd].flatMap((v) => [keep, v, v]),
-          user.id, now(), daysFromNow(RETENTION_DAYS), id)
+      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, deploy = ?, fields_by = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
+        .run(fields.title, fields.head_sha, fields.summary, fields.deploy, by, user.id, now(), daysFromNow(RETENTION_DAYS), id)
       db.prepare('delete from annotations where pull_id = ? and user_id is ?').run(id, user.id)
     } else {
-      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, user_id, created_at, updated_at, expires_at)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, str(payload.title, 300), str(payload.head_sha, 64),
-        summaryMd, deployMd, user.id, now(), now(), daysFromNow(RETENTION_DAYS))
+      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, user_id, created_at, updated_at, expires_at, fields_by)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, fields.title, fields.head_sha,
+        fields.summary, fields.deploy, user.id, now(), now(), daysFromNow(RETENTION_DAYS), by)
     }
     const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r, user.id)
@@ -880,10 +914,13 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
     for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend, user.id)
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }
-  // ponytail: rows commit before the bytes land; a failed write shows as a missing image until the next upload.
+  // The new bytes first, then the old ones go, but for those just overwritten (same backend and name): a file re-uploaded
+  // under its name keeps its previous bytes in the bucket when the new write fails. The rest go even then: no row points
+  // at them any more, so nothing would ever purge or count them.
+  // ponytail: rows commit before the bytes land; a failed write shows as a missing (or, same name, the previous) image until the next upload.
   // Two uploads of one PR at the same moment can interleave here and orphan the first one's bytes; a per-PR lock if that shows up.
-  await store.remove(old)
-  await Promise.all(stored.map((name, i) => store.put(backend, id, name, datas[i], types[i])))
+  const replaced = old.filter((o) => !(o.backend === backend && stored.includes(o.name)))
+  await Promise.all(stored.map((name, i) => store.put(backend, id, name, datas[i], types[i]))).finally(() => store.remove(replaced))
   return { id, url: `${origin}/pulls/${id}`, annotations: rows.length, files: files.length }
 }
 
@@ -975,7 +1012,7 @@ const tools: Record<string, (user: User, a: Args, origin: string) => unknown> = 
   get_notes: (user, a) => pullOut(pullOf(user, a), user),
   upload_notes: (user, a, origin) => {
     // the JSON body has MAX_BODY_KB, like PUT's; the files' share of the request is bounded by bodyLimit below
-    if (JSON.stringify(a.payload ?? null).length > MAX_BODY) fail(413, `payload is over ${MAX_BODY / 1024} KB`)
+    capPayload(Buffer.byteLength(JSON.stringify(a.payload ?? null)))
     const files = a.files == null ? [] : Array.isArray(a.files) ? a.files as Args[] : fail(400, 'files must be an array')
     return savePull(user, String(a.repo ?? ''), Number(a.number), a.payload, files.map((f, i) => ({
       name: str(f?.name, 300) || fail(400, `files[${i}].name is required`),
@@ -1112,6 +1149,16 @@ app.get('/api/admin/stats', (c) => {
 })
 
 // promote or demote another super admin; your own flag stays, so the server always keeps one
+// delete another user (a super admin is demoted first): the way out when a stranger accepted an invitation for someone's
+// address and the real owner, whose GitHub sign-in waits for that user's password, can't get in
+app.delete('/api/admin/users/:id', async (c) => {
+  const id = c.req.param('id'), u = db.prepare('select admin from users where id = ?').get(id) as { admin: number } | undefined
+  if (id === c.get('user').id) fail(400, 'Delete yourself on Settings')
+  if (!u) fail(404, 'Not found')
+  if (u!.admin) fail(400, 'Take away the super admin flag first')
+  await deleteUser(id)
+  return c.json({ ok: true })
+})
 app.put('/api/admin/users/:id', async (c) => {
   if (c.req.param('id') === c.get('user').id) fail(400, 'You cannot change your own super admin flag')
   const res = db.prepare('update users set admin = ? where id = ?').run((await json(c)).admin === true ? 1 : 0, c.req.param('id'))
@@ -1127,11 +1174,6 @@ app.get('/api/admin/storage', (c) => {
     storage: { kind: env ? 's3' : 'disk', type: (process.env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk', ...(cfg && { source: env ? 'env' : 'settings', endpoint: cfg.endpoint, region: cfg.region, bucket: cfg.bucket, prefix: cfg.prefix, key_id: cfg.key_id }) },
     counts, retention_days: RETENTION_DAYS,
   })
-})
-app.post('/api/admin/storage/lifecycle', async (c) => {
-  const cfg = s3Config() ?? fail(400, 'S3 storage is not configured')
-  try { await applyLifecycle(cfg, RETENTION_DAYS + 1) } catch (e) { fail(400, (e as Error).message) }
-  return c.json({ ok: true, days: RETENTION_DAYS + 1 })
 })
 
 // --- skill install, health, static web app

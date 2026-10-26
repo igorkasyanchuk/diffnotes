@@ -55,13 +55,13 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 # 1. the server (any Docker host: a VPS, Coolify, Dokku…)
 git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
 docker build -t diffnotes . && docker run -d -p 3000:3000 -v diffnotes:/data \
-  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.company.com diffnotes
+  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.example.com diffnotes
 docker logs <container> | grep "first admin"        # the generated password
 #    or: docker compose up -d (docker-compose.yml), or Render / Fly.io / Railway / Coolify: docs/deploy.md
 
 # 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
-curl -fsSL https://reviews.company.com/install.sh | sh
-export DIFFNOTES_URL=https://reviews.company.com DIFFNOTES_TOKEN=dn_…   # token from /settings
+curl -fsSL https://reviews.example.com/install.sh | sh
+export DIFFNOTES_URL=https://reviews.example.com DIFFNOTES_TOKEN=dn_…   # token from /settings
 
 # 3. the extension: https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd
 #    (or chrome://extensions → Developer mode → Load unpacked → extension/)
@@ -69,7 +69,7 @@ export DIFFNOTES_URL=https://reviews.company.com DIFFNOTES_TOKEN=dn_…   # toke
 ```
 
 Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab. No skills in your agent?
-Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"` ([more](docs/skill.md#mcp-instead-of-the-skill)).
+Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https://reviews.example.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"` ([more](docs/skill.md#mcp-instead-of-the-skill)).
 
 ## Docs
 

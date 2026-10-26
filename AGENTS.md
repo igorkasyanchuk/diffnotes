@@ -14,7 +14,7 @@ See README.md for what it is. Same stack and habits as specdrop.
 ```
 server/db.ts      schema, password hashing, bootstrap (first admin + account), tokens, purgeExpired
 server/app.ts     all routes: auth (password, GitHub OAuth), invites, accounts, repos, tokens, /api/v1 pulls (skill + extension), /mcp (MCP tools over the same savePull/findPull), /files, /install.sh
-server/storage.ts file bytes on disk or in an S3-compatible bucket (STORAGE_TYPE + provider env vars, SigV4 signing, lifecycle rule, bucket check)
+server/storage.ts file bytes on disk or in an S3-compatible bucket (STORAGE_TYPE + provider env vars, SigV4 signing, retries, bucket check)
 server/index.ts   start, hourly purge, SIGTERM
 docs/             user docs linked from README (install, deploy, skill, extension, accounts, storage, security, api) + images;
                   docs/store/ the Chrome Web Store listing and its images

@@ -11,7 +11,7 @@ services:
       - diffnotes:/data
     environment:
       # server
-      PUBLIC_URL: https://reviews.company.com   # your https:// origin
+      PUBLIC_URL: https://reviews.example.com   # your https:// origin
       ADMIN_EMAIL: you@company.com              # the first admin, only used when there are no users yet
       RETENTION_DAYS: 30
       # ADMIN_PASSWORD: ""                      # default: random, printed once in the logs

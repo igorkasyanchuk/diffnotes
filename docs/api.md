@@ -58,7 +58,7 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - Files: up to `MAX_FILE_MB` each (1 MB), `.mp4` / `.webm` recordings up to `MAX_VIDEO_MB` (2 MB), `MAX_FILES` files
   (30) and `MAX_PULL_MB` (20 MB) per request; a JSON body up to `MAX_BODY_KB` (1024). Defaults in brackets, see [install](install.md).
 - Account limits: `MAX_PULLS` live PRs and `MAX_ACCOUNT_MB` of files (see [install](install.md)); over them, `413`.
-  Disk storage below `MIN_FREE_DISK_MB` free: `507`.
+  Less than `MIN_FREE_DISK_MB` free on the server's volume: `507` (an empty upload, which only removes yours, still passes). A multipart `payload` is held to `MAX_BODY_KB` like a JSON body.
 
 `GET` returns the stored notes with their `id`, `risk`, `mine` (yours: what your next upload replaces) and `can_delete`,
 the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove) and `can_delete_all`. A note is removed by its author or an
@@ -93,20 +93,20 @@ back as a tool result with `isError: true` and the same message. The whole reque
 
 ```bash
 # Claude Code
-claude mcp add --transport http diffnotes https://reviews.company.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
+claude mcp add --transport http diffnotes https://reviews.example.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"
 ```
 
 Cursor, `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 
 ```json
-{ "mcpServers": { "diffnotes": { "url": "https://reviews.company.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
+{ "mcpServers": { "diffnotes": { "url": "https://reviews.example.com/mcp", "headers": { "Authorization": "Bearer ${env:DIFFNOTES_TOKEN}" } } } }
 ```
 
 Codex, `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.diffnotes]
-url = "https://reviews.company.com/mcp"
+url = "https://reviews.example.com/mcp"
 bearer_token_env_var = "DIFFNOTES_TOKEN"
 ```
 
