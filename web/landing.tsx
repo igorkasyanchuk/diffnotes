@@ -39,7 +39,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
   return <>
     <section className="lp-hero">
       <div className="lp-tags"><span>free</span><span>self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
-      <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
+      <h1 className="lp-h1">Your agent writes the review notes. <em>Your team reads them right in the diff.</em></h1>
     </section>
     <Demo />
     <section className="lp-after">
