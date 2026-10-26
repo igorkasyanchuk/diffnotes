@@ -10,7 +10,7 @@ run on your GitLab's host yet.
 
 ## Install (Chrome, Edge, Brave, Arc)
 
-Until it is in the Chrome Web Store, load it from this repository:
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd), or load it from this repository:
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
@@ -18,7 +18,7 @@ Until it is in the Chrome Web Store, load it from this repository:
    **Settings**, press **Connect** and allow access to that server. The token goes with every request, so the server
    must be `https://` (plain `http://` only for `localhost`).
 
-After `git pull`, press the reload icon on the extension's card.
+The store version updates itself. Unpacked: after `git pull`, press the reload icon on the extension's card.
 
 ## Firefox
 

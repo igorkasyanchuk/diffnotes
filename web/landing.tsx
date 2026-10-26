@@ -68,7 +68,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
-        <p className="hint">Load it in Chrome or Firefox, paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
+        <p className="hint">Install it from the Chrome Web Store (or load it in Firefox), paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
+        <p><a href="https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd" className="btn">add to Chrome →</a></p>
       </li>
     </ol>
     <p>{cta}</p>

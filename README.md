@@ -60,7 +60,8 @@ docker logs <container> | grep "first admin"        # the generated password
 curl -fsSL https://reviews.company.com/install.sh | sh
 export DIFFNOTES_URL=https://reviews.company.com DIFFNOTES_TOKEN=dn_…   # token from /settings
 
-# 3. the extension: chrome://extensions → Developer mode → Load unpacked → extension/
+# 3. the extension: https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd
+#    (or chrome://extensions → Developer mode → Load unpacked → extension/)
 #    then its popup: server + token → Connect
 ```
 
