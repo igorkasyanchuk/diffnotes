@@ -4,7 +4,7 @@ app = "diffnotes" # app names are global on Fly: pick your own
 primary_region = "fra"
 
 [env]
-  # every variable: docs/install.md (Environment); secrets go in `fly secrets set`, e.g. BUGSINK_DSN
+  # every variable: docs/install.md (Environment); secrets go in `fly secrets set`, e.g. BUGSINK_DSN, GITHUB_CLIENT_SECRET
   PUBLIC_URL = "https://diffnotes.fly.dev" # your app's https:// origin
   ADMIN_EMAIL = "you@company.com"
   RETENTION_DAYS = "30"

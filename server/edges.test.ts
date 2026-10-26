@@ -90,7 +90,7 @@ describe('people', () => {
   it('signs out', async () => {
     const cookie = await login('dev@example.com', 'dev-password')
     expect((await call('/api/logout', { cookie, method: 'POST' })).status).toBe(200)
-    expect((await call('/api/me', { cookie })).data).toEqual({ user: null })
+    expect((await call('/api/me', { cookie })).data).toMatchObject({ user: null })
     expect((await call('/api/logout', { method: 'POST' })).status).toBe(200)
   })
 
@@ -98,7 +98,7 @@ describe('people', () => {
     const other = await login('dev@example.com', 'dev-password')
     expect((await call('/api/password', { cookie: dev, method: 'PUT', body: { current: 'dev-password', password: 'short' } })).status).toBe(400)
     expect((await call('/api/password', { cookie: dev, method: 'PUT', body: { current: 'dev-password', password: 'new-password' } })).status).toBe(200)
-    expect((await call('/api/me', { cookie: other })).data).toEqual({ user: null })
+    expect((await call('/api/me', { cookie: other })).data).toMatchObject({ user: null })
     expect((await call('/api/me', { cookie: dev })).data.user.id).toBe(devId)
     for (let i = 0; i < 10; i++) expect((await call('/api/password', { cookie: dev, method: 'PUT', body: { current: 'wrong' } })).status).toBe(401)
     expect((await call('/api/password', { cookie: dev, method: 'PUT', body: { current: 'new-password', password: 'newer-password' } })).status).toBe(429)
@@ -292,5 +292,93 @@ describe('repository rules and the deploy card', () => {
 
     expect((await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: {} })).data).toEqual({})
     expect((await put({ annotations: [{ path: 'web/a.tsx', body: 'x' }] })).status).toBe(200)
+  })
+})
+
+describe('GitHub sign-in', () => {
+  type Email = { email: string; primary: boolean; verified: boolean }
+  const start = async (next = '') => {
+    const r = await call(`/auth/github${next}`)
+    return { status: r.status, loc: new URL(r.res.headers.get('location') ?? 'x:'), cookie: r.res.headers.get('set-cookie')?.split(';')[0] ?? '' }
+  }
+  // the whole round trip: our redirect, then GitHub sending the browser back, with GitHub's API answered by the stubs
+  const roundTrip = async (profile: object, emails: Email[], { next = '', token = 'gho_x', state = '' } = {}) => {
+    const s = await start(next)
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (u) => {
+      const url = String(u)
+      if (url === 'https://github.com/login/oauth/access_token') return Response.json(token ? { access_token: token } : { error: 'bad_verification_code' })
+      return Response.json(url.endsWith('/user') ? profile : emails)
+    })
+    try {
+      const r = await call(`/auth/github/callback?code=c1&state=${state || s.loc.searchParams.get('state')}`, { headers: { cookie: s.cookie } })
+      return { to: r.res.headers.get('location') ?? '', cookie: r.res.headers.get('set-cookie')?.match(/sid=[^;]+/)?.[0] ?? '' }
+    } finally { spy.mockRestore() }
+  }
+  const mail = (email: string, primary = true, verified = true) => ({ email, primary, verified })
+
+  it('is off without an OAuth app', async () => {
+    expect((await start()).status).toBe(404)
+    expect((await call('/auth/github/callback?code=x&state=y')).status).toBe(404)
+    expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false })
+  })
+
+  it('signs up, links by email, joins invitations, refuses strangers', async () => {
+    process.env.GITHUB_CLIENT_ID = 'cid'
+    process.env.GITHUB_CLIENT_SECRET = 'csecret'
+    try {
+      const s = await start('?next=//evil.example')
+      expect(s.status).toBe(302)
+      expect(s.loc.origin + s.loc.pathname).toBe('https://github.com/login/oauth/authorize')
+      expect(s.loc.searchParams.get('redirect_uri')).toBe('https://dn.example/auth/github/callback')
+      expect((await call('/api/me')).data).toEqual({ user: null, github: true, signup: false })
+
+      const octo = { id: 7, login: 'octo', name: null }
+      expect((await roundTrip(octo, [mail('octo@example.com')], { state: 'forged' })).to).toContain('expired')
+      expect((await roundTrip(octo, [mail('octo@example.com')])).to).toContain('ask%20a%20teammate') // sign-up is closed
+      expect((await roundTrip(octo, [mail('octo@example.com', true, false)])).to).toContain('verified%20email')
+      expect((await roundTrip(octo, [mail('octo@example.com')], { token: '' })).to).toContain('refused')
+      const down = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+      const d = await start()
+      expect((await call(`/auth/github/callback?code=c&state=${d.loc.searchParams.get('state')}`, { headers: { cookie: d.cookie } })).res.headers.get('location')).toContain('did%20not%20answer')
+      down.mockRestore()
+
+      // an existing user: found by a verified (here: secondary) email, then by the GitHub id
+      const a = await roundTrip({ id: 8, login: 'boss' }, [mail('boss@gh.example'), mail('admin@example.com', false)], { next: '?next=/settings' })
+      expect(a.to).toBe('/settings')
+      expect((await call('/api/me', { cookie: a.cookie })).data.user.email).toBe('admin@example.com')
+      expect((await roundTrip({ id: 8 }, [mail('renamed@gh.example')])).cookie).not.toBe('')
+
+      // an invitation for one of the GitHub emails: the user is made without an account, then joins without a password
+      const { token: inv } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { email: 'joiner@example.com' } })).data
+      const j = await roundTrip({ id: 9, login: 'joiner' }, [mail('joiner@example.com')], { next: `?next=/invite/${inv}` })
+      expect(j.to).toBe(`/invite/${inv}`)
+      expect((await call(`/api/invites/${inv}`, { cookie: j.cookie })).data).toMatchObject({ exists: true, signed_in: true })
+      expect((await call(`/api/invites/${inv}/accept`, { cookie: j.cookie, body: {} })).status).toBe(200)
+      expect((await call('/api/me', { cookie: j.cookie })).data.accounts.map((x: { id: string }) => x.id)).toEqual([accountId])
+
+      // open sign-up: a new user with a team account of their own, no password until they set one
+      process.env.ALLOW_SIGNUP = '1'
+      const n = await roundTrip(octo, [mail('octo@example.com')])
+      expect(n.to).toBe('/dashboard')
+      const me = (await call('/api/me', { cookie: n.cookie })).data
+      expect(me).toMatchObject({ has_password: false, github: true, signup: true, accounts: [{ name: 'octo team', role: 'owner' }] })
+      expect(me.user.name).toBe('octo')
+      expect((await call('/api/login', { body: { email: 'octo@example.com', password: '' } })).status).toBe(401)
+      expect((await call('/api/password', { cookie: n.cookie, method: 'PUT', body: { password: 'octo-pass-1' } })).status).toBe(200)
+      expect((await call('/api/me', { cookie: n.cookie })).data.has_password).toBe(true)
+    } finally {
+      delete process.env.GITHUB_CLIENT_ID; delete process.env.GITHUB_CLIENT_SECRET; delete process.env.ALLOW_SIGNUP
+    }
+  })
+
+  it('deletes a password-less user on the session alone', async () => {
+    process.env.GITHUB_CLIENT_ID = 'cid'; process.env.GITHUB_CLIENT_SECRET = 'csecret'; process.env.ALLOW_SIGNUP = '1'
+    try {
+      const n = await roundTrip({ id: 10, login: 'gone' }, [mail('gone@example.com')])
+      expect((await call('/api/me', { cookie: n.cookie, method: 'DELETE', body: {} })).status).toBe(200)
+      expect(db.prepare('select 1 from users where email = ?').get('gone@example.com')).toBeUndefined()
+    } finally {
+      delete process.env.GITHUB_CLIENT_ID; delete process.env.GITHUB_CLIENT_SECRET; delete process.env.ALLOW_SIGNUP
+    }
   })
 })

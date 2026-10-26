@@ -22,7 +22,7 @@ describe('diffnotes', () => {
   it('rejects a wrong password and anonymous API calls', async () => {
     expect((await call('/api/login', { body: { email: 'admin@example.com', password: 'nope' } })).status).toBe(401)
     expect((await call('/api/dashboard')).status).toBe(401)
-    expect((await call('/api/me')).data).toEqual({ user: null })
+    expect((await call('/api/me')).data).toMatchObject({ user: null })
   })
 
   it('bootstraps the first admin with an account', async () => {

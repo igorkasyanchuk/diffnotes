@@ -204,6 +204,64 @@ app.post('/api/logout', async (c) => {
   return c.json({ ok: true })
 })
 
+// --- GitHub sign-in: on when GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET are set (an OAuth app whose callback is
+// <PUBLIC_URL>/auth/github/callback). It finds the user by GitHub id, then by any verified email of theirs. A new user is
+// made with ALLOW_SIGNUP=1 (with an account of their own) or for a pending invitation (they join through it).
+const github = () => (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
+  ? { id: process.env.GITHUB_CLIENT_ID, secret: process.env.GITHUB_CLIENT_SECRET } : null)
+const signupOpen = () => !!github() && process.env.ALLOW_SIGNUP === '1'
+const GH_COOKIE = { httpOnly: true, sameSite: 'Lax', path: '/auth/github', maxAge: 600, secure: (process.env.PUBLIC_URL ?? '').startsWith('https://') } as const
+
+app.get('/auth/github', async (c) => {
+  const gh = github()
+  if (!gh) return c.notFound()
+  const state = randomBytes(16).toString('base64url'), next = c.req.query('next') ?? ''
+  // only a path on this site to come back to, never //evil.example
+  await setSignedCookie(c, 'gh', JSON.stringify({ state, next: /^\/(?![/\\])/.test(next) ? next : '/dashboard' }), SECRET, GH_COOKIE)
+  const q = new URLSearchParams({ client_id: gh.id, redirect_uri: `${host(c)}/auth/github/callback`, scope: 'user:email', state })
+  return c.redirect(`https://github.com/login/oauth/authorize?${q}`)
+})
+
+app.get('/auth/github/callback', async (c) => {
+  const gh = github()
+  if (!gh) return c.notFound()
+  const back = (error: string) => c.redirect(`/login?error=${encodeURIComponent(error)}`)
+  const saved = JSON.parse((await getSignedCookie(c, SECRET, 'gh')) || 'null') as { state: string; next: string } | null
+  deleteCookie(c, 'gh', { path: '/auth/github' })
+  const code = c.req.query('code')
+  if (!saved || saved.state !== c.req.query('state') || !code) return back('GitHub sign-in expired, try again')
+  // ponytail: per IP, in memory like the login throttle; also caps how fast one address can make users
+  const ip = `gh:${clientIp(c)}`
+  if (throttle(ip, 30, 600_000)) return back('Too many attempts, wait a bit')
+  recordFailure(ip)
+  let profile: { id?: number; login?: string; name?: string | null }, emails: { email: string; primary: boolean; verified: boolean }[]
+  try {
+    const tok = await (await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: gh.id, client_secret: gh.secret, code, redirect_uri: `${host(c)}/auth/github/callback` }),
+    })).json() as { access_token?: string }
+    if (!tok.access_token) return back('GitHub refused the sign-in, try again')
+    const get = async (p: string) => (await fetch(`https://api.github.com${p}`, { headers: {
+      authorization: `Bearer ${tok.access_token}`, accept: 'application/vnd.github+json', 'user-agent': 'diffnotes' } })).json()
+    ;[profile, emails] = await Promise.all([get('/user'), get('/user/emails')])
+  } catch { return back('GitHub did not answer, try again') }
+  // the primary email first: that's the one a new user gets
+  const verified = (Array.isArray(emails) ? emails : []).filter((e) => e.verified).sort((a, b) => Number(b.primary) - Number(a.primary)).map((e) => e.email)
+  if (!profile?.id || !verified.length) return back('Your GitHub account needs a verified email')
+  const ghId = String(profile.id), byEmail = db.prepare('select id from users where email = ?')
+  let userId = (db.prepare('select id from users where github_id = ?').get(ghId) as { id: string } | undefined)?.id
+    ?? verified.map((e) => (byEmail.get(e) as { id: string } | undefined)?.id).find(Boolean)
+  if (!userId) {
+    const invited = verified.find((e) => db.prepare('select 1 from invites where email = ? and expires_at > ?').get(e, now()))
+    if (!invited && !signupOpen()) return back('No DiffNotes user for this GitHub account: ask a teammate for an invitation')
+    userId = createUser(invited ?? verified[0], '', str(profile.name) || str(profile.login))
+    if (!invited) createAccount(`${str(profile.login) || 'My'} team`, userId)
+  }
+  db.prepare('update users set github_id = ? where id = ? and github_id is null').run(ghId, userId)
+  await startSession(c, userId)
+  return c.redirect(saved.next)
+})
+
 const accountsOf = (userId: string) => db.prepare(`select a.id, a.name, m.role from accounts a join memberships m on m.account_id = a.id
   where m.user_id = ? order by a.created_at`).all(userId)
 const tokenCount = (userId: string) => (db.prepare('select count(*) as n from tokens where user_id = ?').get(userId) as { n: number }).n
@@ -211,19 +269,24 @@ const tokenCount = (userId: string) => (db.prepare('select count(*) as n from to
 // who is signed in, plus what the app layout shows around every page: their accounts and whether they have a token yet
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
-  if (!user) return c.json({ user: null })
-  return c.json({ user, accounts: accountsOf(user.id), tokens: tokenCount(user.id) })
+  const signIn = { github: !!github(), signup: signupOpen() }
+  if (!user) return c.json({ user: null, ...signIn })
+  const { password } = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
+  return c.json({ user, accounts: accountsOf(user.id), tokens: tokenCount(user.id), has_password: !!password, ...signIn })
 })
 
-// --- invitations: the only way in besides the first admin
+// --- invitations: the way in besides the first admin and GitHub sign-in
 
 const inviteRow = (token: string) => db.prepare(`select i.*, a.name as account from invites i join accounts a on a.id = i.account_id
   where i.token = ? and i.expires_at > ?`).get(token, now()) as { account_id: string; email: string; role: string; account: string } | undefined
 
-app.get('/api/invites/:token', (c) => {
+// the invitation's own user is signed in already (e.g. just came back from GitHub): joining needs no password
+const signedInAs = async (c: Context, email: string) => (await currentUser(c))?.email.toLowerCase() === email.toLowerCase()
+
+app.get('/api/invites/:token', async (c) => {
   const inv = inviteRow(c.req.param('token')) ?? fail(404, 'This invitation is invalid or expired')
   const exists = !!db.prepare('select 1 from users where email = ?').get(inv.email)
-  return c.json({ email: inv.email, account: inv.account, exists })
+  return c.json({ email: inv.email, account: inv.account, exists, signed_in: await signedInAs(c, inv.email) })
 })
 
 app.post('/api/invites/:token/accept', async (c) => {
@@ -231,7 +294,7 @@ app.post('/api/invites/:token/accept', async (c) => {
   const inv = inviteRow(token) ?? fail(404, 'This invitation is invalid or expired')
   const password = String(body.password ?? '')
   let user = db.prepare('select id, password from users where email = ?').get(inv.email) as { id: string; password: string } | undefined
-  if (user) { // same budgets as /api/login, or a shared invite link would allow unlimited password guesses
+  if (user && await signedInAs(c, inv.email)) { /* joins as is */ } else if (user) { // same budgets as /api/login, or a shared invite link would allow unlimited password guesses
     const keys = loginKeys(c, inv.email.toLowerCase())
     if (throttled(keys)) fail(429, 'Too many attempts, wait a bit')
     if (!verifyPassword(password, user.password)) { failed(keys); fail(401, 'Wrong password') }
@@ -254,6 +317,7 @@ app.use('/api/*', auth)
 // the signed-in user's own password (changing it, deleting yourself): 10 wrong ones in 10 minutes
 function checkPassword(user: User, password: unknown, wrong: string) {
   const row = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
+  if (!row.password) return // signed up with GitHub and never set one: the session is the proof
   if (throttle(`pw:${user.id}`, 10, 600_000)) fail(429, 'Too many attempts, wait a bit')
   if (!verifyPassword(String(password ?? ''), row.password)) { recordFailure(`pw:${user.id}`); fail(401, wrong) }
 }

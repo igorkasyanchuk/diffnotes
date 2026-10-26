@@ -165,7 +165,8 @@ function useSubmit(fn: () => Promise<unknown>) {
   return { submit, error, busy }
 }
 
-type Me = { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number }
+type SignIn = { github: boolean; signup: boolean } // what /api/me says this server offers besides a password
+type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number; has_password: boolean }
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
 const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
@@ -223,8 +224,12 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
   </div>
 }
 
-function Login() {
+const GitHubButton = ({ next, children }: { next?: string; children: ReactNode }) =>
+  <a className="btn" href={`/auth/github${next ? `?next=${encodeURIComponent(next)}` : ''}`}>{children}</a>
+
+function Login({ sign }: { sign: SignIn }) {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
+  const back = new URLSearchParams(location.search).get('error') // GitHub sign-in sends its refusals here
   // api() fires dn:change, so App reloads /api/me and shows the app page in place (a deep link opened signed out);
   // only /login needs to move on, to the dashboard
   const { submit, error, busy } = useSubmit(async () => {
@@ -233,30 +238,39 @@ function Login() {
   })
   return <div className="narrow">
     <h1>sign in</h1>
+    {sign.github && <div className="stack">
+      <GitHubButton next={location.pathname === '/login' ? undefined : location.pathname + location.search}>
+        {sign.signup ? 'sign in or sign up with GitHub' : 'sign in with GitHub'}</GitHubButton>
+      {back && <div className="error">{back}</div>}
+      <p className="hint">{sign.signup ? 'New here? GitHub makes your user and a team account in one step.' : 'or with your email:'}</p>
+    </div>}
     <form className="stack" onSubmit={submit}>
       <label>email<input autoFocus autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <label>password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>sign in</button>
-      <p className="hint">No account? Ask a teammate for an invitation link.<br />
+      <p className="hint">{!sign.signup && <>No account? Ask a teammate for an invitation link.<br /></>}
         Forgot your password? Your server admin runs <code>npm run reset-password</code>.</p>
     </form>
   </div>
 }
 
-function Invite({ token }: { token: string }) {
-  const { data, error: loadError } = useLoad<{ email: string; account: string; exists: boolean }>(`/api/invites/${token}`)
+function Invite({ token, sign }: { token: string; sign: SignIn }) {
+  const { data, error: loadError } = useLoad<{ email: string; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
   const [name, setName] = useState(''), [password, setPassword] = useState('')
   const { submit, error, busy } = useSubmit(async () => { await api(`/api/invites/${token}/accept`, { name, password }); location.href = '/dashboard' })
   if (loadError) return <p className="error">{loadError}</p>
   if (!data) return null
   return <div className="narrow">
     <h1>join {data.account}</h1>
-    <p className="hint">Invitation for {data.email}.{data.exists && ' You already have an account: enter your password to join.'}</p>
+    <p className="hint">Invitation for {data.email}.{data.signed_in ? ' You are signed in as this user.'
+      : data.exists && ' You already have an account: enter your password to join.'}</p>
+    {sign.github && !data.signed_in && <p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton>
+      <span className="hint"> if {data.email} is an email of your GitHub account</span></p>}
     <form className="stack" onSubmit={submit}>
       {!data.exists && <label>your name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>}
-      <label>{data.exists ? 'password' : 'choose a password (8+ characters)'}
-        <input type="password" autoComplete={data.exists ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+      {!data.signed_in && <label>{data.exists ? 'password' : 'choose a password (8+ characters)'}
+        <input type="password" autoComplete={data.exists ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} /></label>}
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>join</button>
     </form>
@@ -281,7 +295,7 @@ function Privacy() {
     </ul>
     <h2>A DiffNotes server</h2>
     <ul>
-      <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash),
+      <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub),
         sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (30 days by default).
         Its operator decides where it runs and who can access it.</li>
       <li>Notes and files are visible only to members of the account that owns the repository.</li>
@@ -582,21 +596,22 @@ function Settings({ me }: { me: Me }) {
       <input placeholder="name, e.g. work laptop" value={name} onChange={(e) => setName(e.target.value)} /><button>new token</button>
     </form>
     <h2>password</h2>
+    {!me.has_password && <p className="hint">You sign in with GitHub. A password is optional: set one to sign in with your email too.</p>}
     <form className="stack narrow" onSubmit={pass.submit}>
-      <label>current password<input type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} /></label>
+      {me.has_password && <label>current password<input type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} /></label>}
       <label>new password<input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></label>
       {pass.error && <div className="error">{pass.error}</div>}
       {done && <div className="ok">password changed, other sessions signed out</div>}
-      <button disabled={pass.busy}>change password</button>
+      <button disabled={pass.busy}>{me.has_password ? 'change password' : 'set password'}</button>
     </form>
     <h2>danger zone</h2>
     <p className="hint">Deleting your user removes your tokens and sign-ins and takes you out of every account.
       {owned.length ? <> The accounts you own go too, with all their repositories, notes and files: <b>{owned.map((a) => a.name).join(', ')}</b>.</> : ''}
       {' '}Notes you uploaded to other accounts stay. There is no undo.</p>
     <form className="stack narrow" onSubmit={remove.submit}>
-      <label>password<input type="password" autoComplete="current-password" value={delPass} onChange={(e) => setDelPass(e.target.value)} /></label>
+      {me.has_password && <label>password<input type="password" autoComplete="current-password" value={delPass} onChange={(e) => setDelPass(e.target.value)} /></label>}
       {remove.error && <div className="error">{remove.error}</div>}
-      <button className="danger" disabled={remove.busy || !delPass}>delete my user</button>
+      <button className="danger" disabled={remove.busy || (me.has_password && !delPass)}>delete my user</button>
     </form>
   </>
 }
@@ -721,6 +736,7 @@ const APP_PATHS = /^\/(dashboard|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$
 
 function App() {
   const [path, setPath] = useState(location.pathname), [me, setMe] = useState<Me | null>(), [n, setN] = useState(0)
+  const [sign, setSign] = useState<SignIn>({ github: false, signup: false })
   useEffect(() => {
     const on = () => setPath(location.pathname), change = () => setN((x) => x + 1)
     addEventListener('popstate', on)
@@ -732,7 +748,8 @@ function App() {
   useEffect(() => {
     let live = true
     // a failed request keeps who we knew; on the very first load it falls back to signed out instead of a blank page
-    api<Me | { user: null }>('/api/me').then((r) => { if (live) setMe(r.user ? r as Me : null) }, () => { if (live) setMe((x) => x ?? null) })
+    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup }); setMe(r.user ? r as Me : null) } },
+      () => { if (live) setMe((x) => x ?? null) })
     return () => { live = false }
   }, [path, n])
   if (me === undefined) return null
@@ -741,7 +758,7 @@ function App() {
     const invite = m(/^\/invite\/([\w-]+)$/)
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || APP_PATHS.test(path))
-    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} /> : login ? <Login />
+    return <PublicLayout signedIn={!!me}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
       : path === '/privacy' ? <Privacy /> : <Landing signedIn={!!me} />}</PublicLayout>
   }
   let page: ReactNode

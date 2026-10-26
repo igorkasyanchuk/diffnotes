@@ -4,6 +4,14 @@ All notable changes to DiffNotes (server, web app, browser extension and agent s
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/). Releases are tagged `vX.Y.Z` ([how](docs/install.md#releases)).
 
+## [Unreleased]
+
+### Added
+
+- **Sign in with GitHub** (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`): existing users are found by their verified
+  emails, invited people join without a password, and `ALLOW_SIGNUP=1` opens registration (a user and a team account
+  of their own). Users made through GitHub can set a password later.
+
 ## [1.1.0] - 2026-10-26
 
 ### Added
@@ -63,5 +71,6 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.1.0
 [1.0.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.0.0

@@ -27,7 +27,7 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 | **Context from the author** | The agent that wrote the code explains it while it still knows the decisions and trade-offs. |
 | **Screenshots in the diff** | UI changes come with before/after or mobile/desktop shots next to the lines that caused them. |
 | **Zero noise** | Nothing is posted to the PR. The conversation stays for humans. |
-| **Your data** | Self-hosted, invite-only, per-account access. Code context never leaves your infrastructure. |
+| **Your data** | Self-hosted, invite-only (or sign-up with GitHub), per-account access. Code context never leaves your infrastructure. |
 | **Any agent, any team** | One skill for every Agent Skills tool; one extension for several servers (teams, clients). |
 
 ## See it

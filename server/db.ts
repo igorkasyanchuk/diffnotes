@@ -83,10 +83,11 @@ if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get
   } catch (e) { db.exec('rollback'); throw e } finally { db.exec('pragma foreign_keys = on') }
 }
 
-// columns that came later, added to databases made before them: risk, the deploy card, repository rules (JSON)
+// columns that came later, added to databases made before them: risk, the deploy card, repository rules (JSON), GitHub sign-in
 for (const sql of ['alter table annotations add column risk text', "alter table pulls add column deploy text not null default ''",
-  "alter table repositories add column rules text not null default '{}'"])
+  "alter table repositories add column rules text not null default '{}'", 'alter table users add column github_id text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
+db.exec('create unique index if not exists users_github on users(github_id)')
 
 export const now = () => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
@@ -100,6 +101,7 @@ export function hashPassword(password: string) {
 }
 export function verifyPassword(password: string, stored: string) {
   const [salt, hash] = stored.split(':')
+  if (!hash) return false // signed up with GitHub, no password set
   const a = scryptSync(password, Buffer.from(salt, 'hex'), 64), b = Buffer.from(hash, 'hex')
   return a.length === b.length && timingSafeEqual(a, b)
 }
@@ -141,10 +143,11 @@ export const getSetting = <T>(k: string): T | null => {
 export const setSetting = (k: string, v: unknown) =>
   db.prepare('insert into settings (key, value) values (?, ?) on conflict do update set value = excluded.value').run(k, JSON.stringify(v))
 
+// password '' = none (signed up with GitHub): only GitHub signs them in until they set one on Settings
 export function createUser(email: string, password: string, name = '', admin = 0) {
   const id = randomUUID()
   db.prepare('insert into users (id, email, name, password, admin, created_at) values (?, ?, ?, ?, ?, ?)')
-    .run(id, email.trim(), name.trim(), hashPassword(password), admin, now())
+    .run(id, email.trim(), name.trim(), password ? hashPassword(password) : '', admin, now())
   return id
 }
 

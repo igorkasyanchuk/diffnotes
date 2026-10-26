@@ -44,7 +44,21 @@ There is no undo for any of these, and files are removed from disk or the bucket
 ## Invitations
 
 Account → **members** → email + role → **invite** → **copy link** and send it. The link works for 7 days. New people
-choose a name and password; people who already have a user enter their password to join.
+choose a name and password; people who already have a user enter their password to join. With GitHub sign-in on, they
+can also **continue with GitHub** when the invited email is one of their GitHub account's verified emails.
+
+## Sign in with GitHub
+
+Off unless the server has an OAuth app. On GitHub: Settings → Developer settings → **OAuth Apps** → **New OAuth App**,
+homepage `https://reviews.company.com`, callback URL `https://reviews.company.com/auth/github/callback`; then
+**Generate a new client secret** and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` ([install](install.md#environment)).
+
+- The login page gets a **sign in with GitHub** button. It finds the user by their GitHub account, or by any of its
+  verified emails (an existing user is linked on the first GitHub sign-in).
+- Strangers are refused unless an invitation waits for one of their verified emails, or `ALLOW_SIGNUP=1`: then anyone
+  with a GitHub account gets a user and a team account they own (open registration; lower `MAX_ACCOUNT_MB` and
+  `MAX_PULLS` to taste).
+- A user made through GitHub has no password: they can set one on **Settings**, and delete themselves without one.
 
 ## Account overview
 

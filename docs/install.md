@@ -96,6 +96,8 @@ This table is the one reference for configuration: everything is an environment 
 | `CLOUDFLARE_ONLY` | unset | `1` behind Cloudflare: only Cloudflare's addresses may connect (the server's own IP serves nothing). Not with Cloudflare Tunnel, which already hides it |
 | **Integrations** (off unless you set them; nothing is preset) | | |
 | `BUGSINK_DSN` | unset | your own Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | unset | a GitHub OAuth app: **sign in with GitHub** ([accounts](accounts.md#sign-in-with-github)); callback `<PUBLIC_URL>/auth/github/callback` |
+| `ALLOW_SIGNUP` | unset | `1` with GitHub sign-in: anyone with a GitHub account may sign up and gets a team account of their own |
 | `UMAMI_SCRIPT` / `UMAMI_WEBSITE_ID` | unset | your own Umami on the landing page only (e.g. `https://umami.example.com/script.js` and the website id): one page view, never the app's pages |
 
 File storage (disk or an S3-compatible bucket) is not an environment variable: a super admin sets it on `/admin`, see
