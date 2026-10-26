@@ -429,6 +429,8 @@ describe('live demo (DEMO_PR)', () => {
       expect((await call('/api/v1/pulls/acme/demo/6', { token: tok })).status).toBe(404) // only that PR
       expect((await call('/api/v1/pulls/acme/demo/5', { token: tok, method: 'DELETE' })).status).toBe(404) // read only
       expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
+      process.env.DEMO_PR = 'https://github.com/acme/demo/pull/5' // the URL works too
+      expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
       await purge()
       expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeTruthy() // expired, kept
       // only a super admin's upload is the demo: the same name in a stranger's account isn't

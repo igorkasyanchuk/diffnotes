@@ -585,10 +585,10 @@ function pullOut(p: Pull, user: User) {
   }
 }
 
-// DEMO_PR=owner/name#12: the landing page's live demo. That pull request's notes, as a super admin uploaded them, are
+// DEMO_PR=owner/name#12 (or the PR's URL, for env files that read # as a comment): the landing page's live demo. That pull request's notes, as a super admin uploaded them, are
 // readable by every signed-in user (anyone can sign up, connect the extension and see them) and never expire.
 export const demoPull = () => {
-  const m = (process.env.DEMO_PR ?? '').match(/^(.+)#(\d+)$/)
+  const m = (process.env.DEMO_PR ?? '').trim().match(/^(.+?)(?:#|\/pull\/|\/-\/merge_requests\/|\/pull-requests\/)(\d+)\/?$/)
   if (!m) return
   return db.prepare(`${PULL_SELECT} join users u on u.id = p.user_id where r.full_name = ? and p.number = ? and u.admin = 1
     order by p.updated_at desc limit 1`).get(repoName(m[1]), Number(m[2])) as Pull | undefined
