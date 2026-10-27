@@ -56,6 +56,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
         <AddToChrome primary />
       </div>
       <p className="hint">One command installs the skill for Claude Code, Codex, Cursor and other Agent Skills tools.</p>
+      <p className="lp-soon">extension for Chrome, Edge, Brave and Arc · <b>Firefox and Safari coming soon</b></p>
       {demo && <p><a href="/demo" className="lp-demo"><span className="pulse" aria-hidden="true" />see it on a live pull request, in 30 seconds →</a></p>}
     </section>
     <Demo />
@@ -89,7 +90,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
-        <p className="hint">Install it from the Chrome Web Store (or load it in Firefox), then paste the one line settings shows next to your token into its popup.</p>
+        <p className="hint">Install it from the Chrome Web Store (Edge, Brave and Arc too; Firefox and Safari coming soon), then paste the one line settings shows next to your token into its popup.</p>
         <p><AddToChrome /></p>
       </li>
       <li>

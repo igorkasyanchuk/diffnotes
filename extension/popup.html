@@ -5,6 +5,8 @@
   <style>
     body { width: 300px; margin: 0; padding: 14px; font: 13px/1.45 system-ui, sans-serif; color: #16181d; background: #f6f5f1; }
     h1 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+    h1 a { margin-left: auto; font-size: 12px; font-weight: 400; color: #4a505c; text-decoration: none; }
+    h1 a:hover { color: #16181d; text-decoration: underline; }
     label { display: grid; gap: 3px; margin-bottom: 8px; color: #4a505c; font-size: 12px; }
     input, select { font: 13px system-ui; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
     button { font: 500 13px system-ui; padding: 7px 12px; border-radius: 6px; border: 1px solid #16181d; background: #16181d; color: #fff; cursor: pointer; }
@@ -18,7 +20,7 @@
   </style>
 </head>
 <body>
-  <h1><img src="icon32.png" width="18" height="18" alt="" />DiffNotes</h1>
+  <h1><img src="icon32.png" width="18" height="18" alt="" />DiffNotes <a href="https://diffnotes.dev" target="_blank" title="DiffNotes website: docs, demo, sign up">diffnotes.dev ↗</a></h1>
   <div id="list"></div>
   <label>Notes look <select id="theme">
     <option value="loud">loud: tinted, thick border</option>

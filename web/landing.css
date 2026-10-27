@@ -50,3 +50,5 @@
 .lp-or { display: flex; align-items: center; gap: 14px; margin: 28px 0 -12px; color: var(--soft); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
 .lp-or::before, .lp-or::after { content: ''; flex: 1; border-top: 1px dashed var(--line-2); }
 @media (max-width: 560px) { .lp-path { padding: 14px 10px 10px; } .lp-path .lp-install li { padding: 12px 10px; } }
+.lp-soon { margin: -2px 0 0; font-size: 11px; color: var(--soft); }
+.lp-soon b { color: var(--muted); font-weight: 600; }

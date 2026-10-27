@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DiffNotes",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Shows your team's DiffNotes annotations on GitHub, GitLab and Bitbucket pull requests.",
   "icons": {
     "16": "icon16.png",
