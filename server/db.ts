@@ -83,9 +83,11 @@ if ((db.prepare("select sql from sqlite_master where name = 'repositories'").get
   } catch (e) { db.exec('rollback'); throw e } finally { db.exec('pragma foreign_keys = on') }
 }
 
-// columns that came later, added to databases made before them: risk, the deploy card, repository rules (JSON), GitHub sign-in
+// columns that came later, added to databases made before them: risk, the deploy card, repository rules (JSON), GitHub sign-in and invites
 for (const sql of ['alter table annotations add column risk text', "alter table pulls add column deploy text not null default ''",
-  "alter table repositories add column rules text not null default '{}'", 'alter table users add column github_id text'])
+  "alter table repositories add column rules text not null default '{}'", 'alter table users add column github_id text',
+  // a GitHub login (lowercase) as of the user's last GitHub sign-in; an invite by login has email '' and this set
+  'alter table users add column github_login text', 'alter table invites add column github text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 db.exec('create unique index if not exists users_github on users(github_id)')
 // every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's

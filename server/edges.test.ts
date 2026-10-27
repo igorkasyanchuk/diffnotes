@@ -361,6 +361,7 @@ describe('GitHub sign-in', () => {
     expect((await start()).status).toBe(404)
     expect((await call('/auth/github/callback?code=x&state=y')).status).toBe(404)
     expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false, demo: null })
+    expect((await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { github: 'octo' } })).data.error).toContain('GitHub sign-in is off')
   })
 
   it('signs up, links by email, joins invitations, refuses strangers', async () => {
@@ -416,6 +417,21 @@ describe('GitHub sign-in', () => {
       expect((await call(`/api/invites/${inv}`, { cookie: j.cookie })).data).toMatchObject({ exists: true, signed_in: true })
       expect((await call(`/api/invites/${inv}/accept`, { cookie: j.cookie, body: {} })).status).toBe(200)
       expect((await call('/api/me', { cookie: j.cookie })).data.accounts.map((x: { id: string }) => x.id)).toEqual([accountId])
+
+      // an invitation by GitHub login: it waits for that login's sign-in (which may make the user), then joins from the dashboard
+      expect((await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { github: 'bad login' } })).status).toBe(400)
+      const { token: byLogin } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { github: '@Hubber' } })).data
+      expect((await call(`/api/accounts/${accountId}`, { cookie: admin })).data.invites[0]).toMatchObject({ email: '', github: 'hubber' })
+      // the link alone joins nobody: not with a password, not as another user
+      expect((await call(`/api/invites/${byLogin}/accept`, { body: { password: 'whatever-123' } })).status).toBe(403)
+      expect((await call(`/api/invites/${byLogin}/accept`, { cookie: j.cookie, body: {} })).status).toBe(403)
+      expect((await call(`/api/invites/${byLogin}`)).data).toMatchObject({ github: 'hubber', exists: false, signed_in: false })
+      const h = await roundTrip({ id: 12, login: 'HUBBER' }, [mail('hub@example.com')]) // sign-up is closed: the invitation lets them in
+      expect(h.to).toBe('/dashboard')
+      expect((await call('/api/dashboard', { cookie: h.cookie })).data).toMatchObject({ accounts: [], invites: [{ token: byLogin, role: 'member' }] })
+      expect((await call(`/api/invites/${byLogin}`, { cookie: h.cookie })).data).toMatchObject({ exists: true, signed_in: true })
+      expect((await call(`/api/invites/${byLogin}/accept`, { cookie: h.cookie, body: {} })).status).toBe(200)
+      expect((await call('/api/dashboard', { cookie: h.cookie })).data).toMatchObject({ accounts: [{ id: accountId }], invites: [] })
 
       // open sign-up: a new user with a team account of their own, no password until they set one
       process.env.ALLOW_SIGNUP = '1'

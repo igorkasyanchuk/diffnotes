@@ -47,6 +47,12 @@ Account → **members** → email + role → **invite** → **copy link** and se
 choose a name and password; people who already have a user enter their password to join. With GitHub sign-in on, they
 can also **continue with GitHub** when the invited email is one of their GitHub account's verified emails.
 
+With GitHub sign-in on, invite a **GitHub login** instead of an email (`octocat` or `@octocat`): the invitation stays
+pending until that login signs in with GitHub (which makes their user if they have none, even with sign-up closed),
+then waits on their **dashboard** under *invitations for you* and they press **join**. Only a GitHub sign-in as that
+login can accept it: the link alone (or a password) does not. A login belongs to whoever signed in with it last, since
+GitHub logins can be renamed and taken.
+
 ## Sign in with GitHub
 
 Off unless the server has an OAuth app. On GitHub: Settings → Developer settings → **OAuth Apps** → **New OAuth App**,
@@ -57,7 +63,7 @@ homepage `https://reviews.example.com`, callback URL `https://reviews.example.co
   verified emails. A user who has a password is linked on its first GitHub sign-in only after signing in with that
   password once (the login page asks), since an invitation never proved who owns the email; nothing else changes.
   A DiffNotes user already linked to another GitHub account is refused.
-- Strangers are refused unless an invitation waits for one of their verified emails, or `ALLOW_SIGNUP=1`: then anyone
+- Strangers are refused unless an invitation waits for one of their verified emails or their login, or `ALLOW_SIGNUP=1`: then anyone
   with a GitHub account gets a user and a team account they own (open registration; lower `MAX_ACCOUNT_MB` and
   `MAX_PULLS` to taste).
 - A user made through GitHub has no password: they can set one on **Settings**, and delete themselves without one.

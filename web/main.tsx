@@ -259,11 +259,20 @@ function Login({ sign }: { sign: SignIn }) {
 }
 
 function Invite({ token, sign }: { token: string; sign: SignIn }) {
-  const { data, error: loadError } = useLoad<{ email: string; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
+  const { data, error: loadError } = useLoad<{ email: string; github: string | null; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
   const [name, setName] = useState(''), [password, setPassword] = useState('')
   const { submit, error, busy } = useSubmit(async () => { await api(`/api/invites/${token}/accept`, { name, password }); location.href = '/dashboard' })
   if (loadError) return <p className="error">{loadError}</p>
   if (!data) return null
+  // an invite by GitHub login: only a GitHub sign-in as that login joins
+  if (data.github) return <div className="narrow">
+    <h1>join {data.account}</h1>
+    <p className="hint">Invitation for GitHub user @{data.github}.{data.signed_in && ' You are signed in as this user.'}</p>
+    {data.signed_in
+      ? <form className="stack" onSubmit={submit}>{error && <div className="error">{error}</div>}<button className="primary" disabled={busy}>join</button></form>
+      : sign.github ? <p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton></p>
+        : <p className="error">GitHub sign-in is off on this server: ask for an invitation by email.</p>}
+  </div>
   return <div className="narrow">
     <h1>join {data.account}</h1>
     <p className="hint">Invitation for {data.email}.{data.signed_in ? ' You are signed in as this user.'
@@ -324,7 +333,8 @@ const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: 
     </div>) : <div className="empty">nothing yet. install the skill (settings) and ask your agent to annotate a pull request.</div>}
   </div>
 
-type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number })[]; retention_days: number }
+type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number })[]; retention_days: number
+  invites: { token: string; account: string; role: string }[] }
 function Dashboard() {
   const { data, reload } = useLoad<Dash>('/api/dashboard')
   const [name, setName] = useState('')
@@ -332,6 +342,15 @@ function Dashboard() {
   if (!data) return null
   return <>
     <h1>dashboard</h1>
+    {!!data.invites.length && <>
+      <h2>invitations for you</h2>
+      <div className="list">
+        {data.invites.map((i) => <div key={i.token}>
+          <span className="grow">{i.account}</span><span className="chip">{i.role}</span>
+          <Link to={`/invite/${i.token}`}>join →</Link>
+        </div>)}
+      </div>
+    </>}
     <h2>annotated pull requests</h2>
     <PullList pulls={data.pulls} />
     <p className="hint">notes are kept for {data.retention_days} days after the last upload.</p>
@@ -353,7 +372,7 @@ type Acc = {
   account: { id: string; name: string }; role: string
   members: { id: string; email: string; name: string; role: string }[]
   repositories: { id: string; full_name: string; pulls: number; rules: Rules }[]
-  invites: { token: string; email: string; role: string; expires_at: string }[]
+  invites: { token: string; email: string; github: string | null; role: string; expires_at: string }[]
 }
 type Overview = {
   totals: Record<'members' | 'admins' | 'invites' | 'repositories' | 'pulls' | 'annotations' | 'files' | 'bytes' | 'expiring_soon', number>
@@ -427,7 +446,11 @@ const del = async (url: string, reload: () => void, what = 'Are you sure?') => {
 
 function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
   const [email, setEmail] = useState(''), [role, setRole] = useState('member'), [err, setErr] = useState('')
-  const invite = useSubmit(async () => { await api(`/api/accounts/${id}/invites`, { email, role }); setEmail(''); reload() })
+  // an address, or a GitHub login (with or without @)
+  const invite = useSubmit(async () => {
+    const who = email.trim(), byLogin = !who.includes('@') || who.startsWith('@')
+    await api(`/api/accounts/${id}/invites`, { ...(byLogin ? { github: who } : { email: who }), role }); setEmail(''); reload()
+  })
   const change = async (m: string, next: string) => {
     setErr('')
     try { await api(`/api/accounts/${id}/members/${m}`, { role: next }, 'PUT'); reload() } catch (e) { setErr((e as Error).message) }
@@ -449,19 +472,20 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
       <h2>invitations</h2>
       {!!data.invites.length && <div className="list">
         {data.invites.map((i) => <div key={i.token}>
-          <span className="grow">{i.email} <span className="hint">until {fmt(i.expires_at)}</span></span>
+          <span className="grow">{i.github ? `@${i.github}` : i.email} <span className="hint">{i.github && 'pending GitHub sign-in · '}until {fmt(i.expires_at)}</span></span>
           <span className="chip">{i.role}</span>
           <button className="link" onClick={() => navigator.clipboard.writeText(`${location.origin}/invite/${i.token}`)}>copy link</button>
           <button className="link danger" onClick={() => del(`/api/accounts/${id}/invites/${i.token}`, reload)}>revoke</button>
         </div>)}
       </div>}
       <form className="row" onSubmit={invite.submit}>
-        <input type="email" placeholder="teammate@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input placeholder="teammate@company.com or GitHub login" value={email} onChange={(e) => setEmail(e.target.value)} />
         <select value={role} onChange={(e) => setRole(e.target.value)}><option>member</option><option>admin</option></select>
         <button>invite</button>
       </form>
       {invite.error && <div className="error">{invite.error}</div>}
-      <p className="hint">send them the link (copy link); it works for 7 days.</p>
+      <p className="hint">send them the link (copy link); it works for 7 days. Invited by GitHub login: it waits on their dashboard
+        once they sign in with GitHub, and they join from there.</p>
     </>}
   </>
 }
@@ -589,7 +613,8 @@ function Settings({ me }: { me: Me }) {
     <p>2. make a token below and add it to your shell profile (~/.zshrc or ~/.bashrc):</p>
     {/* the placeholder must stay valid shell: `<token>` pasted into ~/.zshrc is a redirection and a parse error */}
     <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${fresh || 'paste-your-token-here'}`} />
-    <p>3. in the browser extension's popup, add this server with the same (or another) token.</p>
+    <p>3. in the browser extension's popup, paste this one line into the Server field (it fills both fields), then press Connect:</p>
+    <Code text={JSON.stringify({ server: location.origin, token: fresh || 'make-a-token-below' })} />
     <h2 id="tokens">tokens</h2>
     {fresh && <div className="token"><Code text={fresh} /><span className="hint">copy it now: it is shown only once.</span></div>}
     <div className="list">

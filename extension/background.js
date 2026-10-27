@@ -48,6 +48,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       chrome.action.setBadgeText({ tabId: sender.tab.id, text: count ? String(count) : '' })
       return { pulls, errors }
     }
+    if (msg.type === 'connect') return connect()
     if (msg.type === 'clear') return chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
     // exactly /files/<pull>/<name> on a connected server: a `..` segment would send the token to any other API path
     if (msg.type === 'file' && /^\/files\/[\w-]+\/[\w-][\w.-]*$/.test(msg.url)) {
@@ -67,6 +68,28 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return { error: 'unknown message' }
   })().then(reply, (e) => reply({ error: String(e.message ?? e) }))
   return true
+})
+
+// Connecting a server: the popup keeps what was typed as storage.session `draft` {server, token} and asks for the origin.
+// The permission prompt can close the popup before it hears the answer (then the server was never saved and needed a
+// second Connect), so the background finishes it: when asked by the popup, or when the permission lands without it.
+async function connect() {
+  const { draft } = await chrome.storage.session.get('draft')
+  if (!draft?.server) return { error: 'nothing to connect' }
+  const { server, token } = draft
+  const res = await fetch(`${server}/api/v1/me`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+  const user = res?.ok ? (await res.json().catch(() => null))?.user : null
+  const error = !res ? `can't reach ${new URL(server).host}` : res.status === 401 ? 'That token is not valid on this server'
+    : !res.ok ? `Server answered ${res.status}` : !user?.email ? `${new URL(server).host} did not answer like a DiffNotes server` : ''
+  // a failure stays in the draft, so the popup shows it (and the fields) when it opens again
+  if (error) { await chrome.storage.session.set({ draft: { ...draft, error } }); return { error } }
+  await chrome.storage.local.set({ servers: [...(await servers()).filter((x) => x.server !== server), { server, token, user: user.email }] })
+  await chrome.storage.session.remove('draft')
+  return { ok: true }
+}
+chrome.permissions.onAdded.addListener(async ({ origins = [] }) => {
+  const { draft } = await chrome.storage.session.get('draft')
+  if (draft?.server && !draft.error && origins.includes(`${draft.server}/*`)) connect()
 })
 
 // move first-release settings over as soon as the extension updates

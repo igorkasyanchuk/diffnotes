@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Install in the hero**: the one-command skill install with a copy button and *add to Chrome*, right under the headline.
 - **Live demo** (`DEMO_PR=owner/name#12`): one pull request whose notes every signed-in user can read and that never
   expires, while its last upload and every note and file on it are by super admins; `/demo` walks a visitor through extension, account, token and the PR.
+- **Invite by GitHub login**: an account admin invites `octocat` instead of an email; it waits until that login signs
+  in with GitHub, then shows on their dashboard to join.
+- **Extension: one-line connect**: Settings shows `{"server":…,"token":…}` for a new token; pasted into the popup's
+  Server field it fills both. What was typed survives the popup closing.
 - **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
 ### Security
@@ -43,6 +47,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- Extension: a server sometimes wasn't added on the first **Connect** (the permission prompt closed the popup before
+  it saved); the background now finishes the connect once the permission is granted.
 - S3 storage: a `5xx`, a `429` or a dropped connection is tried again (3 tries), and a re-upload writes the new files before it
   deletes the old ones, so a file re-uploaded under its name keeps its previous version when the write still fails
   instead of going missing (seen once on B2).

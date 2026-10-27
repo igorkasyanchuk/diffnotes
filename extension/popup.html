@@ -21,10 +21,10 @@
   <div id="list"></div>
   <form id="connect">
     <h2 id="add-title">Connect a server</h2>
-    <label>Server <input id="server" placeholder="https://diffnotes.example.com" required /></label>
+    <label>Server, or the line from Settings <input id="server" placeholder="https://diffnotes.example.com" required /></label>
     <label>Token <input id="token" type="password" placeholder="dn_…" required /></label>
-    <button>Connect</button>
-    <p class="hint">Make a token on your server's <a id="settings" href="#" target="_blank">Settings</a> page. Notes from every connected server show on GitHub, GitLab and Bitbucket.</p>
+    <button id="submit">Connect</button>
+    <p class="hint">Make a token on your server's <a id="settings" href="#" target="_blank">Settings</a> page and paste the one line it shows for the extension. Notes from every connected server show on GitHub, GitLab and Bitbucket.</p>
   </form>
   <div class="error" id="error"></div>
   <script src="popup.js"></script>

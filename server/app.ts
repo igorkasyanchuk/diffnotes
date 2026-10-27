@@ -279,13 +279,20 @@ app.get('/auth/github/callback', async (c) => {
     }
     userId = found?.id
   }
+  const login = str(profile.login).toLowerCase()
   if (!userId) {
     const invited = verified.find((e) => db.prepare('select 1 from invites where email = ? and expires_at > ?').get(e, now()))
+      ?? (login && db.prepare('select 1 from invites where github = ? and expires_at > ?').get(login, now()) ? verified[0] : undefined)
     if (!invited && !signupOpen()) return back('No DiffNotes user for this GitHub account: ask a teammate for an invitation')
     userId = createUser(invited ?? verified[0], '', str(profile.name) || str(profile.login))
     if (!invited) createAccount(`${str(profile.login) || 'My'} team`, userId)
   }
   db.prepare('update users set github_id = ? where id = ? and github_id is null').run(ghId, userId)
+  // logins can be renamed and taken by someone else: the latest sign-in holds one (invites by login look it up)
+  if ((db.prepare('select github_id from users where id = ?').get(userId) as { github_id: string | null }).github_id === ghId) {
+    db.prepare('update users set github_login = null where github_login = ? and id != ?').run(login, userId)
+    db.prepare('update users set github_login = ? where id = ?').run(login || null, userId)
+  }
   await startSession(c, userId)
   return c.redirect(saved.next)
 })
@@ -307,23 +314,32 @@ app.get('/api/me', async (c) => {
 // --- invitations: the way in besides the first admin and GitHub sign-in
 
 const inviteRow = (token: string) => db.prepare(`select i.*, a.name as account from invites i join accounts a on a.id = i.account_id
-  where i.token = ? and i.expires_at > ?`).get(token, now()) as { account_id: string; email: string; role: string; account: string } | undefined
+  where i.token = ? and i.expires_at > ?`).get(token, now()) as Inv | undefined
+type Inv = { account_id: string; email: string; github: string | null; role: string; account: string }
 
-// the invitation's own user is signed in already (e.g. just came back from GitHub): joining needs no password
-const signedInAs = async (c: Context, email: string) => (await currentUser(c))?.email.toLowerCase() === email.toLowerCase()
+// the invitation's own user is signed in already (e.g. just came back from GitHub): joining needs no password.
+// An invite by GitHub login is for whoever last signed in with that login, and only signed in that way.
+const signedInAs = async (c: Context, inv: Inv) => {
+  const user = await currentUser(c)
+  if (!user) return false
+  if (inv.github) return (db.prepare('select github_login from users where id = ?').get(user.id) as { github_login: string | null }).github_login === inv.github
+  return user.email.toLowerCase() === inv.email.toLowerCase()
+}
 
 app.get('/api/invites/:token', async (c) => {
   const inv = inviteRow(c.req.param('token')) ?? fail(404, 'This invitation is invalid or expired')
-  const exists = !!db.prepare('select 1 from users where email = ?').get(inv.email)
-  return c.json({ email: inv.email, account: inv.account, exists, signed_in: await signedInAs(c, inv.email) })
+  const exists = !!(inv.github ? db.prepare('select 1 from users where github_login = ?').get(inv.github) : db.prepare('select 1 from users where email = ?').get(inv.email))
+  return c.json({ email: inv.email, github: inv.github, account: inv.account, exists, signed_in: await signedInAs(c, inv) })
 })
 
 app.post('/api/invites/:token/accept', async (c) => {
   const token = c.req.param('token'), body = await json(c)
   const inv = inviteRow(token) ?? fail(404, 'This invitation is invalid or expired')
   const password = String(body.password ?? '')
-  let user = db.prepare('select id, password from users where email = ?').get(inv.email) as { id: string; password: string } | undefined
-  if (user && await signedInAs(c, inv.email)) { /* joins as is */ } else if (user) { // same budgets as /api/login, or a shared invite link would allow unlimited password guesses
+  if (inv.github && !await signedInAs(c, inv)) fail(403, `Sign in with GitHub as @${inv.github} to join`)
+  let user = (inv.github ? db.prepare('select u.id, u.password from users u where id = ?').get((await currentUser(c))!.id)
+    : db.prepare('select id, password from users where email = ?').get(inv.email)) as { id: string; password: string } | undefined
+  if (user && await signedInAs(c, inv)) { /* joins as is */ } else if (user) { // same budgets as /api/login, or a shared invite link would allow unlimited password guesses
     const keys = loginKeys(c, inv.email.toLowerCase())
     if (throttled(keys)) fail(429, 'Too many attempts, wait a bit')
     if (!verifyPassword(password, user.password)) { failed(keys); fail(401, 'Wrong password') }
@@ -448,7 +464,11 @@ app.get('/api/dashboard', (c) => {
     (select count(*) from annotations n where n.pull_id = p.id) as annotations
     from pulls p join repositories r on r.id = p.repository_id join memberships m on m.account_id = r.account_id
     where m.user_id = ? order by p.updated_at desc limit 50`).all(user.id)
-  return c.json({ accounts, pulls, retention_days: RETENTION_DAYS })
+  // invitations waiting for this user: by their email, or by their GitHub login
+  const invites = db.prepare(`select i.token, a.name as account, i.role from invites i join accounts a on a.id = i.account_id
+    join users u on u.id = ? where i.expires_at > ? and (i.email = u.email or i.github = u.github_login)
+    and not exists (select 1 from memberships m where m.account_id = i.account_id and m.user_id = u.id) order by i.created_at`).all(user.id, now())
+  return c.json({ accounts, pulls, invites, retention_days: RETENTION_DAYS })
 })
 
 app.post('/api/accounts', async (c) => {
@@ -467,7 +487,7 @@ app.get('/api/accounts/:id', (c) => {
     from repositories r where r.account_id = ? order by r.full_name`).all(id) as { rules: string }[]).map((r) => ({ ...r, rules: JSON.parse(r.rules) }))
   // a super admin outside the account manages it but can't see or make invitations: one would let them join and read
   const invites = canManage(my) && memberRole(id, user.id)
-    ? db.prepare('select token, email, role, expires_at from invites where account_id = ? order by created_at desc').all(id) : []
+    ? db.prepare('select token, email, github, role, expires_at from invites where account_id = ? order by created_at desc').all(id) : []
   return c.json({ account, role: my, members, repositories, invites })
 })
 
@@ -528,11 +548,15 @@ app.post('/api/accounts/:id/invites', async (c) => {
   const id = c.req.param('id'), user = c.get('user'), body = await json(c)
   requireAdmin(id, user)
   if (!memberRole(id, user.id)) fail(403, 'Super admins invite people only into accounts they belong to')
-  const email = str(body.email).toLowerCase()
-  if (!/^[^@\s]+@[^@\s]+$/.test(email)) fail(400, 'Enter an email address')
+  // an email, or a GitHub login: that person joins from their dashboard once they sign in with GitHub
+  const byLogin = body.github !== undefined
+  const email = byLogin ? '' : str(body.email).toLowerCase(), login = byLogin ? str(body.github).replace(/^@/, '').toLowerCase() : ''
+  if (byLogin && !github()) fail(400, 'GitHub sign-in is off on this server: invite by email')
+  if (byLogin && !/^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/.test(login)) fail(400, 'Enter a GitHub login')
+  if (!byLogin && !/^[^@\s]+@[^@\s]+$/.test(email)) fail(400, 'Enter an email address')
   const token = randomBytes(24).toString('base64url')
-  db.prepare('insert into invites (token, account_id, email, role, created_by, created_at, expires_at) values (?, ?, ?, ?, ?, ?, ?)')
-    .run(token, id, email, body.role === 'admin' ? 'admin' : 'member', user.id, now(), daysFromNow(INVITE_DAYS))
+  db.prepare('insert into invites (token, account_id, email, github, role, created_by, created_at, expires_at) values (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(token, id, email, login || null, body.role === 'admin' ? 'admin' : 'member', user.id, now(), daysFromNow(INVITE_DAYS))
   return c.json({ token })
 })
 app.delete('/api/accounts/:id/invites/:token', (c) => {

@@ -14,8 +14,10 @@ Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
-3. Pin **DiffNotes**, open its popup, enter your server (`https://reviews.example.com`) and a token from the server's
-   **Settings**, press **Connect** and allow access to that server. The token goes with every request, so the server
+3. Pin **DiffNotes**, make a token on your server's **Settings** and paste the one line shown there for the extension
+   (`{"server":"https://reviews.example.com","token":"dn_…"}`) into the popup's **Server** field: it fills both fields
+   (or type the address and the token yourself). Press **Connect** and allow access to that server. What you typed is
+   kept if the popup closes meanwhile, and a connect the permission prompt interrupted completes on its own. The token goes with every request, so the server
    must be `https://` (plain `http://` only for `localhost`).
 
 The store version updates itself. Unpacked: after `git pull`, press the reload icon on the extension's card.
@@ -27,8 +29,8 @@ The same `extension/` folder works in Firefox 154 or later (one manifest for bot
 1. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → pick `extension/manifest.json`
    (a temporary add-on is gone after a restart; for a permanent one, sign it with `npx web-ext sign -s extension`).
 2. In `about:addons` → DiffNotes → **Permissions**, make sure github.com, gitlab.com and bitbucket.org are allowed.
-3. Connect a server from the popup as above. If the popup closes when Firefox asks for access to your server, open it
-   again and press **Connect** once more.
+3. Connect a server from the popup as above. The popup may close when Firefox asks for access to your server: the
+   server is connected anyway once you allow it (open the popup again to see it).
 
 ## Safari
 
