@@ -18,6 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   in with GitHub, then shows on their dashboard to join.
 - **Extension: one-line connect**: Settings shows `{"server":…,"token":…}` for a new token; pasted into the popup's
   Server field it fills both. What was typed survives the popup closing.
+- **Setup steps** (`/welcome`): after joining or signing up, three steps that tick themselves (agent connected,
+  extension connected, first notes), each with its own token made in place; the invitation page says who invited
+  you and what comes next.
 - **Open invite links**: anyone with the link joins as a member until it expires (5 min to 1 day), signed in, with
   GitHub or with an email and password.
 - **Extension: note themes**: loud, sticky, standard, quiet, compact or ghost, picked in the popup.

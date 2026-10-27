@@ -89,7 +89,9 @@ for (const sql of ['alter table annotations add column risk text', "alter table 
   // a GitHub login (lowercase) as of the user's last GitHub sign-in; an invite by login has email '' and this set
   'alter table users add column github_login text', 'alter table invites add column github text',
   // an open link (email ''): anyone who has it joins until it expires, any number of people
-  'alter table invites add column open integer not null default 0'])
+  'alter table invites add column open integer not null default 0',
+  // when the user's agent (skill, MCP) and browser extension first used a token: the web app's setup checklist ticks them (notes_at below)
+  'alter table users add column agent_at text', 'alter table users add column extension_at text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 db.exec('create unique index if not exists users_github on users(github_id)')
 // every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's
@@ -105,8 +107,17 @@ for (const [t, col, fill] of [['annotations', 'user_id', '(select p.user_id from
     db.exec('commit')
   } catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
 }
+// the setup checklist's last tick: the user's first uploaded notes (a column, since notes expire). Filled once, as it is
+// added: users from before the checklist who had used a token or uploaded notes count as set up, like the old token bar did
+db.exec('begin')
+try {
+  db.exec('alter table users add column notes_at text')
+  db.exec(`update users set agent_at = created_at, extension_at = created_at, notes_at = created_at
+    where id in (select user_id from tokens where last_used_at is not null union select user_id from annotations)`)
+  db.exec('commit')
+} catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
 
-export const now = () => new Date().toISOString()
+export const now =() => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 export const daysFromNow = (d: number) => new Date(Date.now() + d * 86400_000).toISOString()
 

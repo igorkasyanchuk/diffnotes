@@ -149,6 +149,28 @@ describe('people', () => {
   })
 })
 
+describe('setup checklist', () => {
+  it('ticks the agent, the extension and the first notes as they happen', async () => {
+    const { token: inv } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { email: 'newbie@example.com' } })).data
+    // the invitation says who sent it and for which role
+    expect((await call(`/api/invites/${inv}`)).data).toMatchObject({ by: 'Admin', role: 'member', account: expect.any(String) })
+    const r = await call(`/api/invites/${inv}/accept`, { body: { password: 'newbie-pass' } })
+    const cookie = r.res.headers.get('set-cookie')!.split(';')[0]
+    const setup = async () => (await call('/api/me', { cookie })).data.setup
+    expect(await setup()).toEqual({ agent: false, extension: false, notes: false })
+    const t = (await call('/api/tokens', { cookie, body: { name: 'x' } })).data.token
+    await call('/api/v1/me', { token: t }) // a read without the header: an extension before 1.2, not proof of an agent
+    expect(await setup()).toEqual({ agent: false, extension: false, notes: false })
+    await call('/api/v1/me', { token: t, headers: { 'x-diffnotes-client': 'extension' } })
+    expect(await setup()).toEqual({ agent: false, extension: true, notes: false })
+    await call('/api/accounts', { cookie, body: { name: 'newbie team' } }) // an owner: the upload connects the repository
+    expect((await call('/api/v1/pulls/newbie/app/1', { token: t, method: 'PUT', body: { annotations: [note] } })).status).toBe(200)
+    expect(await setup()).toEqual({ agent: true, extension: true, notes: true })
+    await call('/api/v1/pulls/newbie/app/1', { token: t, method: 'DELETE' }) // notes gone (or expired): the step stays done
+    expect((await setup()).notes).toBe(true)
+  })
+})
+
 describe('uploads', () => {
   it('accepts jpeg and webp by their signatures', async () => {
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), webp = new TextEncoder().encode('RIFF\0\0\0\0WEBPVP8 ')
@@ -427,7 +449,7 @@ describe('GitHub sign-in', () => {
       expect((await call(`/api/invites/${byLogin}/accept`, { cookie: j.cookie, body: {} })).status).toBe(403)
       expect((await call(`/api/invites/${byLogin}`)).data).toMatchObject({ github: 'hubber', exists: false, signed_in: false })
       const h = await roundTrip({ id: 12, login: 'HUBBER' }, [mail('hub@example.com')]) // sign-up is closed: the invitation lets them in
-      expect(h.to).toBe('/dashboard')
+      expect(h.to).toBe('/dashboard') // invited, not a member yet: the invitation to join is there
       expect((await call('/api/dashboard', { cookie: h.cookie })).data).toMatchObject({ accounts: [], invites: [{ token: byLogin, role: 'member' }] })
       expect((await call(`/api/invites/${byLogin}`, { cookie: h.cookie })).data).toMatchObject({ exists: true, signed_in: true })
       expect((await call(`/api/invites/${byLogin}/accept`, { cookie: h.cookie, body: {} })).status).toBe(200)
@@ -463,7 +485,7 @@ describe('GitHub sign-in', () => {
       // open sign-up: a new user with a team account of their own, no password until they set one
       process.env.ALLOW_SIGNUP = '1'
       const n = await roundTrip(octo, [mail('octo@example.com')])
-      expect(n.to).toBe('/dashboard')
+      expect(n.to).toBe('/welcome')
       const me = (await call('/api/me', { cookie: n.cookie })).data
       expect(me).toMatchObject({ has_password: false, github: true, signup: true, accounts: [{ name: 'octo team', role: 'owner' }] })
       expect(me.user.name).toBe('octo')

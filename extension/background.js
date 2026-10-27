@@ -11,9 +11,12 @@ async function servers() {
   return list
 }
 
+// every request says it's the extension, so the server's setup checklist can tick "extension connected"
+const headers = (token) => ({ authorization: `Bearer ${token}`, 'x-diffnotes-client': 'extension' })
+
 async function call({ server, token }, path) {
   // a network or permission failure throws; say so instead of showing nothing
-  const res = await fetch(server + path, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+  const res = await fetch(server + path, { headers: headers(token) }).catch(() => null)
   const host = new URL(server).host
   if (!res) return { error: `can't reach ${host}: open the DiffNotes popup and connect it again` }
   if (res.status === 404) return { none: true }
@@ -61,7 +64,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.type === 'delete' && !msg.url.includes('..') && /^\/api\/v1\/(annotations\/\d+|pulls\/[\w.:/-]+\/\d+\?id=[0-9a-f-]{36})$/.test(msg.url)) {
       const s = (await servers()).find((x) => x.server === msg.server)
       if (!s) return { error: 'not connected' }
-      const res = await fetch(s.server + msg.url, { method: 'DELETE', headers: { authorization: `Bearer ${s.token}` } }).catch(() => null)
+      const res = await fetch(s.server + msg.url, { method: 'DELETE', headers: headers(s.token) }).catch(() => null)
       if (!res) return { error: `can't reach ${new URL(s.server).host}` }
       return res.ok ? { ok: true } : { error: (await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}` }
     }
@@ -77,7 +80,7 @@ async function connect() {
   const { draft } = await chrome.storage.session.get('draft')
   if (!draft?.server) return { error: 'nothing to connect' }
   const { server, token } = draft
-  const res = await fetch(`${server}/api/v1/me`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+  const res = await fetch(`${server}/api/v1/me`, { headers: headers(token) }).catch(() => null)
   const user = res?.ok ? (await res.json().catch(() => null))?.user : null
   const error = !res ? `can't reach ${new URL(server).host}` : res.status === 401 ? 'That token is not valid on this server'
     : !res.ok ? `Server answered ${res.status}` : !user?.email ? `${new URL(server).host} did not answer like a DiffNotes server` : ''

@@ -140,10 +140,14 @@ async function currentUser(c: Context): Promise<User | undefined> {
   if (bearer) {
     // tokens are for the skill, MCP clients and the extension: annotations and files only, never tokens, passwords or /admin
     if (!/^\/(api\/v1\/|files\/|mcp$)/.test(c.req.path)) return
-    const user = db.prepare(`select ${USER_COLS}, t.id as token_id from tokens t join users u on u.id = t.user_id where t.hash = ?`)
-      .get(sha256(bearer)) as (User & { token_id: string }) | undefined
+    const user = db.prepare(`select ${USER_COLS}, t.id as token_id, u.agent_at, u.extension_at from tokens t join users u on u.id = t.user_id where t.hash = ?`)
+      .get(sha256(bearer)) as (User & { token_id: string; agent_at: string | null; extension_at: string | null }) | undefined
     if (!user) return
     db.prepare('update tokens set last_used_at = ? where id = ?').run(now(), user.token_id)
+    // the setup checklist's ticks, written once: the extension says so in a header (its requests carry no reliable
+    // Origin); the agent's first upload or MCP call is any other PUT or POST (an extension before 1.2 sends no header, but only reads and deletes)
+    const col = c.req.header('x-diffnotes-client') === 'extension' ? 'extension_at' : ['PUT', 'POST'].includes(c.req.method) ? 'agent_at' : null
+    if (col && !user[col]) db.prepare(`update users set ${col} = ? where id = ?`).run(now(), user.id)
     return { id: user.id, email: user.email, name: user.name, admin: user.admin }
   }
   const sid = await getSignedCookie(c, SECRET, 'sid')
@@ -291,6 +295,8 @@ app.get('/auth/github/callback', async (c) => {
     if (!invited && !signupOpen()) return back('No DiffNotes user for this GitHub account: ask a teammate for an invitation')
     userId = createUser(invited ?? verified[0], '', str(profile.name) || str(profile.login))
     if (!invited) createAccount(`${str(profile.login) || 'My'} team`, userId)
+    // signed up with an account of their own: the setup steps first. An invited one joins from the dashboard (its invitations)
+    if (!invited && saved.next === '/dashboard') saved.next = '/welcome'
   }
   db.prepare('update users set github_id = ? where id = ? and github_id is null').run(ghId, userId)
   // logins can be renamed and taken by someone else: the latest sign-in holds one (invites by login look it up)
@@ -306,21 +312,25 @@ const accountsOf = (userId: string) => db.prepare(`select a.id, a.name, m.role f
   where m.user_id = ? order by a.created_at`).all(userId)
 const tokenCount = (userId: string) => (db.prepare('select count(*) as n from tokens where user_id = ?').get(userId) as { n: number }).n
 
-// who is signed in, plus what the app layout shows around every page: their accounts and whether they have a token yet
+// who is signed in, plus what the app layout shows around every page: their accounts and how far the setup steps are
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
   const d = demoPull()
   const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null }
   if (!user) return c.json({ user: null, ...signIn })
-  const { password } = db.prepare('select password from users where id = ?').get(user.id) as { password: string }
-  return c.json({ user, accounts: accountsOf(user.id), tokens: tokenCount(user.id), has_password: !!password, ...signIn })
+  const u = db.prepare('select password, agent_at, extension_at, notes_at from users where id = ?').get(user.id) as Record<string, string | null>
+  // the setup checklist (/welcome): what this user has done so far (kept when their notes expire or are removed)
+  const setup = { agent: !!u.agent_at, extension: !!u.extension_at, notes: !!u.notes_at }
+  return c.json({ user, accounts: accountsOf(user.id), has_password: !!u.password, setup, ...signIn })
 })
 
 // --- invitations: the way in besides the first admin and GitHub sign-in
 
-const inviteRow = (token: string) => db.prepare(`select i.*, a.name as account from invites i join accounts a on a.id = i.account_id
+// by_name: the inviter's name only, never their email (whoever holds the link reads this signed out)
+const inviteRow = (token: string) => db.prepare(`select i.*, a.name as account, nullif(b.name, '') as by_name
+  from invites i join accounts a on a.id = i.account_id left join users b on b.id = i.created_by
   where i.token = ? and i.expires_at > ?`).get(token, now()) as Inv | undefined
-type Inv = { account_id: string; email: string; github: string | null; open: number; role: string; account: string; expires_at: string }
+type Inv = { account_id: string; email: string; github: string | null; open: number; role: string; account: string; expires_at: string; by_name: string | null }
 
 // the invitation's own user is signed in already (e.g. just came back from GitHub): joining needs no password.
 // An invite by GitHub login is for whoever last signed in with that login, and only signed in that way.
@@ -336,7 +346,7 @@ const signedInAs = async (c: Context, inv: Inv) => {
 app.get('/api/invites/:token', async (c) => {
   const inv = inviteRow(c.req.param('token')) ?? fail(404, 'This invitation is invalid or expired')
   const exists = !!(inv.github ? db.prepare('select 1 from users where github_login = ?').get(inv.github) : db.prepare('select 1 from users where email = ?').get(inv.email))
-  return c.json({ email: inv.email, github: inv.github, open: !!inv.open, expires_at: inv.expires_at, account: inv.account, exists, signed_in: !!await signedInAs(c, inv) })
+  return c.json({ email: inv.email, github: inv.github, open: !!inv.open, expires_at: inv.expires_at, account: inv.account, by: inv.by_name, role: inv.role, exists, signed_in: !!await signedInAs(c, inv) })
 })
 
 app.post('/api/invites/:token/accept', async (c) => {
@@ -964,6 +974,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
     }
     const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r, user.id)
+    if (rows.length) db.prepare('update users set notes_at = ? where id = ? and notes_at is null').run(now(), user.id) // the setup checklist
     db.prepare('delete from files where pull_id = ? and user_id is ?').run(id, user.id)
     const add = db.prepare('insert into files (pull_id, name, type, size, backend, user_id) values (?, ?, ?, ?, ?, ?)')
     for (const [i, name] of stored.entries()) add.run(id, name, types[i], datas[i].length, backend, user.id)
@@ -1257,6 +1268,7 @@ Disallow: /api/
 Disallow: /files/
 Disallow: /dashboard
 Disallow: /settings
+Disallow: /welcome
 Disallow: /admin
 Disallow: /accounts/
 Disallow: /pulls/

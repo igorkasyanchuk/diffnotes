@@ -59,6 +59,16 @@ GitHub logins can be renamed and taken.
 DiffNotes user. Without GitHub sign-in on the server, the form makes new users too; with it, new people come with GitHub,
 since a typed email isn't proven and would let anyone holding the link claim an address and catch its invitations. Revoke it to stop it early. Handy for a meeting; don't post it anywhere public.
 
+## Setup steps for new people
+
+Joining through an invitation (or signing up with GitHub) lands on **/welcome**: three steps with a "start here" mark on
+the current one — give your agent the skill, add the browser extension, annotate a first pull request. Each makes its
+own token in place and ticks itself as it happens (the server sees the extension's first request, the agent's first
+upload or MCP call, and the first uploaded notes; the extension says so with an `x-diffnotes-client: extension` header).
+Until all three are done, the sidebar shows **setup n/3** and a bar on top offers to continue or hide it; "I've done
+this" marks a step by hand in that browser (an extension older than 1.2 doesn't send the header). Existing users joining
+another account see their steps already ticked, and so do users from before the steps who had used a token.
+
 ## Sign in with GitHub
 
 Off unless the server has an OAuth app. On GitHub: Settings → Developer settings → **OAuth Apps** → **New OAuth App**,

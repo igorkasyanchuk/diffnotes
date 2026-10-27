@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
-import { AGENT_PROMPT, BadgePage, Code, DemoPage, Landing } from './landing.tsx'
+import { AGENT_PROMPT, AddToChrome, BadgePage, Code, DemoPage, Landing } from './landing.tsx'
 import { version } from '../package.json'
 
 declare global {
@@ -184,7 +184,8 @@ function useSubmit(fn: () => Promise<unknown>, done?: string) {
 }
 
 type SignIn = { github: boolean; signup: boolean; demo: { repository: string; number: number } | null } // what /api/me says this server offers besides a password
-type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; tokens: number; has_password: boolean }
+type Setup = { agent: boolean; extension: boolean; notes: boolean }
+type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; has_password: boolean; setup: Setup }
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
 const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
@@ -220,6 +221,7 @@ function PublicLayout({ signedIn, signup, children }: { signedIn: boolean; signu
 function AppLayout({ me, path, children }: { me: Me; path: string; children: ReactNode }) {
   const logout = async () => { await api('/api/logout', {}); location.href = '/' }
   const on = (p: string) => (path === p || path.startsWith(`${p}/`) ? 'on' : undefined)
+  const setupN = setupDone(me).length
   return <div className="app">
     <aside className="side">
       <Brand />
@@ -228,6 +230,7 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
         <span className="side-h">accounts</span>
         {me.accounts.map((a) => <Link key={a.id} to={`/accounts/${a.id}`} className={on(`/accounts/${a.id}`)}>{a.name}</Link>)}
         <span className="side-h">you</span>
+        {setupN < 3 && <Link to="/welcome" className={on('/welcome')}>setup <span className="chip hot">{setupN}/3</span></Link>}
         <Link to="/settings" className={on('/settings')}>settings</Link>
         {!!me.user.admin && <Link to="/admin" className={on('/admin')}>server admin</Link>}
         <button className="link" onClick={logout}>logout</button>
@@ -235,9 +238,10 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
       <div className="side-me hint">{me.user.email}</div>
     </aside>
     <div className="app-main">
-      {!me.tokens && <div className="nag">
-        <span><b>no agent token yet.</b> create one to connect your coding agent and the browser extension.</span>
-        {path !== '/settings' && <Link to="/settings#tokens" className="btn primary">create token →</Link>}
+      {setupN < 3 && path !== '/welcome' && <div className="nag">
+        <span><b>finish setting up:</b> {setupN} of 3 steps done (agent, browser extension, first notes).</span>
+        <span><Link to="/welcome" className="btn primary">continue setup →</Link>{' '}
+          <button type="button" className="link" onClick={() => { markSetup(me, STEPS); toast('setup hidden: the steps stay linked from settings') }}>I'm set up, hide this</button></span>
       </div>}
       <main>{children}</main>
       <Footer />
@@ -277,16 +281,25 @@ function Login({ sign }: { sign: SignIn }) {
 }
 
 function Invite({ token, sign }: { token: string; sign: SignIn }) {
-  const { data, error: loadError } = useLoad<{ email: string; github: string | null; open: boolean; expires_at: string; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
+  const { data, error: loadError } = useLoad<{ email: string; github: string | null; open: boolean; expires_at: string; account: string
+    by: string | null; role: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
   const [name, setName] = useState(''), [password, setPassword] = useState(''), [email, setEmail] = useState('')
+  // joined: the setup steps next (they show what is done already, so existing users see they're set)
   const { submit, error, busy } = useSubmit(async () => {
-    await api(`/api/invites/${token}/accept`, { name, password, email }); location.href = '/dashboard'
+    await api(`/api/invites/${token}/accept`, { name, password, email }); location.href = `/welcome?joined=${encodeURIComponent(data?.account ?? '')}`
   })
-  if (loadError) return <p className="error">{loadError}</p>
+  if (loadError) return <div className="narrow"><h1>invitation</h1><p className="error">{loadError}</p>
+    <p className="hint">Invitations work once (open links until they expire). Ask whoever invited you for a new one.</p></div>
   if (!data) return null
+  const intro = <div className="invite-intro">
+    <p><b>{data.by ?? 'A teammate'}</b> invited you to <b>{data.account}</b>{data.role === 'admin' && ' as an admin'}.</p>
+    <p className="hint">DiffNotes puts your coding agent's notes next to the changed lines of your pull requests, where your team reads them.
+      After joining, a short setup (about 3 minutes) connects your agent and your browser.</p>
+  </div>
   // an open link: anyone joins, signed in already or with an email (a new user, or an existing one with its password)
   if (data.open) return <div className="narrow">
     <h1>join {data.account}</h1>
+    {intro}
     <p className="hint">Anyone with this link can join as a member until {new Date(data.expires_at).toLocaleString()}.</p>
     {/* with GitHub on, new people join with GitHub (it proves their email); the form is for existing users */}
     {!data.signed_in && sign.github && <><p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton></p>
@@ -305,6 +318,7 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
   // an invite by GitHub login: only a GitHub sign-in as that login joins
   if (data.github) return <div className="narrow">
     <h1>join {data.account}</h1>
+    {intro}
     <p className="hint">Invitation for GitHub user @{data.github}.{data.signed_in && ' You are signed in as this user.'}</p>
     {data.signed_in
       ? <form className="stack" onSubmit={submit}>{error && <div className="error">{error}</div>}<button className="primary" disabled={busy}>{busy ? 'joining…' : 'join'}</button></form>
@@ -313,6 +327,7 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
   </div>
   return <div className="narrow">
     <h1>join {data.account}</h1>
+    {intro}
     <p className="hint">Invitation for {data.email}.{data.signed_in ? ' You are signed in as this user.'
       : data.exists && ' You already have an account: enter your password to join.'}</p>
     {sign.github && !data.signed_in && <p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton>
@@ -368,7 +383,7 @@ const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: 
       <span className="chip hot">{p.annotations} notes</span>
       <span className="hint">{fmt(p.updated_at)}</span>
       <a href={prUrl(p.repository, p.number)} target="_blank" rel="noreferrer">{forge(p.repository)} ↗</a>
-    </div>) : <div className="empty">nothing yet. install the skill (settings) and ask your agent to annotate a pull request.</div>}
+    </div>) : <div className="empty">nothing yet. the <Link to="/welcome">setup steps</Link> get your agent annotating pull requests in about 3 minutes.</div>}
   </div>
 
 type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number })[]; retention_days: number
@@ -643,6 +658,89 @@ function PullPage({ id }: { id: string }) {
   </>
 }
 
+// The setup flow after joining or signing up: three steps that tick themselves as they happen (the server sees the
+// extension's first request, the agent's first upload or MCP call and the first notes), polled while the page is open.
+// Each step can be marked done by hand, in this browser: an extension from before 1.2 doesn't say it's the extension.
+const STEPS = ['agent', 'extension', 'notes'] as const
+type Step = typeof STEPS[number]
+const skipKey = (me: Me) => `dn:setup-done:${me.user.id}` // per user: a shared browser has more than one
+const skipped = (me: Me): Step[] => { try { return JSON.parse(localStorage.getItem(skipKey(me)) ?? '[]') } catch { return [] } }
+const setupDone = (me: Me) => STEPS.filter((s) => me.setup[s] || skipped(me).includes(s))
+// dn:change: App re-renders, so the sidebar's count and the bar on top follow
+const markSetup = (me: Me, steps: readonly Step[]) => {
+  const next = [...new Set([...skipped(me), ...steps])]
+  try { localStorage.setItem(skipKey(me), JSON.stringify(next)) } catch { /* private mode: for this visit only */ }
+  dispatchEvent(new Event('dn:change'))
+  return next
+}
+function Welcome({ me }: { me: Me }) {
+  // the account just joined (the invitation page sends its name): one of this user's, never any text a link carries
+  const joined = me.accounts.find((a) => a.name === new URLSearchParams(location.search).get('joined'))?.name
+  const [marked, setMarked] = useState(() => skipped(me))
+  const done = (s: Step) => me.setup[s] || marked.includes(s)
+  const current = STEPS.find((s) => !done(s))
+  const [open, setOpen] = useState<Step | undefined>(current)
+  useEffect(() => { setOpen(current) }, [current]) // a step ticked (here or elsewhere): on to the next
+  // ponytail: polls /api/me (via dn:change) every 4 s while steps are left and the tab is shown, so ticks show up without a reload
+  useEffect(() => {
+    if (!current) return
+    const t = setInterval(() => { if (!document.hidden) dispatchEvent(new Event('dn:change')) }, 4000)
+    return () => clearInterval(t)
+  }, [current])
+  const mark = (s: Step) => { setMarked(markSetup(me, [s])); toast('marked as done') }
+  // one token per place it goes, made right here and shown once; one per click, not two for a double click
+  const [tokens, setTokens] = useState<Partial<Record<Step, string>>>({}), [making, setMaking] = useState(false)
+  const make = (s: Step, name: string) => async () => {
+    setMaking(true)
+    try { const { token } = await api('/api/tokens', { name }); setTokens((t) => ({ ...t, [s]: token })); toast('token created: copy it now, it is shown only once') }
+    catch (e) { toast((e as Error).message, true) } finally { setMaking(false) }
+  }
+  const n = STEPS.filter(done).length
+  const item = (s: Step, title: string, why: string, body: ReactNode) => <li key={s} className={`setup-step${done(s) ? ' done' : ''}${current === s ? ' current' : ''}`}>
+    <button type="button" className="setup-head" onClick={() => setOpen(open === s ? undefined : s)} aria-expanded={open === s}>
+      <span className="setup-check" aria-hidden="true">{done(s) ? '✓' : STEPS.indexOf(s) + 1}</span>
+      <b>{title}</b>
+      {current === s && <span className="tip">start here</span>}
+      {done(s) && <span className="hint">done</span>}
+    </button>
+    {open === s && <div className="setup-body">
+      <p className="hint">{why}</p>
+      {body}
+      {!done(s) && <p className="hint setup-wait"><span className="pulse" aria-hidden="true" /> this ticks itself once it happens ·{' '}
+        <button type="button" className="link" onClick={() => mark(s)}>I've done this</button></p>}
+    </div>}
+  </li>
+  return <div className="setup">
+    <h1>{joined ? `welcome to ${joined}` : 'welcome'}</h1>
+    <p className="lp-lead">{joined ? "You're in. " : ''}Three short steps and your pull requests carry notes your team reads right in the diff.</p>
+    <div className="setup-progress" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={n}><span style={{ width: `${(n / 3) * 100}%` }} /></div>
+    <p className="hint">{n} of 3 done{n === 3 ? '' : ', about a minute each'}</p>
+    <ol className="setup-list">
+      {item('agent', 'give your coding agent the skill', 'Claude Code, Codex, Cursor or any Agent Skills tool learns to write notes and upload them here.', <>
+        <p>1. install the skill (run it in a terminal):</p>
+        <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
+        <p>2. give it a token: {!tokens.agent && <button type="button" className="primary" disabled={making} onClick={make('agent', 'agent')}>make a token for my agent</button>}</p>
+        {tokens.agent && <><p className="hint">add these two lines to your shell profile (~/.zshrc or ~/.bashrc), then open a new terminal:</p>
+          <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${tokens.agent}`} /></>}
+        <p className="hint">It ticks at your agent's first upload (or its first MCP call).</p>
+      </>)}
+      {item('extension', 'add the browser extension', 'It shows the notes next to the changed lines on GitHub, GitLab and Bitbucket. Nothing is posted to the PR.', <>
+        <p>1. <AddToChrome primary /> <span className="hint">Edge, Brave and Arc too; Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox" target="_blank" rel="noreferrer">load it from the repo</a></span></p>
+        <p>2. pin it (the puzzle icon in the toolbar), then: {!tokens.extension && <button type="button" className="primary" disabled={making} onClick={make('extension', 'browser extension')}>make a token for the extension</button>}</p>
+        {tokens.extension && <><p className="hint">open the extension's popup, paste this one line into its Server field and press Connect:</p>
+          <Code text={JSON.stringify({ server: location.origin, token: tokens.extension })} /></>}
+      </>)}
+      {item('notes', 'annotate your first pull request', "On a branch with an open pull request, ask your agent this. Then open the PR's “Files changed”: the notes are there.", <>
+        <Code wrap text={AGENT_PROMPT} />
+        {me.demo && <p className="hint">No PR at hand? <Link to="/demo">See the live demo</Link> first.</p>}
+      </>)}
+    </ol>
+    {n === 3 ? <div className="card setup-all"><b>✓ all set.</b> Your team sees your notes on every PR you annotate.{' '}
+      <Link to="/dashboard">go to the dashboard →</Link></div>
+      : <p className="hint">You can leave and come back: <Link to="/welcome">setup</Link> stays in the sidebar until it's done.</p>}
+  </div>
+}
+
 function Settings({ me }: { me: Me }) {
   const { data, reload } = useLoad<{ id: string; name: string; created_at: string; last_used_at: string | null }[]>('/api/tokens')
   const [name, setName] = useState(''), [fresh, setFresh] = useState('')
@@ -661,6 +759,7 @@ function Settings({ me }: { me: Me }) {
   })
   return <>
     <h1>settings</h1>
+    <p className="hint">New here? The <Link to="/welcome">setup steps</Link> walk you through all of this.</p>
     <h2>connect your agent</h2>
     <p>1. install the skill for Claude Code, Codex, Cursor and other Agent Skills tools:</p>
     <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
@@ -786,7 +885,7 @@ function StorageSettings() {
   </>
 }
 
-const APP_PATHS = /^\/(dashboard|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$/
+const APP_PATHS = /^\/(dashboard|welcome|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$/
 
 function App() {
   const [path, setPath] = useState(location.pathname), [me, setMe] = useState<Me | null>(), [n, setN] = useState(0)
@@ -821,6 +920,7 @@ function App() {
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />
   else if (m(/^\/pulls\/([\w-]+)$/)) page = <PullPage id={m(/^\/pulls\/([\w-]+)$/)!} />
   else if (path === '/settings') page = <Settings me={me} />
+  else if (path === '/welcome') page = <Welcome me={me} />
   else if (path === '/admin' && me.user.admin) page = <Admin user={me.user} />
   else page = <Dashboard />
   return <AppLayout me={me} path={path}>{page}<Gallery /><Toaster /></AppLayout>
