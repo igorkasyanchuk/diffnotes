@@ -15,7 +15,7 @@ const SCENES: { name: string; ms: number; at?: Target; click?: Target | 'thumb' 
   { name: 'live', ms: 5000, at: 'live', click: 'express', label: 'A live demo you can click', caption: <>Small <b>HTML demos</b> run in a locked sandbox: no network, no access to GitHub.</> },
   { name: 'dock', ms: 3800, at: 'dock', label: 'Stays with you as you scroll', caption: <>The <b>dock</b> keeps the notes and the switch in reach.</> },
   { name: 'off', ms: 5200, at: 'dock', click: 'switch', label: 'One switch hides every note', caption: <>Want the bare diff? <b>Notes off</b>, and back on whenever you like.</> },
-  { name: 'end', ms: 6500, caption: <>Free, self-hosted, <b>3 minutes</b> to install.</> },
+  { name: 'end', ms: 6500, caption: <>Free, self-hosted, <b>5 minutes</b> to install.</> },
 ]
 
 type Row = [kind: ' ' | '+' | '-', old: number | '', now: number | '', code: string]

@@ -490,17 +490,21 @@ export async function purge() {
   return ids.length
 }
 
+// the PRs of every account you're in, newest first, PER_PAGE at a time (?page=2…)
+const PER_PAGE = 20
 app.get('/api/dashboard', (c) => {
   const user = c.get('user'), accounts = accountsOf(user.id)
-  const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository,
+  const from = `from pulls p join repositories r on r.id = p.repository_id join memberships m on m.account_id = r.account_id where m.user_id = ?`
+  const total = (db.prepare(`select count(*) as n ${from}`).get(user.id) as { n: number }).n
+  const page = Math.min(Math.max(1, Math.floor(Number(c.req.query('page')) || 1)), Math.max(1, Math.ceil(total / PER_PAGE)))
+  const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, ${UPLOADER} as uploader,
     (select count(*) from annotations n where n.pull_id = p.id) as annotations
-    from pulls p join repositories r on r.id = p.repository_id join memberships m on m.account_id = r.account_id
-    where m.user_id = ? order by p.updated_at desc limit 50`).all(user.id)
+    ${from} order by p.updated_at desc, p.id limit ? offset ?`).all(user.id, PER_PAGE, (page - 1) * PER_PAGE)
   // invitations waiting for this user: by their email, or by their GitHub login
   const invites = db.prepare(`select i.token, a.name as account, i.role from invites i join accounts a on a.id = i.account_id
     join users u on u.id = ? where i.expires_at > ? and ((i.email != '' and i.email = u.email) or i.github = u.github_login)
     and not exists (select 1 from memberships m where m.account_id = i.account_id and m.user_id = u.id) order by i.created_at`).all(user.id, now())
-  return c.json({ accounts, pulls, invites, retention_days: RETENTION_DAYS })
+  return c.json({ accounts, pulls, total, page, per_page: PER_PAGE, invites, retention_days: RETENTION_DAYS })
 })
 
 app.post('/api/accounts', async (c) => {
@@ -527,10 +531,10 @@ app.get('/api/accounts/:id', (c) => {
 app.get('/api/accounts/:id/overview', (c) => {
   const id = c.req.param('id'), user = c.get('user')
   role(id, user)
-  const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, u.email as uploader,
+  const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, ${UPLOADER} as uploader,
     (select count(*) from annotations n where n.pull_id = p.id) as annotations,
     (select count(*) from files f where f.pull_id = p.id) as files, (select coalesce(sum(f.size), 0) from files f where f.pull_id = p.id) as bytes
-    from pulls p join repositories r on r.id = p.repository_id left join users u on u.id = p.user_id
+    from pulls p join repositories r on r.id = p.repository_id
     where r.account_id = ? order by p.updated_at desc`).all(id) as { repository: string; annotations: number; files: number; bytes: number; expires_at: string }[]
   const repos = db.prepare('select full_name from repositories where account_id = ? order by full_name').all(id) as { full_name: string }[]
   const byRepo = repos.map(({ full_name }) => {
@@ -685,6 +689,9 @@ const holds = (pull: string, author: string | null = null) => !!db.prepare(`sele
 // yours: notes or files you wrote, or a PR you uploaded with neither (a summary, a deploy card only)
 const owns = (p: Pull, user: User) => holds(p.id, user.id) || (p.user_id === user.id && !holds(p.id))
 
+// who uploaded a PR (its last upload): the name, else the email; null once that user is gone
+const NAME = `coalesce(nullif(u.name, ''), u.email)`, UPLOADER = `(select ${NAME} from users u where u.id = p.user_id)`
+
 function pullOut(p: Pull, user: User) {
   const member = isMember(p.account_id, user), admin = member && isAdminOf(p, user)
   // mine: what your next upload replaces; teammates' notes and files stay
@@ -695,6 +702,12 @@ function pullOut(p: Pull, user: User) {
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary, deploy: p.deploy,
     updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
+    // who wrote its notes and files, the last uploader first; the uploader alone when there are none (a summary only).
+    // Members only: the live demo is read by everyone signed in
+    authors: member ? (db.prepare(`select ${NAME} as name from users u where u.id in
+      (select user_id from annotations where pull_id = ?2 union select user_id from files where pull_id = ?2)
+      or (u.id = ?1 and not exists (select 1 from annotations where pull_id = ?2 union all select 1 from files where pull_id = ?2))
+      order by u.id = ?1 desc, name collate nocase`).all(p.user_id, p.id) as { name: string }[]).map((a) => a.name) : [],
     can_delete: admin || (member && owns(p, user)), can_delete_all: admin,
   }
 }
@@ -1277,8 +1290,16 @@ Disallow: /login
 
 Sitemap: ${host(c)}/sitemap.xml
 `))
+// the public pages search engines may index, with their own title and description (page() puts them in the HTML);
+// /demo only while there is one (DEMO_PR). Every other page is noindex and keeps index.html's.
+const PUBLIC_PAGES: Record<string, { title: string; description: string }> = {
+  '/demo': { title: 'Live demo · DiffNotes', description: 'See DiffNotes on a real pull request: plain-language notes, risk levels, before / after screenshots and a clickable demo, right inside the GitHub diff. About a minute.' },
+  '/badge': { title: 'Badge · DiffNotes', description: 'A “Reviewed with DiffNotes” badge for your README and pull request template: tell contributors your pull requests come with notes in the diff.' },
+  '/privacy': { title: 'Privacy · DiffNotes', description: 'What the DiffNotes browser extension and a DiffNotes server keep, who sees it, and what is never sent anywhere.' },
+}
+const indexed = (p: string) => p === '/' || (p in PUBLIC_PAGES && (p !== '/demo' || !!demoName()))
 app.get('/sitemap.xml', (c) => c.body(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${host(c)}/</loc></url><url><loc>${host(c)}/privacy</loc></url></urlset>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', ...Object.keys(PUBLIC_PAGES)].filter(indexed).map((p) => `<url><loc>${host(c)}${p}</loc></url>`).join('')}</urlset>
 `, 200, { 'content-type': 'application/xml; charset=utf-8' }))
 
 // the web app's one page, with this server's address in its canonical and Open Graph tags (index.html: __ORIGIN__)
@@ -1299,9 +1320,12 @@ const page = (c: Context) => {
   const landing = c.req.path === '/' && analytics
   c.header('content-security-policy', landing ? analytics.csp : PAGE_CSP)
   c.header('cache-control', 'no-cache')
-  if (c.req.path !== '/' && c.req.path !== '/privacy') c.header('x-robots-tag', 'noindex')
-  // /privacy is indexed (sitemap.xml): its canonical and og:url are itself, not the landing page
-  const html = (c.req.path === '/privacy' ? indexHtml.replace(/(rel="canonical" href|property="og:url" content)="__ORIGIN__\/"/g, '$1="__ORIGIN__/privacy"') : indexHtml)
+  const p = c.req.path, own = indexed(p) && PUBLIC_PAGES[p]
+  if (!indexed(p)) c.header('x-robots-tag', 'noindex')
+  // an indexed page (sitemap.xml) other than / names itself: canonical, og:url, title and description
+  const html = (own ? indexHtml.replace(/(rel="canonical" href|property="og:url" content)="__ORIGIN__\/"/g, `$1="__ORIGIN__${p}"`)
+    .replace(/<title>[^<]*<\/title>/, `<title>${own.title}</title>`).replace(/(property="og:title" content=)"[^"]*"/, `$1"${own.title}"`)
+    .replace(/(name="description" content=|property="og:description" content=)"[^"]*"/g, `$1"${own.description}"`) : indexHtml)
     .replaceAll('__ORIGIN__', host(c))
   return c.html(landing ? html.replace('</head>', `${analytics.tag}\n</head>`) : html)
 }

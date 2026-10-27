@@ -77,6 +77,17 @@ describe('pages', () => {
     expect((await call('/robots.txt')).data).toContain('Sitemap: https://dn.example/sitemap.xml')
     expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/</loc>')
     expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/privacy</loc>')
+    // the public pages name themselves: title, description, canonical; /demo only while DEMO_PR is set
+    const badge = await call('/badge')
+    expect(badge.data).toContain('<title>Badge · DiffNotes</title>')
+    expect(badge.data).toContain('<meta property="og:title" content="Badge · DiffNotes"')
+    expect(badge.data).toMatch(/<meta name="description" content="A “Reviewed with DiffNotes” badge/)
+    expect(badge.data).toContain('<link rel="canonical" href="https://dn.example/badge"')
+    expect(badge.res.headers.get('x-robots-tag')).toBeNull()
+    expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/badge</loc>')
+    expect((await call('/sitemap.xml')).data).not.toContain('/demo')
+    expect((await call('/demo')).res.headers.get('x-robots-tag')).toBe('noindex')
+    expect((await call('/demo')).data).toContain('<link rel="canonical" href="https://dn.example/"')
     const privacy = await call('/privacy')
     expect(privacy.data).toContain('<link rel="canonical" href="https://dn.example/privacy"')
     expect(privacy.status).toBe(200)
@@ -534,7 +545,11 @@ describe('live demo (DEMO_PR)', () => {
     try {
       const r = await call('/api/v1/pulls/acme/demo/5', { token: tok })
       expect(r.status).toBe(200)
-      expect(r.data).toMatchObject({ annotations: [{ body: 'why' }], can_delete: false })
+      expect(r.data).toMatchObject({ annotations: [{ body: 'why' }], can_delete: false, authors: [] }) // who wrote it: members only
+      expect((await call('/sitemap.xml')).data).toContain('<loc>https://dn.example/demo</loc>')
+      const demoPage = await call('/demo')
+      expect(demoPage.res.headers.get('x-robots-tag')).toBeNull()
+      expect(demoPage.data).toContain('<title>Live demo · DiffNotes</title>')
       expect((await call(r.data.files[0].url, { token: tok })).status).toBe(200)
       expect((await call('/api/v1/pulls/acme/demo/6', { token: tok })).status).toBe(404) // only that PR
       expect((await call('/api/v1/pulls/acme/demo/5', { token: tok, method: 'DELETE' })).status).toBe(404) // read only

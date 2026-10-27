@@ -246,7 +246,7 @@
     if (!error) dock(box)
   }
 
-  // How loud the notes are (popup: loud, sticky, standard, quiet, compact, ghost): a class on <html>, content.css styles it
+  // How the notes look (popup: standard, loud, sticky, quiet, compact, ghost and more): a class on <html>, content.css styles it
   const theme = (t) => {
     const cl = document.documentElement.classList
     cl.remove(...[...cl].filter((c) => c.startsWith('dn-theme-')))
@@ -258,26 +258,31 @@
   chrome.storage.local.get('noteTheme').then((s) => theme(s.noteTheme), () => {})
   chrome.storage.onChanged.addListener((ch) => { if (ch.noteTheme) theme(ch.noteTheme.newValue) })
 
-  // Notes on/off for the whole diff, remembered across PRs. Every switch on the page shows the same state.
-  let hidden = false
-  chrome.storage.local.get('hideNotes').then((s) => setHidden(!!s.hideNotes, false))
-  function setHidden(v, save = true) {
-    hidden = v
-    document.documentElement.classList.toggle('dn-hide-notes', v)
-    document.querySelectorAll('.dn-switch').forEach((b) => b.setAttribute('aria-checked', String(!v)))
-    if (save) chrome.storage.local.set({ hideNotes: v })
-    clampAll() // notes that were hidden get measured now that they show
+  // Notes in the diff on/off, and the box's summary (deploy card, risk map, summary) on/off: each remembered across PRs,
+  // a class on <html>. Every switch on the page shows the same state. save false: as stored (the first read).
+  let hidden = false, noSummary = false
+  chrome.storage.local.get(['hideNotes', 'hideSummary']).then((s) => { setHidden(!!s.hideNotes, false); setNoSummary(!!s.hideSummary, false) }, () => {})
+  const flip = (what, cls, key, v, save) => {
+    document.documentElement.classList.toggle(cls, v)
+    document.querySelectorAll(`.dn-switch[data-dn-what=${what}]`).forEach((b) => b.setAttribute('aria-checked', String(!v)))
+    // in a microtask, like fold(): an orphaned script's chrome.* throws, which would skip clampAll() below
+    if (save) Promise.resolve().then(() => chrome.storage.local.set({ [key]: v })).catch(() => {})
+    clampAll() // what was hidden gets measured now that it shows
   }
-  function notesSwitch() {
-    const b = el('button', 'dn-switch')
+  function setHidden(v, save = true) { hidden = v; flip('notes', 'dn-hide-notes', 'hideNotes', v, save) }
+  function setNoSummary(v, save = true) { noSummary = v; flip('summary', 'dn-hide-summary', 'hideSummary', v, save) }
+  function toggle(what) {
+    const b = el('button', 'dn-switch'), notes = what === 'notes'
     b.type = 'button'
+    b.dataset.dnWhat = what
     b.setAttribute('role', 'switch')
-    b.setAttribute('aria-checked', String(!hidden))
-    b.title = 'Show or hide DiffNotes notes in the diff'
-    b.append(el('i'), el('span', '', 'notes'))
-    b.addEventListener('click', () => setHidden(!hidden))
+    b.setAttribute('aria-checked', String(!(notes ? hidden : noSummary)))
+    b.title = notes ? 'Show or hide DiffNotes notes in the diff' : 'Show or hide the summary in this box'
+    b.append(el('i'), el('span', '', what))
+    b.addEventListener('click', () => (notes ? setHidden(!hidden) : setNoSummary(!noSummary)))
     return b
   }
+  const notesSwitch = () => toggle('notes')
 
   // Once the box scrolls away, a floating dock at the bottom keeps the count, the notes switch and the summary at hand.
   function dock(box) {
@@ -348,7 +353,6 @@
     const title = el('button', 'dn-head dn-box-title')
     title.type = 'button'
     title.append(el('span', 'dn-badge', 'DN'), el('b', '', `DiffNotes · ${pull.annotations.length} notes`))
-    title.addEventListener('click', () => { box.classList.toggle('dn-collapsed'); clampAll() })
     const all = (c) => () => { fold(pull.annotations, c); document.querySelectorAll('.dn-note').forEach((n) => n.classList.toggle('dn-collapsed', c)); clampAll() }
     const expand = el('button', 'dn-link', 'expand all'), collapse = el('button', 'dn-link', 'collapse all')
     expand.addEventListener('click', all(false))
@@ -372,25 +376,27 @@
       return b
     })
     // the summary (and deploy card) as Markdown for the PR's description: /files/… links point at their server (readers
-    // sign in there), images become links (the site can't load them without a session). Nothing is posted anywhere.
+    // sign in there), images become links (the site can't load them without a session), links to notes (#note:) their text
+    // (no such anchor on the PR). Nothing is posted anywhere.
     const summaries = pull.pulls.filter((p) => p.summary || p.deploy), copy = el('button', 'dn-link', 'copy summary')
     copy.type = 'button'
     copy.title = 'Copy the summary as Markdown, e.g. for the PR description'
     copy.addEventListener('click', () => {
       const text = summaries.map((p) => (many ? `### ${new URL(p.server).host}\n\n` : '') +
-        [p.summary, p.deploy && `### Deploy\n\n${p.deploy}`].filter(Boolean).join('\n\n').replace(/!?\[([^\]]*)\]\((\/files\/[^)\s]+)\)/g, (m, label, u) => `[${label || 'image'}](${p.server}${u})`)).join('\n\n')
+        [p.summary, p.deploy && `### Deploy\n\n${p.deploy}`].filter(Boolean).join('\n\n').replace(/\[([^\]]+)\]\(#note:[^)\s]+\)/g, '$1').replace(/!?\[([^\]]*)\]\((\/files\/[^)\s]+)\)/g, (m, label, u) => `[${label || 'image'}](${p.server}${u})`)).join('\n\n')
       navigator.clipboard.writeText(text).then(() => 'copied ✓', () => 'copy failed').then((t) => {
         copy.textContent = t
         setTimeout(() => { copy.textContent = 'copy summary' }, 1500)
       })
     })
     bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...opens, ...removes)
-    const body = el('div', 'dn-box-body')
+    // sum: what the summary switch hides (deploy card, risk map, summary); a server's error and notes not placed in the diff always show
+    const body = el('div', 'dn-box-body'), sum = el('div', 'dn-box-sum')
     // the deploy card, pinned first: what shipping this PR takes (migrations, env vars, flags, rollback), for whoever deploys it
     for (const p of pull.pulls.filter((x) => x.deploy)) {
       const d = el('div', 'dn-md dn-summary dn-deploy')
       d.append(el('div', 'dn-risks-title', many ? `Deploy · ${new URL(p.server).host}` : 'Deploy'), md(p.deploy, p.server))
-      body.append(d)
+      sum.append(d)
     }
     // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
     const risky = pull.annotations.map((a, i) => [a, i]).filter(([a]) => RISKS.includes(a.risk))
@@ -405,14 +411,21 @@
         row.append(el('span', `dn-risk dn-risk-${a.risk}`, a.risk), el('code', '', `${a.path}${a.line ? `:${a.line}` : ''}`), el('span', 'dn-hint', a.title || ''))
         map.append(row)
       }
-      body.append(map)
+      sum.append(map)
     }
     for (const p of pull.pulls.filter((x) => x.summary)) {
       const s = el('div', 'dn-md dn-summary')
       if (many) s.append(el('h6', '', new URL(p.server).host))
       s.append(md(p.summary, p.server))
-      body.append(s)
+      sum.append(s)
     }
+    // the summary switch, and a click on the title flips it too. A box without a summary has neither (no arrow either):
+    // a click there would hide the next PR's summary unseen
+    if (sum.childElementCount) {
+      body.append(sum)
+      bar.insertBefore(toggle('summary'), bar.querySelector('.dn-switch').nextSibling)
+      title.addEventListener('click', () => setNoSummary(!noSummary))
+    } else title.classList.add('dn-no-sum')
     for (const e of pull.errors) body.append(el('div', 'dn-hint', e))
     if (missing.length) {
       body.append(el('div', 'dn-hint', `${missing.length} not shown in the diff yet (file collapsed, not loaded, or the line changed since):`))
@@ -447,19 +460,25 @@
     }
     if (!long && more) more.remove()
   }
-  // risk map and "changed" link: jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
-  document.addEventListener('click', (e) => {
-    const i = e.target.closest?.('[data-dn-jump]')?.dataset.dnJump
-    if (i == null) return
+  // jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
+  function jump(i) {
     if (hidden) setHidden(false)
     document.getElementById('dn-pop')?.remove()
     reveal(document.querySelector(`.dn-row [data-dn="${i}"], .dn-file[data-dn="${i}"], #dn-box [data-dn="${i}"]`), true)
+  }
+  // risk map and "changed" link; a note's link to another note ([text](#note:path:line), markdown.js), resolved among this PR's notes
+  document.addEventListener('click', (e) => {
+    const i = e.target.closest?.('[data-dn-jump]')?.dataset.dnJump
+    if (i != null) return jump(i)
+    const ref = e.target.closest?.('a[data-dn-note]')?.dataset.dnNote
+    if (ref == null || !pull) return
+    e.preventDefault()
+    const n = dnNoteRef(ref, pull.annotations)
+    if (n >= 0) jump(n)
   })
   // open: a folded note unfolds (a jump is to read it); j / k only scroll to it
   function reveal(n, open) {
     if (!n) return
-    // a note listed in a collapsed box has no box to scroll to: open it (clicked from the dock's summary pop)
-    if (n.closest('#dn-box.dn-collapsed')) { document.getElementById('dn-box').classList.remove('dn-collapsed'); clampAll() }
     if (open && n.classList.contains('dn-collapsed')) { n.classList.remove('dn-collapsed'); fold([pull.annotations[n.dataset.dn]], false); clampAll() }
     n.scrollIntoView({ behavior: 'smooth', block: 'center' })
     n.classList.add('dn-flash')

@@ -43,7 +43,7 @@ There is no undo for any of these, and files are removed from disk or the bucket
 
 ## Invitations
 
-Account → **members** → email + role → **invite** → **copy link** and send it. The link works for 7 days. New people
+Account → **members** → email + role → **invite** → **copy link** and send it yourself: DiffNotes sends no emails. The link works for 7 days. New people
 choose a name and password; people who already have a user enter their password to join. With GitHub sign-in on, they
 can also **continue with GitHub** when the invited email is one of their GitHub account's verified emails.
 

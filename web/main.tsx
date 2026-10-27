@@ -10,11 +10,12 @@ declare global {
   var dnMarkdown: (md: string) => string
   var dnPreview: (name: string, text: string) => string
   var dnCompare: (root: ParentNode) => void
+  var dnNoteRef: (ref: string, notes: { path: string; line: number | null; end_line: number | null; side: string }[]) => number
 }
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]; authors?: string[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -147,11 +148,24 @@ function Attachment({ f }: { f: { name: string; type: string; size: number; url:
       : html !== undefined && <div className="md preview" dangerouslySetInnerHTML={{ __html: html }} />}
   </div>
 }
+// who wrote it: initials on a colour of their own (no image: the app's pages load nothing from third parties)
+const Avatar = ({ name }: { name: string }) => {
+  const initials = name.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join('').toUpperCase() || '?'
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360
+  return <span className="avatar" style={{ '--h': h } as React.CSSProperties} title={name} aria-hidden="true">{initials}</span>
+}
+const Author = ({ name }: { name: string | null | undefined }) => name ? <span className="author"><Avatar name={name} />{name}</span> : <span className="hint">—</span>
 const Stat = ({ label, value }: { label: string; value: ReactNode }) => <div className="stat"><b>{value}</b><span>{label}</span></div>
 
 function useLoad<T>(url: string) {
   const [data, setData] = useState<T>(), [error, setError] = useState(''), [n, setN] = useState(0)
-  useEffect(() => { api<T>(url).then(setData, (e) => setError(e.message)) }, [url, n])
+  // live: a slower answer for an older url (the dashboard's pages) never replaces a newer one
+  useEffect(() => {
+    let live = true
+    api<T>(url).then((d) => { if (live) setData(d) }, (e) => { if (live) setError(e.message) })
+    return () => { live = false }
+  }, [url, n])
   return { data, error, reload: () => setN((x) => x + 1) }
 }
 
@@ -200,11 +214,12 @@ const Footer = () => <footer className="foot">
 </footer>
 
 // public pages: landing, sign in, invitations
-function PublicLayout({ signedIn, signup, children }: { signedIn: boolean; signup: boolean; children: ReactNode }) {
+function PublicLayout({ signedIn, signup, demo, children }: { signedIn: boolean; signup: boolean; demo: boolean; children: ReactNode }) {
   return <>
     <header className="top">
       <Brand />
       <nav>
+        {demo && <Link to="/demo" className="btn demo-link"><span className="pulse" aria-hidden="true" />live demo</Link>}
         <a href={SOURCE} target="_blank" rel="noreferrer" className="btn gh" aria-label="DiffNotes on GitHub">
           <GitHubMark />
           <span>GitHub</span>
@@ -294,7 +309,7 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
   const intro = <div className="invite-intro">
     <p><b>{data.by ?? 'A teammate'}</b> invited you to <b>{data.account}</b>{data.role === 'admin' && ' as an admin'}.</p>
     <p className="hint">DiffNotes puts your coding agent's notes next to the changed lines of your pull requests, where your team reads them.
-      After joining, a short setup (about 3 minutes) connects your agent and your browser.</p>
+      After joining, a short setup (about 5 minutes) connects your agent and your browser.</p>
   </div>
   // an open link: anyone joins, signed in already or with an email (a new user, or an existing one with its password)
   if (data.open) return <div className="narrow">
@@ -375,21 +390,28 @@ function Privacy() {
   </div>
 }
 
-const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: string })[] }) =>
+const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: string | null })[] }) =>
   <div className="list">
     {pulls.length ? pulls.map((p) => <div key={p.id}>
       <span className="mono hint">{p.repository}#{p.number}</span>
       <span className="grow"><Link to={`/pulls/${p.id}`}>{p.title || 'untitled'}</Link></span>
+      {p.uploader && <Author name={p.uploader} />}
       <span className="chip hot">{p.annotations} notes</span>
       <span className="hint">{fmt(p.updated_at)}</span>
       <a href={prUrl(p.repository, p.number)} target="_blank" rel="noreferrer">{forge(p.repository)} ↗</a>
-    </div>) : <div className="empty">nothing yet. the <Link to="/welcome">setup steps</Link> get your agent annotating pull requests in about 3 minutes.</div>}
+    </div>) : <div className="empty">nothing yet. the <Link to="/welcome">setup steps</Link> get your agent annotating pull requests in about 5 minutes.</div>}
   </div>
 
-type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number })[]; retention_days: number
-  invites: { token: string; account: string; role: string }[] }
+type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number; uploader: string | null })[]; retention_days: number
+  total: number; page: number; per_page: number; invites: { token: string; account: string; role: string }[] }
 function Dashboard() {
-  const { data, reload } = useLoad<Dash>('/api/dashboard')
+  const urlPage = () => Math.max(1, Number(new URLSearchParams(location.search).get('page')) || 1)
+  const [page, setPage] = useState(urlPage)
+  // the sidebar's dashboard link and back / forward keep this page mounted: follow the address
+  useEffect(() => { const on = () => setPage(urlPage()); addEventListener('popstate', on); return () => removeEventListener('popstate', on) }, [])
+  const { data, reload } = useLoad<Dash>(`/api/dashboard?page=${page}`)
+  // ?page=N in the address, so back and a reload stay on it
+  const turn = (n: number) => { setPage(n); history.replaceState(null, '', n > 1 ? `?page=${n}` : location.pathname); scrollTo(0, 0) }
   const [name, setName] = useState('')
   const { submit, error, busy } = useSubmit(async () => { await api('/api/accounts', { name }); setName(''); reload() }, 'account created')
   if (!data) return null
@@ -404,8 +426,13 @@ function Dashboard() {
         </div>)}
       </div>
     </>}
-    <h2>annotated pull requests</h2>
+    <h2>annotated pull requests{data.total > 0 && <span className="count"> · {data.total}</span>}</h2>
     <PullList pulls={data.pulls} />
+    {data.total > data.per_page && <div className="pager">
+      <button type="button" disabled={data.page <= 1} onClick={() => turn(data.page - 1)}>← newer</button>
+      <span className="hint">page {data.page} of {Math.ceil(data.total / data.per_page)}</span>
+      <button type="button" disabled={data.page * data.per_page >= data.total} onClick={() => turn(data.page + 1)}>older →</button>
+    </div>}
     <p className="hint">notes are kept for {data.retention_days} days after the last upload.</p>
     <h2>accounts</h2>
     <div className="list">
@@ -479,11 +506,11 @@ function AccountOverview({ id }: { id: string }) {
       </tr>)}</tbody>
     </table></div> : <div className="list"><div className="empty">no repositories yet</div></div>}
     <h2>latest uploads</h2>
-    {data.recent.length ? <div className="scroll"><table className="grid">
+    {data.recent.length ? <div className="scroll"><table className="grid fit">
       <thead><tr><th>pull request</th><th>by</th><th className="num">notes</th><th className="num">files</th><th className="num">size</th><th>updated</th><th>expires</th></tr></thead>
       <tbody>{data.recent.map((p) => <tr key={p.id}>
-        <td><Link to={`/pulls/${p.id}`}>{p.repository}#{p.number}</Link> <span className="hint">{p.title}</span></td>
-        <td>{p.uploader ?? '—'}</td><td className="num">{p.annotations}</td><td className="num">{p.files}</td><td className="num">{bytes(p.bytes)}</td>
+        <td className="wrap"><Link to={`/pulls/${p.id}`}>{p.repository}#{p.number}</Link><div className="hint">{p.title}</div></td>
+        <td className="wrap"><Author name={p.uploader} /></td><td className="num">{p.annotations}</td><td className="num">{p.files}</td><td className="num">{bytes(p.bytes)}</td>
         <td>{fmt(p.updated_at)}</td><td>{fmt(p.expires_at)}</td>
       </tr>)}</tbody>
     </table></div> : <div className="list"><div className="empty">{t.pulls ? 'shown to the account\'s members only' : 'no uploads yet'}</div></div>}
@@ -495,6 +522,16 @@ type TabProps = { id: string; data: Acc; admin: boolean; reload: () => void }
 const del = async (url: string, reload: () => void, what = 'Are you sure?', done = 'removed') => {
   if (!confirm(what)) return
   try { await api(url, undefined, 'DELETE'); toast(done); reload() } catch (e) { toast((e as Error).message, true) }
+}
+
+// a search box and a role picker over a list of people: name and email match any case, every word of the query
+const matches = (q: string, ...fields: string[]) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => fields.some((f) => f.toLowerCase().includes(w)))
+function Filter({ q, setQ, roles, role, setRole, found, of }: { q: string; setQ: (q: string) => void; roles: string[]; role: string; setRole: (r: string) => void; found: number; of: number }) {
+  return <div className="filter">
+    <input type="search" placeholder="filter by name or email" value={q} onChange={(e) => setQ(e.target.value)} aria-label="filter by name or email" />
+    <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="role"><option value="">every role</option>{roles.map((r) => <option key={r}>{r}</option>)}</select>
+    {(q || role) && <span className="hint">{found} of {of}</span>}
+  </div>
 }
 
 function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
@@ -516,10 +553,15 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
     setErr('')
     try { await api(`/api/accounts/${id}/members/${m}`, { role: next }, 'PUT'); toast(`role changed to ${next}`); reload() } catch (e) { setErr((e as Error).message) }
   }
+  const [q, setQ] = useState(''), [only, setOnly] = useState('')
+  // the filter shows from two members up; below that it doesn't apply (a filter left set can't hide the last one)
+  const shown = data.members.length > 1 ? data.members.filter((m) => (!only || m.role === only) && matches(q, m.name, m.email)) : data.members
   return <>
+    {data.members.length > 1 && <Filter q={q} setQ={setQ} roles={['owner', 'admin', 'member']} role={only} setRole={setOnly} found={shown.length} of={data.members.length} />}
     <div className="list">
-      {data.members.map((m) => <div key={m.id}>
-        <span className="grow">{m.name || m.email} <span className="hint">{m.name && m.email}</span></span>
+      {!shown.length && <div className="empty">no member matches</div>}
+      {shown.map((m) => <div key={m.id}>
+        <span className="grow author"><Avatar name={m.name || m.email} />{m.name || m.email} <span className="hint">{m.name && m.email}</span></span>
         {admin && m.role !== 'owner' && m.id !== user.id
           ? <select className="inline" value={m.role} onChange={(e) => change(m.id, e.target.value)}><option>admin</option><option>member</option></select>
           : <span className={`chip${m.role === 'member' ? '' : ' hot'}`}>{m.role}</span>}
@@ -540,22 +582,31 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
           <button className="link danger" onClick={() => del(`/api/accounts/${id}/invites/${i.token}`, reload, 'Revoke this invitation? Its link stops working.', 'invitation revoked')}>revoke</button>
         </div>)}
       </div>}
-      <form className="row" onSubmit={invite.submit}>
-        <input placeholder="teammate@company.com or GitHub login" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <select value={role} onChange={(e) => setRole(e.target.value)}><option>member</option><option>admin</option></select>
-        <button disabled={invite.busy}>{invite.busy ? 'inviting…' : 'invite'}</button>
-      </form>
-      {invite.error && <div className="error">{invite.error}</div>}
-      <p className="hint">send them the link (copied when you invite); it works for 7 days. Invited by GitHub login: it waits on their dashboard
-        once they sign in with GitHub, and they join from there.</p>
-      <form className="row" onSubmit={open.submit}>
-        <span className="hint">open link, anyone who has it joins as a member, for</span>
-        <select value={minutes} onChange={(e) => setMinutes(e.target.value)}>
-          {[['5', '5 minutes'], ['10', '10 minutes'], ['30', '30 minutes'], ['60', '1 hour'], ['1440', '1 day']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <button disabled={open.busy}>{open.busy ? 'creating…' : 'create link'}</button>
-      </form>
-      {open.error && <div className="error">{open.error}</div>}
+      <p className="notice"><b>DiffNotes sends no emails.</b> Inviting someone makes a link (copied for you): send it to them yourself, in chat
+        or email. Invited by GitHub login: the invitation also waits on their dashboard once they sign in with GitHub.</p>
+      <div className="invite-cards">
+        <form className="card invite-card" onSubmit={invite.submit}>
+          <h3>invite a person</h3>
+          <p className="hint">by email or GitHub login; the link works once, for 7 days.</p>
+          <div className="controls">
+            <input placeholder="email or GitHub login" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="role"><option>member</option><option>admin</option></select>
+            <button className="primary" disabled={invite.busy}>{invite.busy ? 'inviting…' : 'invite'}</button>
+          </div>
+          {invite.error && <div className="error">{invite.error}</div>}
+        </form>
+        <form className="card invite-card" onSubmit={open.submit}>
+          <h3>open link</h3>
+          <p className="hint">anyone who has it joins as a member, until it expires.</p>
+          <div className="controls">
+            <select value={minutes} onChange={(e) => setMinutes(e.target.value)} aria-label="link works for">
+              {[['5', 'for 5 minutes'], ['10', 'for 10 minutes'], ['30', 'for 30 minutes'], ['60', 'for 1 hour'], ['1440', 'for 1 day']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <button disabled={open.busy}>{open.busy ? 'creating…' : 'create link'}</button>
+          </div>
+          {open.error && <div className="error">{open.error}</div>}
+        </form>
+      </div>
     </>}
   </>
 }
@@ -622,6 +673,23 @@ function AccountSettings({ id, data, user, reload }: Omit<TabProps, 'admin'> & {
 
 function PullPage({ id }: { id: string }) {
   const { data, error } = useLoad<Pull>(`/api/pulls/${id}`)
+  // a note's link to another note (#note:path:line, markdown.js): scroll to it and flash it
+  useEffect(() => {
+    if (!data) return
+    const click = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement).closest?.('a[data-dn-note]') as HTMLElement | null
+      if (!a) return
+      e.preventDefault()
+      const n = data.annotations[dnNoteRef(a.dataset.dnNote ?? '', data.annotations)]
+      const to = n && document.getElementById(`note-${n.id}`)
+      if (!to) return toast('that note is not on this pull request', true)
+      to.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      to.classList.add('flash')
+      setTimeout(() => to.classList.remove('flash'), 1200)
+    }
+    document.addEventListener('click', click)
+    return () => document.removeEventListener('click', click)
+  }, [data])
   if (error) return <p className="error">{error}</p>
   if (!data) return null
   const byFile = Map.groupBy(data.annotations, (a) => a.path)
@@ -630,6 +698,7 @@ function PullPage({ id }: { id: string }) {
   return <>
     <p className="hint">{data.repository}#{data.number}{data.head_sha && <> · written for commit <code>{data.head_sha.slice(0, 7)}</code></>} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
     <h1>{data.title || 'untitled pull request'}</h1>
+    {!!data.authors?.length && <p className="authors">notes by {data.authors.map((a, i) => <Author key={i} name={a} />)}</p>}
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
       {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
         data.can_delete_all ? 'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.'
@@ -812,7 +881,7 @@ type AdminStats = {
 }
 function Admin({ user }: { user: User }) {
   const { data, error, reload } = useLoad<AdminStats>('/api/admin/stats')
-  const [err, setErr] = useState('')
+  const [err, setErr] = useState(''), [q, setQ] = useState(''), [only, setOnly] = useState('')
   const flag = async (id: string, admin: boolean) => {
     setErr('')
     try { await api(`/api/admin/users/${id}`, { admin }, 'PUT'); toast(admin ? 'made super admin' : 'super admin removed'); reload() } catch (e) { setErr((e as Error).message) }
@@ -820,6 +889,7 @@ function Admin({ user }: { user: User }) {
   if (error) return <p className="error">{error}</p>
   if (!data) return null
   const t = data.totals, used = t.disk_total_bytes - t.disk_free_bytes
+  const users = data.users.filter((u) => (!only || (only === 'super admin') === !!u.admin) && matches(q, u.name, u.email))
   return <>
     <div className="head"><h1>server</h1><span className="chip hot">super admin</span></div>
     <div className="stats">
@@ -847,9 +917,10 @@ function Admin({ user }: { user: User }) {
       </tr>)}</tbody>
     </table></div>
     <h2>users</h2>
+    <Filter q={q} setQ={setQ} roles={['super admin', 'user']} role={only} setRole={setOnly} found={users.length} of={data.users.length} />
     <div className="scroll"><table className="grid">
       <thead><tr><th>user</th><th className="num">accounts</th><th>joined</th><th>last sign-in</th><th>token used</th><th>super admin</th><th></th></tr></thead>
-      <tbody>{data.users.map((u) => <tr key={u.id}>
+      <tbody>{users.map((u) => <tr key={u.id}>
         <td>{u.email} <span className="hint">{u.name}</span></td><td className="num">{u.accounts}</td><td>{fmt(u.created_at)}</td>
         <td>{fmt(u.signed_in_at)}</td><td>{fmt(u.token_used_at)}</td>
         <td>{u.id === user.id ? <span className="chip hot">you</span>
@@ -905,13 +976,20 @@ function App() {
       () => { if (live) setMe((x) => x ?? null) })
     return () => { live = false }
   }, [path, n])
+  // the tab's title; the server writes the public pages' own into the HTML too (app.ts PUBLIC_PAGES), for crawlers
+  useEffect(() => {
+    const t = ({ '/dashboard': 'dashboard', '/welcome': 'setup', '/settings': 'settings', '/admin': 'server admin', '/login': 'sign in',
+      '/demo': 'Live demo', '/badge': 'Badge', '/privacy': 'Privacy' } as Record<string, string>)[path] // the public ones as app.ts writes them
+      ?? (path.startsWith('/accounts/') ? 'account' : path.startsWith('/pulls/') ? 'pull request' : path.startsWith('/invite/') ? 'invitation' : '')
+    document.title = t ? `${t} · DiffNotes` : 'DiffNotes · AI pull request notes, right in the diff'
+  }, [path])
   if (me === undefined) return null
   const m = (re: RegExp) => path.match(re)?.[1]
   if (!me || !APP_PATHS.test(path)) {
     const invite = m(/^\/invite\/([\w-]+)$/)
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || APP_PATHS.test(path))
-    return <PublicLayout signedIn={!!me} signup={sign.signup}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
+    return <PublicLayout signedIn={!!me} signup={sign.signup} demo={!!sign.demo}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
       : path === '/privacy' ? <Privacy /> : path === '/badge' ? <BadgePage />
       : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }} />
       : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}<Toaster /></PublicLayout>

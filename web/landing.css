@@ -24,11 +24,15 @@
 .lp-install pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 560px) { .lp-h1 { font-size: 28px; } }
-.lp-quick { display: flex; gap: 8px; justify-content: center; align-items: stretch; flex-wrap: wrap; max-width: 640px; margin: 22px auto 6px; }
+.lp-quick { display: flex; gap: 8px; justify-content: center; align-items: stretch; flex-wrap: wrap; max-width: 760px; margin: 22px auto 6px; }
 .lp-quick .code { flex: 1 1 340px; min-width: 0; text-align: left; }
-.lp-quick .code pre { margin: 0; height: 100%; display: flex; align-items: center; white-space: pre; }
+.lp-quick .code pre { margin: 0; height: 100%; display: flex; align-items: center; white-space: pre; scrollbar-width: none; }
+/* the command fits on one line; a long self-hosted address still scrolls (trackpad, keys), without a bar under it */
+.lp-quick .code pre::-webkit-scrollbar { display: none; }
 .lp-quick .copy { top: 50%; transform: translateY(-50%); }
 .lp-quick > .btn { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 0 18px; min-height: 44px; }
 @media (max-width: 560px) { .lp-quick > .btn { flex: 1 1 100%; } }
 .lp-page { max-width: 720px; }
 .btn.chrome { display: inline-flex; align-items: center; gap: 8px; }
+.lp-demo { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel); color: var(--ink); font-size: 13px; }
+.lp-demo:hover { border-color: var(--accent); text-decoration: none; }

@@ -49,6 +49,8 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - In `body` and `summary`: ` ```mermaid ` flowcharts are drawn as diagrams, and two adjacent images named
   `…-before` / `…-after` (or captioned Before / After) become one image with a drag handle. An image whose file is an
   `.mp4` or `.webm` (`![caption](attachment:flow.webm)`) plays inline as a muted video with controls.
+  `[text](#note:<path>:<line>)` links to another note of the PR (the one whose lines hold `<line>`, the new side first;
+  `#note:<path>` alone: the file's note, else its first); a click scrolls to it in the diff and on the PR's page.
 - Every note and file has its author. Each PUT replaces the caller's own notes and files on the PR (teammates' stay)
   and restarts the expiry. Title, `head_sha`, summary and deploy card are the PR's: the latest upload sets them, and
   while teammates' notes are there a blank one keeps what it was. Limits per PR (`MAX_ANNOTATIONS`, `MAX_FILES`) count
@@ -61,7 +63,7 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   Less than `MIN_FREE_DISK_MB` free on the server's volume: `507` (an empty upload, which only removes yours, still passes). A multipart `payload` is held to `MAX_BODY_KB` like a JSON body.
 
 `GET` returns the stored notes with their `id`, `risk`, `mine` (yours: what your next upload replaces) and `can_delete`,
-the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove) and `can_delete_all`. A note is removed by its author or an
+the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove), `can_delete_all` and `authors` (who wrote its notes and files, the last uploader first). A note is removed by its author or an
 account owner or admin; `DELETE` of the PR removes everything for an owner or admin, your own notes and files for anyone
 else (the PR goes with the last of them; `403` with none of yours).
 

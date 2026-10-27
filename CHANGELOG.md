@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Extension: 11 more note themes**: outline, card, tinted, dashed, blue, green, purple, mono, contrast, terminal and
+  paper. The standard theme has a thin orange border, so notes stand out from the code.
+- **Extension: summary switch** next to the notes switch: hides the box's summary, deploy card and risk map, remembered
+  across PRs (a click on the box's title does the same).
+- **Links between notes**: `[text](#note:path:line)` in a note jumps to the note on that line, in the diff and on the
+  PR's page; the skill says when to use them.
+- **Who wrote the notes**: the dashboard, an account's latest uploads and a PR's page show the uploader with an initials avatar.
+- **Dashboard pages**: 20 annotated PRs at a time with newer / older, and the total.
+- **Filters** for an account's members and the server admin's users: by name or email, and by role.
+- **SEO**: `/demo` (when set), `/badge` and `/privacy` have their own title and description and are in the sitemap; every
+  page sets the tab's title.
+
+### Changed
+
+- Landing: the install command fits without a scrollbar; the live demo is linked in the header and under the command.
+- Members tab: a visible note that DiffNotes sends no emails (send the invitation link yourself), and the two ways to
+  invite (a person, an open link) as two cards.
+- An account's latest uploads fit the page instead of scrolling sideways.
+- “Start in 3 minutes” is now 5: closer to what the setup takes.
+
 ## [1.2.0] - 2026-10-27
 
 ### Added

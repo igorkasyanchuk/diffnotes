@@ -66,6 +66,10 @@ never write it into files or commits.
   diagram: nodes `A[box]`, `A(round)`, `A{decision}`, `A((circle))`, edges `-->`, `---`, `-.->`, `==>`, labels
   `-->|yes|`. Use it for a flow or a state change that words make hard to follow; keep it under ~15 nodes. Other
   Mermaid types (sequence, class…) show as code.
+- **Links between notes**: when a note only makes sense with another one (a caller and the function it calls, a
+  migration and the model that reads it), link it: `[the new column](#note:db/schema.sql:12)` jumps to the note whose
+  block holds that line (the new side first; `#note:<path>` alone: the file's note, else its first). Use it where
+  reviewers would otherwise hunt for the other half, not on every note; the path is the repository path, as in `path`.
 - **Risk**: give `"risk": "high" | "medium" | "low"` to the notes where reviewers should look hardest or can relax
   (money, auth, data loss, migrations, concurrency are high; copy and renames low). Reviewers get a "where to look
   hardest" list at the top. Use it sparingly and say why in the note's text; leave it out when there is nothing to flag.

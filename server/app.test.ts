@@ -90,6 +90,10 @@ describe('diffnotes', () => {
     const p = (await call(`/api/pulls/${pullId}`, { cookie: member })).data
     expect(p.annotations).toHaveLength(1)
     expect(p.files).toEqual([])
+    expect(p.authors).toEqual(['Admin']) // the uploader, by name
+    // the dashboard: a page of PRs with who uploaded them; a page past the end is the last one
+    const d = (await call('/api/dashboard?page=99', { cookie: member })).data
+    expect(d).toMatchObject({ total: 1, page: 1, per_page: 20, pulls: [{ id: pullId, uploader: 'Admin' }] })
     expect((await call('/api/v1/pulls/acme/web/42', { token, method: 'PUT', body: { annotations: [{ body: 'no path' }] } })).status).toBe(400)
     expect((await call('/api/v1/pulls/acme/web/0', { token, method: 'PUT', body: { annotations: [] } })).status).toBe(400)
   })
@@ -142,6 +146,8 @@ describe('diffnotes', () => {
     expect((await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })).status).toBe(200)
     const both = (await call('/api/v1/pulls/acme/web/78', { cookie: member })).data
     expect(both).toMatchObject({ summary: 'by admin', can_delete: true, can_delete_all: false })
+    expect(both.authors).toHaveLength(2) // the member (last uploader) first, then the admin
+    expect(both.authors[1]).toBe('Admin')
     // the admin's summary kept by the member's blank upload: the PR's fields have no single author now (the demo checks it)
     expect(db.prepare('select fields_by from pulls where id = ?').get(put.data.id)).toEqual({ fields_by: null })
     expect(both.annotations.map((a: { body: string; can_delete: boolean }) => [a.body, a.can_delete])).toEqual([['keep', false], ['mine', true]])
@@ -153,6 +159,8 @@ describe('diffnotes', () => {
     await call('/api/v1/pulls/acme/web/78', { cookie: member, method: 'PUT', body })
     expect((await call(`/api/pulls/${put.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
     expect((await call('/api/v1/pulls/acme/web/78', { token })).data.annotations.map((a: { body: string }) => a.body)).toEqual(['keep'])
+    // the member uploaded last but wrote nothing left: only who wrote the notes is listed
+    expect((await call('/api/v1/pulls/acme/web/78', { token })).data.authors).toEqual(['Admin'])
     const solo = new FormData()
     solo.set('payload', JSON.stringify({ annotations: [{ path: 'a.ts', body: '![s](attachment:solo.png)' }] }))
     solo.append('file', new File([png()], 'solo.png'))
@@ -162,7 +170,7 @@ describe('diffnotes', () => {
     expect(fs.existsSync(path.join(process.env.DATA_DIR!, 'uploads', alone.data.id, 'solo.png'))).toBe(false) // its bytes too
     // a PR uploaded with a summary only (no notes, no files) is its uploader's to remove
     const bare = await call('/api/v1/pulls/acme/web/80', { cookie: member, method: 'PUT', body: { summary: 'only this', annotations: [] } })
-    expect((await call(`/api/pulls/${bare.data.id}`, { cookie: member })).data.can_delete).toBe(true)
+    expect((await call(`/api/pulls/${bare.data.id}`, { cookie: member })).data).toMatchObject({ can_delete: true, authors: [expect.any(String)] }) // its uploader
     expect((await call(`/api/pulls/${bare.data.id}`, { cookie: member, method: 'DELETE' })).status).toBe(200)
     expect((await call(`/api/pulls/${bare.data.id}`, { cookie: admin })).status).toBe(404)
     // files too: a teammate's upload keeps the other's, even under the same name
@@ -485,7 +493,7 @@ describe('diffnotes', () => {
     const o = (await call(`/api/accounts/${accountId}/overview`, { cookie: member })).data
     expect(o.totals).toMatchObject({ members: 2, admins: 2, repositories: 2, pulls: 1, annotations: 2, files: 1, bytes: 10 })
     expect(o.repositories.find((r: { repository: string }) => r.repository === 'acme/web')).toMatchObject({ pulls: 1, files: 1, bytes: 10 })
-    expect(o.recent[0]).toMatchObject({ title: 'Overview', uploader: 'admin@example.com', annotations: 2 })
+    expect(o.recent[0]).toMatchObject({ title: 'Overview', uploader: 'Admin', annotations: 2 })
   })
 
   it('gives super admins server stats and every account, nobody else', async () => {

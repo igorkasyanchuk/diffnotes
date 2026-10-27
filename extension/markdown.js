@@ -1,5 +1,5 @@
 // Tiny Markdown → HTML for annotation bodies, shared by the extension (content script global) and the web app (import).
-// Everything is escaped first; only http(s), relative and /files/ URLs survive. resolve(url) turns /files/… into a usable src.
+// Everything is escaped first; only http(s), relative and /files/ URLs survive, plus #note: links between notes. resolve(url) turns /files/… into a usable src.
 // Images and videos load only from the note's own server: a remote one is a link, so opening a note never tells a third party who read it.
 ;(() => {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
@@ -22,6 +22,8 @@
       return u ? hold(`<img alt="${alt}" src="${esc(resolve(u))}" data-dn-src="${esc(u)}">`) : m
     })
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+      // a link to another note of the same PR: [the migration](#note:db/schema.sql:12); the page jumps to it (dnNoteRef)
+      if (/^#note:[^\u0000]+$/.test(url)) return `${hold(`<a href="${url}" class="dn-note-link" data-dn-note="${url.slice(6)}">`)}${label}</a>`
       const u = safeUrl(url.replace(/&amp;/g, '&'))
       return u ? `${hold(`<a href="${esc(resolve(u))}" target="_blank" rel="noopener noreferrer">`)}${label}</a>` : m
     })
@@ -254,4 +256,19 @@
   globalThis.dnPreview = (name, text, resolve) =>
     /\.md$/i.test(name) ? markdown(text, resolve) : /\.csv$/i.test(name) ? csv(text) : `<pre>${esc(String(text ?? ''))}</pre>`
   globalThis.dnMarkdown = markdown
+  // #note:path, #note:path:line → the index of the note it names in notes ({path, line, end_line, side}), or -1.
+  // A line picks the note whose range holds it (the new side first), else the nearest one in that file; no line, the
+  // file's note, else its first. The ref may be URL-encoded (a path with spaces).
+  globalThis.dnNoteRef = (ref, notes) => {
+    let r = String(ref ?? '')
+    try { r = decodeURIComponent(r) } catch { /* as written */ }
+    const [, path, n] = r.match(/^([\s\S]*?)(?::L?(\d+))?$/), line = Number(n) // [\s\S]: a decoded %0A must not fail the match
+    const all = notes.map((a, i) => [a, i]).filter(([a]) => a.path === path)
+    if (!all.length) return -1
+    if (!line) return (all.find(([a]) => !a.line) ?? all[0])[1]
+    const holds = all.filter(([a]) => a.line && a.line <= line && line <= (a.end_line || a.line))
+    if (holds.length) return (holds.find(([a]) => a.side !== 'LEFT') ?? holds[0])[1]
+    const dist = (a) => (a.line ? Math.abs(a.line - line) : Infinity)
+    return all.reduce((best, x) => (dist(x[0]) < dist(best[0]) ? x : best))[1]
+  }
 })()

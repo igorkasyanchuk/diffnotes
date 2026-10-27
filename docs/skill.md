@@ -40,7 +40,8 @@ stored notes, keeps and fixes the ones that still hold and drops the rest; with 
 (`DELETE /api/v1/pulls/…`; with an admin's token and teammates' notes on the PR, it uploads an empty set instead, so
 theirs stay). People can delete their notes on a PR from its page (admins: all of them), and a note's author or an admin can remove
 it right in the diff. Notes can also carry a risk level (a "where to look hardest" list for reviewers), before /
-after image pairs (shown with a drag handle), short screen recordings and Mermaid flowcharts (drawn as diagrams).
+after image pairs (shown with a drag handle), short screen recordings, Mermaid flowcharts (drawn as diagrams) and
+links to each other (`#note:path:line`).
 When shipping the PR takes more than a merge (a migration, a new env var, a flag, steps in order), the agent adds a
 **deploy card**, pinned at the top of the summary. A repository's [rules](accounts.md#repository-rules) can require
 a risk on every note, a deploy card or screenshots; the agent adds what an upload is refused for and sends it again.

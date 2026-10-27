@@ -318,3 +318,37 @@ button.more { margin-top: 4px; font-size: 12px; }
 .invite-intro { margin: 0 0 12px; }
 .invite-intro p { margin: 4px 0; }
 @media (max-width: 600px) { .setup-body { padding-left: 16px; } .tip { display: none; } }
+
+/* people: initials avatars (Avatar in main.tsx), filters over lists, the dashboard's pages */
+.avatar { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font: 700 10px/1 var(--mono);
+  color: #fff; background: hsl(var(--h) 55% 42%); letter-spacing: 0; }
+.author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.list .author { color: var(--muted); font-size: 12px; }
+.list .grow.author { display: flex; color: var(--ink); font-size: inherit; }
+.authors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--soft); font-size: 12px; margin: -4px 0 12px; }
+.authors .author { color: var(--ink); }
+h2 .count { color: var(--soft); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 10px; }
+.filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.filter input { flex: 1 1 220px; width: auto; }
+.filter select { width: auto; }
+/* a table that fits its box: long titles wrap instead of scrolling sideways */
+table.grid.fit td.wrap { white-space: normal; overflow-wrap: anywhere; }
+table.grid.fit td.wrap .hint { margin-top: 2px; }
+table.grid.fit td.wrap .author { white-space: normal; } /* a long uploader (an email) wraps too */
+.note.flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }
+/* invitations: what to know first, then the two ways in */
+.notice { margin: 4px 0 14px; padding: 10px 14px; border: 1px solid var(--link); border-left-width: 3px; border-radius: 6px; font-size: 13px; color: var(--muted);
+  background: color-mix(in srgb, var(--link) 8%, transparent); }
+.notice b { color: var(--ink); }
+.invite-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.invite-card { display: flex; flex-direction: column; gap: 6px; }
+.invite-card h3 { margin: 0; font-size: 14px; }
+.invite-card .hint { margin: 0 0 6px; }
+.invite-card .controls { display: flex; gap: 8px; margin-top: auto; }
+.invite-card .controls input { flex: 1; min-width: 0; }
+.invite-card .controls select { width: auto; flex: none; }
+.invite-card .controls select:first-child { flex: 1; }
+.invite-card .controls > * { height: 36px; }
+.top .demo-link { display: inline-flex; align-items: center; gap: 8px; margin-right: 6px; }
+@media (max-width: 480px) { .top .demo-link { display: none; } }

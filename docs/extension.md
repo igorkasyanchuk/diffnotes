@@ -46,9 +46,11 @@ build, first allow unsigned extensions in Safari's Develop menu). Safari has no 
 
 ## How notes look
 
-The popup's **Notes look** picks one of six themes, from the most to the least visible: **loud** (tinted, thick
-border), **sticky** (a yellow sticky note), **standard**, **quiet** (a line at the left only), **compact** (small and
-tight) and **ghost** (faded until you hover it). It applies to open pages right away and is kept in the browser.
+The popup's **Notes look** picks a theme. By loudness: **loud** (tinted, thick border), **sticky** (a yellow sticky
+note), **standard** (the default: a thin orange border), **quiet** (a line at the left only), **compact** (small and
+tight) and **ghost** (faded until you hover it). Shapes: **outline**, **card** (raised, with a shadow), **tinted**,
+**dashed**. Colours: **blue**, **green**, **purple**, **mono**. Moods: **contrast** (black on white), **terminal**
+(green on black), **paper** (warm, serif). It applies to open pages right away and is kept in the browser.
 
 ## Several servers
 
@@ -62,7 +64,8 @@ Open a PR's **Files changed** tab:
 
 | | |
 |---|---|
-| **Summary box** above the first file | the PR summary, linked reports, *notes* on/off switch, expand / collapse all, *copy summary*, open in DiffNotes |
+| **Summary box** above the first file | the PR summary, linked reports, *notes* and *summary* on/off switches (both remembered; a click on the box's title flips *summary*), expand / collapse all, *copy summary*, open in DiffNotes |
+| **Links between notes** | a note's link to another one (`#note:path:line`, written by the agent) scrolls to that note and flashes it |
 | **Changed since your last visit** | on a PR you opened before, notes added or changed since get a *new* / *updated* tag, and the box and dock say “N changed since your last visit” (a click jumps to the first). Remembered in the browser for 60 days |
 | **Copy summary** | copies the PR summary as Markdown for the PR description; attachments become links to your DiffNotes server (readers need to sign in there). Nothing is posted |
 | **File cards** under file headers | notes about a whole file (new, renamed, deleted) |

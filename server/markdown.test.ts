@@ -9,6 +9,29 @@ const g = globalThis as unknown as {
 }
 const md = (s: unknown) => g.dnMarkdown(s)
 
+describe('links between notes', () => {
+  const ref = (r: string, notes: object[]) => (globalThis as unknown as { dnNoteRef: (r: string, n: object[]) => number }).dnNoteRef(r, notes)
+  it('renders #note: links without a target, escaped', () => {
+    expect(md('see [the column](#note:db/schema.sql:12)')).toBe('<p>see <a href="#note:db/schema.sql:12" class="dn-note-link" data-dn-note="db/schema.sql:12">the column</a></p>')
+    expect(md('[x](#note:a"b.ts)')).toBe('<p><a href="#note:a&quot;b.ts" class="dn-note-link" data-dn-note="a&quot;b.ts">x</a></p>')
+    expect(md('[x](#other)')).toBe('<p>[x](#other)</p>') // other fragments stay text
+  })
+  it('finds the note a ref names', () => {
+    const notes = [{ path: 'a.ts', line: 10, end_line: 14, side: 'RIGHT' }, { path: 'a.ts', line: 30, side: 'LEFT' }, { path: 'a.ts', line: 30, side: 'RIGHT' },
+      { path: 'b c.ts', line: null }, { path: 'b c.ts', line: 5 }]
+    expect(ref('a.ts:12', notes)).toBe(0) // inside 10–14
+    expect(ref('a.ts:L30', notes)).toBe(2) // the new side first
+    expect(ref('a.ts:28', notes)).toBe(1) // nearest
+    expect(ref('a.ts', notes)).toBe(0) // no file note: the first
+    expect(ref('b%20c.ts', notes)).toBe(3) // the file note, URL-encoded path
+    expect(ref('b c.ts:2', [{ path: 'b c.ts', line: null }])).toBe(0)
+    expect(ref('%E0', notes)).toBe(-1) // bad encoding: as written, no such file
+    expect(ref('a%0Ab.ts:1', notes)).toBe(-1) // a decoded line break: no such file, not a throw
+    expect(ref('nope.ts:1', notes)).toBe(-1)
+    expect(ref('a.ts:30', [{ path: 'a.ts', line: 30, side: 'LEFT' }])).toBe(0)
+  })
+})
+
 describe('dnMarkdown', () => {
   it('renders blocks', () => {
     expect(md('# Title\n###### six')).toBe('<h3>Title</h3><h6>six</h6>')

@@ -55,14 +55,14 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
         <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
         <AddToChrome primary />
       </div>
-      <p className="hint">One command installs the skill for Claude Code, Codex, Cursor and other Agent Skills tools.
-        {demo && <> <a href="/demo">See it on a live PR in 30 seconds →</a></>}</p>
+      <p className="hint">One command installs the skill for Claude Code, Codex, Cursor and other Agent Skills tools.</p>
+      {demo && <p><a href="/demo" className="lp-demo"><span className="pulse" aria-hidden="true" />see it on a live pull request, in 30 seconds →</a></p>}
     </section>
     <Demo />
     <section className="lp-after">
       <p className="lp-lead">A coding agent attaches plain-language notes, screenshots and live demos to the lines it changed. Reviewers see them
         right inside the diff on GitHub, GitLab or Bitbucket, through a small browser extension. Nothing is posted to the PR.</p>
-      <p>{cta} <a href="#install" className="btn">start in 3 minutes</a></p>
+      <p>{cta} <a href="#install" className="btn">start in 5 minutes</a></p>
     </section>
 
     <h2>why developers like it</h2>
@@ -70,7 +70,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       {BENEFITS.map(([t, d]) => <div key={t} className="card"><h3>{t}</h3><p>{d}</p></div>)}
     </div>
 
-    <h2 id="install">start in 3 minutes</h2>
+    <h2 id="install">start in 5 minutes</h2>
     <p className="hint">Use this server ({location.host}): nothing to install on your side but the skill and the extension.
       Want your own? <a href="#self-host">Self-host it</a>, the steps are the same against your address.</p>
     <ol className="lp-install">
