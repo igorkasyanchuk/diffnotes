@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **`.diffnotes.yml`**: a repository says how its PRs are annotated (language, tone, paths to skip, where screenshots
+  go, risk and deploy card required, what the summary covers); the skill follows it, the server's rules still enforce.
+- **Preview-deploy links**: `preview` (the PR's preview deploy, https) and a note's `try` (a path on it) give
+  *try it on the preview ↗* under the note in the diff and on the PR's page; the skill finds the preview from the PR's
+  GitHub deployments or the preview bot's comment.
+- **Stacked pull requests**: `stack` lists the PRs of a stack, bottom first; the summary box and the PR's page show it
+  with this PR highlighted and mark the others that have notes.
+- **Server admin**: each account's files, size against its quota and the estimated monthly storage cost at B2, R2
+  or S3 list prices (as of 27 Oct 2026), the biggest account first, with totals.
+
+### Changed
+
+- **Notes and files are kept 365 days** after a PR's last upload by default (was 30); set `RETENTION_DAYS` for less. PRs and files
+  now live longer against `MAX_PULLS` and `MAX_ACCOUNT_MB`: raise them if accounts fill up.
+- **Deploy card**: list items starting with `migration:`, `env:`, `flag:`, `step:` or `rollback:` show that kind as a tag.
+
 ## [1.3.1] - 2026-10-27
 
 ### Added

@@ -4,7 +4,7 @@
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
   // Notes folded by hand stay folded after a reload while their content is the same: keyed by a hash of the PR and the
   // note (a.fold, set in check()), not its id (a re-upload makes new ids), so a note that changed opens again. Kept
-  // FOLD_DAYS from the fold, past the default 30 days retention. Every tab keeps its copy current through onChanged.
+  // FOLD_DAYS from the fold (shorter than the default 365 days retention: a fold this old is let go). Every tab keeps its copy current through onChanged.
   // ponytail: 32-bit FNV-1a, a collision only starts some other note folded
   const FOLD_DAYS = 60
   let folded = {} // note key → when it was folded
@@ -64,14 +64,27 @@
     box.classList.toggle('dn-collapsed', !!folded[a.fold])
     head.addEventListener('click', () => { fold([a], box.classList.toggle('dn-collapsed')); clampAll() })
     box.append(head, body)
+    const actions = el('div', 'dn-actions'), go = previewLink(a.preview, a.try)
+    if (go) actions.append(go)
     if (a.canDelete && a.id) {
-      const actions = el('div', 'dn-actions'), remove = el('button', 'dn-link dn-remove', 'remove note')
+      const remove = el('button', 'dn-link dn-remove', 'remove note')
       remove.type = 'button'
       remove.addEventListener('click', confirming('Remove this note for everyone?', () => removeNotes(a.server, `/api/v1/annotations/${a.id}`)))
       actions.append(remove)
-      box.append(actions)
     }
+    if (actions.childElementCount) box.append(actions)
     return box
+  }
+
+  // the PR's preview deploy (https only), at a path on it (a note's try: /checkout, the server keeps it a path; the box: '',
+  // the preview itself, so one deployed under a path (…/pr-42/) isn't cut to its host's root)
+  const previewLink = (preview, path, text = 'try it on the preview ↗') => {
+    if (!/^https:\/\//i.test(preview ?? '') || !URL.canParse(preview) || path == null) return null
+    const a = el('a', 'dn-link dn-try', text)
+    a.href = dnPreviewUrl(preview, path)
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+    return a
   }
 
   // Removing notes: a note's author and account admins see "remove" (the server says so with can_delete and checks again).
@@ -305,8 +318,8 @@
         pop.id = 'dn-pop'
         const body = live().querySelector('.dn-box-body'), copy = body ? body.cloneNode(true) : el('div', 'dn-hint', 'No summary for this pull request.')
         // a cloned demo frame never gets its HTML posted in; the file link (delegated) still opens the demo.
-        // remove note needs its listener: that stays in the box
-        copy.querySelectorAll('.dn-demo, .dn-actions').forEach((d) => d.remove())
+        // remove note needs its listener: that stays in the box (a note's try link works in the copy)
+        copy.querySelectorAll('.dn-demo, .dn-remove, .dn-confirm, .dn-actions:not(:has(.dn-try))').forEach((d) => d.remove())
         copy.querySelectorAll('iframe.dn-video').forEach(playIn) // a recording is posted in again
         pop.append(copy)
         // a clone has no listeners: note headers toggle (and are remembered) through the pop
@@ -389,13 +402,32 @@
         setTimeout(() => { copy.textContent = 'copy summary' }, 1500)
       })
     })
-    bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...opens, ...removes)
-    // sum: what the summary switch hides (deploy card, risk map, summary); a server's error and notes not placed in the diff always show
+    const preview = previewLink(pull.pulls.find((p) => p.preview)?.preview, '', 'preview ↗')
+    bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...(preview ? [preview] : []), ...opens, ...removes)
+    // sum: what the summary switch hides (stack, deploy card, risk map, summary); a server's error and notes not placed in the diff always show
     const body = el('div', 'dn-box-body'), sum = el('div', 'dn-box-sum')
+    // a stacked PR: the stack, bottom first, this one marked; the others link to their own diff (where their notes show)
+    const stack = pull.pulls.find((p) => p.stack?.length)?.stack
+    if (stack) {
+      const row = el('div', 'dn-stack')
+      row.append(el('span', 'dn-risks-title', 'Stack'))
+      stack.forEach((s, i) => {
+        if (i) row.append(el('span', 'dn-hint', '→'))
+        const label = `#${s.number}${s.title ? ` ${s.title}` : ''}`
+        if (String(s.number) === String(pull.pulls[0].number)) { const b = el('b', 'dn-stack-pr dn-stack-current', label); b.setAttribute('aria-current', 'page'); return row.append(b) }
+        const a = el('a', 'dn-stack-pr', s.notes ? `${label} · DN` : label)
+        // the same tab (files, diffs…), not what follows it: a commit range there is this PR's. The last /pull/<n>:
+        // an owner named pull with a numeric repository (/pull/123/pull/42) has one before it
+        a.href = location.pathname.replace(/^(.*\/(?:pull|merge_requests|pull-requests)\/)\d+(\/[^/]*)?.*/, (_, at, tab = '') => `${at}${s.number}${tab}`)
+        if (s.notes) a.title = 'Has DiffNotes notes'
+        row.append(a)
+      })
+      sum.append(row)
+    }
     // the deploy card, pinned first: what shipping this PR takes (migrations, env vars, flags, rollback), for whoever deploys it
     for (const p of pull.pulls.filter((x) => x.deploy)) {
       const d = el('div', 'dn-md dn-summary dn-deploy')
-      d.append(el('div', 'dn-risks-title', many ? `Deploy · ${new URL(p.server).host}` : 'Deploy'), md(p.deploy, p.server))
+      d.append(el('div', 'dn-risks-title', many ? `Deploy · ${new URL(p.server).host}` : 'Deploy'), nodes(dnDeploy(p.deploy), p.server))
       sum.append(d)
     }
     // risk map: the notes the agent marked risky, highest first; a click jumps to the note in the diff
@@ -709,7 +741,7 @@
     if (current !== key) return
     if (res?.pulls?.length) {
       const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
-      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, canDelete: a.can_delete ?? p.can_delete,
+      pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, preview: p.preview, canDelete: a.can_delete ?? p.can_delete,
         fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')),
         anchor: hash([key, p.server, a.path, a.side, a.line].join('\n')) }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')

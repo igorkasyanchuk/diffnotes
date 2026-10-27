@@ -78,7 +78,9 @@ Open a PR's **Files changed** tab:
 | **Where to look hardest** | notes the agent marked `high` / `medium` / `low` risk, listed first in the box; click one to jump to it |
 | **Before / after** | a `-before` / `-after` image pair is one image with a drag handle; ⤢ opens it large (Esc closes) |
 | **Diagrams** | ` ```mermaid ` flowcharts in a note are drawn in place |
-| **Deploy card** | what shipping the PR takes (migrations, env vars, flags, rollback), pinned at the top of the box; *copy summary* includes it |
+| **Deploy card** | what shipping the PR takes (migrations, env vars, flags, rollback), pinned at the top of the box, each step tagged with its kind; *copy summary* includes it |
+| **Stack** | on a stacked PR, the stack bottom first with this PR highlighted; the others link to their diff (*DN*: they have notes too) |
+| **Preview deploy** | *preview ↗* in the box and *try it on the preview ↗* under notes open the PR's preview deploy at that screen |
 | **Keyboard** | `j` / `k` next / previous note, `n` notes on / off, `o` opens the current note's attachment, `?` lists the keys (press it again for the site's own help). Not while typing; while notes show, `j` / `k` take over the site's own (GitLab and Bitbucket use them for files), and on a PR with notes `n` replaces GitLab's next-thread key |
 | **Remove** | a note's author and account admins see *remove note* under it; in the box, admins get *remove all notes* and authors *remove my notes*; both ask first |
 

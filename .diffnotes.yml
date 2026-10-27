@@ -1,0 +1,7 @@
+# How the DiffNotes skill annotates this repository's pull requests (skill/diffnotes/SKILL.md, "Repository rules")
+language: en
+tone: plain words, short; say what changes for the user or the operator
+skip: [docs/images/**, docs/store/**, package-lock.json]
+screenshots: [web/**, extension/*.css, extension/popup.*]
+deploy: required # a new env var or migration is easy to miss on Coolify
+summary: What it does for users or self-hosters first, then why.

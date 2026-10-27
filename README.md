@@ -17,7 +17,7 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 - The notes go to **your own DiffNotes server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
 - Reviewers with the **browser extension** (Chrome, Firefox) see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
   changed lines, image galleries, file previews, what changed since their last visit, one switch to hide everything.
-- Notes **expire on their own** (30 days by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
+- Notes **expire on their own** (after a year by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
 - Up and running in **about 5 minutes**: one container, one `curl | sh`, one extension.
 
 <p align="center"><img src="docs/images/flow.svg" alt="agent → diffnotes server ← browser extension → github.com PR" width="860"></p>

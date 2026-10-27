@@ -69,8 +69,19 @@ export const PROVIDERS: Record<string, Provider> = {
   minio: { vars: { place: 'MINIO_ENDPOINT', bucket: 'MINIO_BUCKET', key_id: 'MINIO_ACCESS_KEY', secret: 'MINIO_SECRET_KEY' },
     endpoint: (u) => u.replace(/\/+$/, ''), region: () => 'us-east-1', place: /^https?:\/\/[\w.-]+(:\d+)?\/*$/, hint: 'the service URL, e.g. https://minio.example.com' },
 }
+// ponytail: list prices (USD per GB-month, standard storage, the free GB per bucket) hard-coded as of PRICES_AS_OF, for
+// /admin's cost estimate only; egress and API calls left out (B2 and R2 serve these small files free). Re-check them
+// now and then, or read them from env vars if they drift. disk and minio: your own hardware, no price
+export const PRICES_AS_OF = '2026-10-27'
+export const PRICES: Record<string, { name: string; gb_month: number; free_gb: number }> = {
+  b2: { name: 'Backblaze B2', gb_month: 0.00695, free_gb: 10 },
+  r2: { name: 'Cloudflare R2', gb_month: 0.015, free_gb: 10 },
+  s3: { name: 'AWS S3 Standard (us-east-1)', gb_month: 0.023, free_gb: 0 },
+}
+
+export const storageType = (env: Record<string, string | undefined>) => (env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk'
 export function s3FromEnv(env: Record<string, string | undefined>): S3Config | null {
-  const type = (env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk'
+  const type = storageType(env)
   if (type === 'disk') return null
   const p = PROVIDERS[type]
   if (!p) throw new Error(`STORAGE_TYPE is disk, ${Object.keys(PROVIDERS).join(', ')}; not ${type}`)

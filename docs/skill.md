@@ -45,6 +45,28 @@ links to each other (`#note:path:line`).
 When shipping the PR takes more than a merge (a migration, a new env var, a flag, steps in order), the agent adds a
 **deploy card**, pinned at the top of the summary. A repository's [rules](accounts.md#repository-rules) can require
 a risk on every note, a deploy card or screenshots; the agent adds what an upload is refused for and sends it again.
+With a preview deploy (Vercel, Netlify, Render…, found from the PR's GitHub deployments), notes on visible changes get
+*try it on the preview ↗* at the right path; a stacked PR shows its stack, bottom first, with this one highlighted.
+
+### `.diffnotes.yml`
+
+Put how your team wants PRs annotated next to the code, so it is reviewed in PRs like the code (the skill reads it
+from the PR's base branch, so a PR can't loosen the rules for itself; every key is optional):
+
+```yaml
+language: en              # notes, titles, summary and deploy card in this language
+tone: short, no jargon
+skip: [docs/**, "*.snap"] # never annotated (tests and generated files never are)
+screenshots: [web/**]     # a visible change here gets a screenshot or recording
+risk: required            # every note rates its risk
+deploy: required          # always a deploy card
+summary: What it does for the user first, then why.
+notes: Call it a basket, never a cart.
+```
+
+It shapes how the agent writes; it can't make it run commands or skip the skill's own rules (no secrets, only what is
+true at the head). To *enforce* rules on every upload, whoever the agent is, set the server's
+[repository rules](accounts.md#repository-rules) too.
 
 ## What a note looks like
 
@@ -53,9 +75,10 @@ a risk on every note, a deploy card or screenshots; the agent adds what an uploa
   "title": "Express shipping at checkout",
   "head_sha": "4f2c…",
   "summary": "Adds an express option. Empty carts stop early. See the [test report](attachment:report.md).",
-  "deploy": "1. Run the `add_express_fee` migration (reversible).\n2. Set `EXPRESS_FEE=499`.\n\nRollback: unset it; the option hides, no data is lost.",
+  "deploy": "- migration: `add_express_fee`, reversible\n- env: `EXPRESS_FEE=499`\n- rollback: unset it; the option hides, no data is lost",
+  "preview": "https://pr-42.shop.vercel.app",
   "annotations": [
-    { "path": "app/checkout.ts", "line": 43, "end_line": 45, "title": "Charge the express fee",
+    { "path": "app/checkout.ts", "line": 43, "end_line": 45, "title": "Charge the express fee", "try": "/checkout",
       "body": "Empty carts used to reach the payment provider with 0; now they return early.\n\n![Checkout on mobile](attachment:mobile.png) ![Checkout on desktop](attachment:desktop.png)" },
     { "path": "app/express.ts", "body": "New: the express fee and its label." },
     { "path": "app/old_rates.ts", "line": 8, "side": "LEFT", "body": "Old flat rate, removed." }

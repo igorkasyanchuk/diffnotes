@@ -366,6 +366,34 @@ describe('repository rules and the deploy card', () => {
     expect((await call(`/api/repositories/${repo}/rules`, { cookie: admin, method: 'PUT', body: {} })).data).toEqual({})
     expect((await put({ annotations: [{ path: 'web/a.tsx', body: 'x' }] })).status).toBe(200)
   })
+
+  it('stores the preview deploy, each note\'s path on it and the stack, and marks the stacked PRs with notes', async () => {
+    // in the account above (MAX_ACCOUNTS is reached), its pull request gone (MAX_PULLS)
+    const acc = (await call('/api/dashboard', { cookie: admin })).data.accounts.find((a: { name: string }) => a.name === 'Ruled').id
+    expect((await call('/api/v1/pulls/ruled/app/1', { token, method: 'DELETE' })).status).toBe(200)
+    expect((await call(`/api/accounts/${acc}/repositories`, { cookie: admin, body: { full_name: 'stack/app' } })).status).toBe(200)
+    const put = (n: number, body: unknown) => call(`/api/v1/pulls/stack/app/${n}`, { token, method: 'PUT', body })
+    const get = async (n: number) => (await call(`/api/v1/pulls/stack/app/${n}`, { token })).data
+    const first = await put(41, { preview: 'https://pr-41.example.dev', stack: [{ number: 41, title: 'fee table' }, { number: 42, title: 'picker' }],
+      annotations: [{ path: 'a.ts', body: 'x', try: '/checkout?step=2' }] })
+    expect(first.status).toBe(200)
+    expect((await put(42, { preview: 'http://pr-42.example.dev', stack: [{ number: 41 }, { number: 42, title: 'picker' }, { number: 43 }, { number: 41 }, 'x', { number: -1 }],
+      annotations: [{ path: 'a.ts', body: 'x', try: '//evil.example' }, { path: 'b.ts', body: 'x', try: 'javascript:alert(1)' }, { path: 'c.ts', body: 'x', try: '/a b' }] })).status).toBe(200)
+    const one = await get(41), two = await get(42)
+    expect(one.preview).toBe('https://pr-41.example.dev/')
+    expect(one.annotations[0].try).toBe('/checkout?step=2')
+    expect(two.preview).toBe('') // https only
+    expect(two.annotations.map((a: { try: unknown }) => a.try)).toEqual([null, null, null]) // a path here, never another host
+    expect(two.stack).toEqual([{ number: 41, title: '', notes: true }, { number: 42, title: 'picker', notes: true }, { number: 43, title: '', notes: false }])
+    // a stack without this PR, or with it alone, is none
+    expect((await put(41, { stack: [{ number: 7 }, { number: 8 }], annotations: [note] })).status).toBe(200)
+    expect((await get(41)).stack).toEqual([])
+    expect((await put(41, { stack: [{ number: 41 }], annotations: [note] })).status).toBe(200)
+    expect((await get(41)).stack).toEqual([])
+    // its notes cleared (an empty upload leaves the row): no longer marked
+    expect((await put(41, { annotations: [] })).status).toBe(200)
+    expect((await get(42)).stack[0]).toEqual({ number: 41, title: '', notes: false })
+  })
 })
 
 describe('GitHub sign-in', () => {

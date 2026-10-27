@@ -79,7 +79,7 @@ This table is the one reference for configuration: everything is an environment 
 | **Server** | | |
 | `PUBLIC_URL` | the request's origin | the public `https://` origin |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin` / random | only used when there are no users yet |
-| `RETENTION_DAYS` | `30` | notes and files are deleted this long after the PR's last upload |
+| `RETENTION_DAYS` | `365` | notes and files are deleted this long after the PR's last upload |
 | `PORT` | `3000` | |
 | `DATA_DIR` | `./data` (`/data` in Docker) | database, uploads, `session.secret`, `encryption.key` |
 | **Limits** | | |

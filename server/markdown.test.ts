@@ -9,6 +9,30 @@ const g = globalThis as unknown as {
 }
 const md = (s: unknown) => g.dnMarkdown(s)
 
+describe('deploy card', () => {
+  const dep = (s: string) => (globalThis as unknown as { dnDeploy: (s: string) => string }).dnDeploy(s)
+  it('tags list items that start with a kind, and only in a deploy card', () => {
+    expect(dep('- Migration: `add_fee`, reversible\n- envs: EXPRESS_FEE=499\n- other: x')).toBe('<ul><li class="dn-dep"><span class="dn-dep-tag dn-dep-migration">migration</span> <code>add_fee</code>, reversible</li>' +
+      '<li class="dn-dep"><span class="dn-dep-tag dn-dep-env">env</span> EXPRESS_FEE=499</li><li>other: x</li></ul>')
+    expect(dep('- rollback: <b>x</b>')).toContain('&lt;b&gt;x&lt;/b&gt;')
+    expect(dep('> - env: X')).toContain('<li class="dn-dep">') // in a quote too
+    expect(md('- migration: x')).toBe('<ul><li>migration: x</li></ul>')
+  })
+})
+
+describe('preview links', () => {
+  const url = (p: string, t: string) => (globalThis as unknown as { dnPreviewUrl: (p: string, t: string) => string }).dnPreviewUrl(p, t)
+  it('puts a note\'s path under the preview\'s own path', () => {
+    expect(url('https://pr-42.x.vercel.app/', '/checkout?step=2')).toBe('https://pr-42.x.vercel.app/checkout?step=2')
+    expect(url('https://o.github.io/repo/pr-42/', '/checkout')).toBe('https://o.github.io/repo/pr-42/checkout')
+    expect(url('https://o.github.io/repo/pr-42?x=1#y', '/a#b')).toBe('https://o.github.io/repo/pr-42/a#b')
+    expect(url('https://x.dev/app/', '')).toBe('https://x.dev/app/')
+    // never another host or scheme, whatever follows the slash
+    expect(url('https://x.dev/', '/https://evil.example/a')).toBe('https://x.dev/https://evil.example/a')
+    expect(url('https://x.dev/', '/javascript:alert(1)')).toBe('https://x.dev/javascript:alert(1)')
+  })
+})
+
 describe('links between notes', () => {
   const ref = (r: string, notes: object[]) => (globalThis as unknown as { dnNoteRef: (r: string, n: object[]) => number }).dnNoteRef(r, notes)
   it('renders #note: links without a target, escaped', () => {

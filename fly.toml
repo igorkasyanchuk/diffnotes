@@ -7,7 +7,7 @@ primary_region = "fra"
   # every variable: docs/install.md (Environment); secrets go in `fly secrets set`, e.g. BUGSINK_DSN, GITHUB_CLIENT_SECRET
   PUBLIC_URL = "https://diffnotes.fly.dev" # your app's https:// origin
   ADMIN_EMAIL = "you@company.com"
-  RETENTION_DAYS = "30"
+  RETENTION_DAYS = "365"
   # MAX_FILE_MB = "1"
   # MAX_VIDEO_MB = "2"
   # MAX_FILES = "30"

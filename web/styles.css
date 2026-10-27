@@ -288,6 +288,18 @@ button.more { margin-top: 4px; font-size: 12px; }
 .rules input:not([type]) { flex: 1; min-width: 160px; }
 .card.deploy { border-left: 3px solid var(--accent); margin-bottom: 12px; }
 .card.deploy h3 { margin: 0 0 6px; }
+/* pr-stack, not stack: that one lays out the sign-in and settings forms */
+.pr-stack { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 13px; }
+.pr-stack > span { display: inline-flex; gap: 6px; align-items: center; }
+.pr-stack a, .pr-stack b { padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; }
+.pr-stack b { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pr-stack a:hover { background: var(--panel-2); }
+.note .try { margin-top: 6px; font-size: 12px; }
+.md li.dn-dep { list-style: none; margin: 3px 0 3px -18px; } /* like li.task: plain items of the same list keep their bullet */
+.dn-dep-tag { display: inline-block; min-width: 64px; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; text-align: center; background: var(--panel-2); color: var(--ink); }
+.dn-dep-migration { background: color-mix(in srgb, #d97706 18%, transparent); }
+.dn-dep-env, .dn-dep-flag { background: color-mix(in srgb, #2563eb 16%, transparent); }
+.dn-dep-rollback { background: color-mix(in srgb, #16a34a 16%, transparent); }
 
 /* the setup flow (/welcome): a checklist that ticks itself, the current step marked with a "start here" tip */
 .setup { max-width: 760px; }

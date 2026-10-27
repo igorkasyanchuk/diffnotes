@@ -21,7 +21,7 @@
     <text x="40" y="148" fill="#4ade80">$ annotate PR #42</text>
     <text x="288" y="110">your server, your data</text>
     <text x="288" y="126">notes, images, files</text>
-    <text x="288" y="148">expire after 30 days</text>
+    <text x="288" y="148">expire after a year</text>
     <text x="536" y="110">one or more servers</text>
     <text x="536" y="126">token per server</text>
     <text x="536" y="148">nothing posted to GitHub</text>

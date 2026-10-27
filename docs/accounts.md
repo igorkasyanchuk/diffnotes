@@ -27,7 +27,9 @@ Account → **repositories** → **rules** (owners and admins) sets what every u
   (`**` any folders, `*` within one name; `web/` means `web/**`), comma separated, 300 characters at most.
 
 An upload that misses one is refused with `422` and a message saying what to add; the skill and MCP clients read it,
-add it and upload again. The rules show as chips on the repository for everyone in the account.
+add it and upload again. The rules show as chips on the repository for everyone in the account. How notes are
+*written* (language, tone, paths to skip) can live in the repository itself, in a
+[`.diffnotes.yml`](skill.md#diffnotesyml) the skill follows.
 
 ## Deleting
 

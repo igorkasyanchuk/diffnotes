@@ -13,7 +13,7 @@ import {
   DATA_DIR, DB_FILE, EXT_TYPES, RETENTION_DAYS, UPLOADS, bootstrap, createAccount, createUser, daysFromNow, db, getSetting, hashPassword, newToken, now, purgeExpired,
   sessionSecret, sha256, unseal, verifyPassword,
 } from './db.ts'
-import { s3FromEnv, storage } from './storage.ts'
+import { PRICES, PRICES_AS_OF, s3FromEnv, storage, storageType } from './storage.ts'
 import type { S3Config } from './storage.ts'
 import type { User } from './db.ts'
 
@@ -699,8 +699,9 @@ app.delete('/api/repositories/:id', async (c) => {
 
 // --- pull request annotations (the skill writes, the extension and the web app read)
 
-type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; deploy: string; updated_at: string; expires_at: string; full_name: string; account_id: string; user_id: string | null }
-const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.deploy, p.updated_at, p.expires_at, r.full_name, r.account_id, p.user_id
+type Pull = { id: string; number: number; title: string; head_sha: string; summary: string; deploy: string; preview: string; stack: string; updated_at: string; expires_at: string
+  full_name: string; account_id: string; repository_id: string; user_id: string | null }
+const PULL_SELECT = `select p.id, p.number, p.title, p.head_sha, p.summary, p.deploy, p.preview, p.stack, p.updated_at, p.expires_at, r.full_name, r.account_id, p.repository_id, p.user_id
   from pulls p join repositories r on r.id = p.repository_id`
 
 // Every note and file has its author. Authors replace and remove their own; the account's owner and admins remove any,
@@ -722,13 +723,20 @@ const UPLOADER_AVATAR = `(select ${AVATAR} from users u where u.id = p.user_id)`
 function pullOut(p: Pull, user: User) {
   const member = isMember(p.account_id, user), admin = member && isAdminOf(p, user)
   // mine: what your next upload replaces; teammates' notes and files stay
-  const annotations = (db.prepare('select id, path, line, end_line, side, title, body, risk, user_id from annotations where pull_id = ? order by position, id')
-    .all(p.id) as { user_id: string | null }[]).map(({ user_id, ...a }) => ({ ...a, mine: user_id === user.id, can_delete: admin || (member && user_id === user.id) }))
+  const annotations = (db.prepare('select id, path, line, end_line, side, title, body, risk, try_path, user_id from annotations where pull_id = ? order by position, id')
+    .all(p.id) as { user_id: string | null; try_path: string | null }[])
+    .map(({ user_id, try_path, ...a }) => ({ ...a, try: try_path, mine: user_id === user.id, can_delete: admin || (member && user_id === user.id) }))
+  // the stack it sits in, bottom first; notes: that PR has notes in this account too (members only, like authors), not
+  // only a row left behind by an empty upload or removed notes
+  const stack = (p.stack ? JSON.parse(p.stack) : []) as { number: number; title: string }[]
+  const noted = new Set(member && stack.length ? (db.prepare(`select number from pulls x where repository_id = ? and number in (select value from json_each(?))
+    and exists (select 1 from annotations a where a.pull_id = x.id)`)
+    .all(p.repository_id, JSON.stringify(stack.map((s) => s.number))) as { number: number }[]).map((r) => r.number) : [])
   const files = (db.prepare('select name, type, size, user_id from files where pull_id = ? order by name').all(p.id) as { name: string; type: string; size: number; user_id: string | null }[])
     .map(({ user_id, ...f }) => ({ ...f, mine: user_id === user.id, url: `/files/${p.id}/${encodeURIComponent(f.name)}` }))
   return {
     id: p.id, repository: p.full_name, number: p.number, title: p.title, head_sha: p.head_sha, summary: p.summary, deploy: p.deploy,
-    updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
+    preview: p.preview, stack: stack.map((s) => ({ ...s, notes: noted.has(s.number) })), updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
     // who wrote its notes and files, the last uploader first; the uploader alone when there are none (a summary only).
     // Members only: the live demo is read by everyone signed in
     authors: member ? db.prepare(`select ${NAME} as name, ${AVATAR} as avatar from users u where u.id in
@@ -887,7 +895,20 @@ app.put(PULL_PATH, async (c) => {
 })
 
 type Upload = { name: string; data: Buffer }
-type Fields = { title: string; head_sha: string; summary: string; deploy: string } // a PR's own, set by its latest upload
+type Fields = { title: string; head_sha: string; summary: string; deploy: string; preview: string; stack: string } // a PR's own, set by its latest upload
+// preview: the PR's preview deploy, https only; a note's try: a path on it (/checkout?step=2), never //host
+const previewUrl = (v: unknown) => { const u = URL.parse(str(v, 500)); return u?.protocol === 'https:' ? u.href : '' }
+const tryPath = (v: unknown) => { const s = str(v, 500); return /^\/(?![\/\\])\S*$/.test(s) ? s : null }
+// the stack, bottom first: [{number, title}], the first 20 valid ones, kept only when it holds this PR and another
+function stackOf(v: unknown, number: number) {
+  const seen = new Set<number>(), out: { number: number; title: string }[] = []
+  for (const x of (Array.isArray(v) ? v : []) as (Record<string, unknown> | null)[]) {
+    const n = x?.number as number
+    if (Number.isSafeInteger(n) && n > 0 && !seen.has(n)) { seen.add(n); out.push({ number: n, title: str(x!.title, 200) }) }
+    if (out.length === 20) break
+  }
+  return out.length > 1 && seen.has(number) ? JSON.stringify(out) : ''
+}
 type Rules = { risk?: boolean; deploy?: boolean; screenshots?: string }
 // a path glob: ** any directories, * and ? within one name; matched against the whole path. A table, not a RegExp:
 // *a*a*a*b as a regex backtracks for minutes on a long path, and any account owner can set one (the server would stall)
@@ -940,7 +961,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   if (datas.some((d, i) => d.length > (types[i].startsWith('video/') ? MAX_VIDEO : MAX_FILE))) fail(413, `Files up to ${MAX_FILE / MB}MB each, videos (mp4, webm) up to ${MAX_VIDEO / MB}MB`)
 
   const fullName = repoName(repo), { id: repoFound, account_id: accountId } = repositoryFor(fullName, number, user)
-  const existing = db.prepare('select id, title, head_sha, summary, deploy, fields_by from pulls where repository_id = ? and number = ?')
+  const existing = db.prepare('select id, title, head_sha, summary, deploy, preview, stack, fields_by from pulls where repository_id = ? and number = ?')
     .get(repoFound, number) as (Fields & { id: string; fields_by: string | null }) | undefined
   // an upload replaces the uploader's own notes and files; teammates' stay, and count towards the PR's limits
   // (taken: their file names, which this upload's files don't get)
@@ -983,7 +1004,8 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const link = (md: string) => md.replace(/attachment:([^\s)"']+)/g, (m, n: string) =>
     names.has(n) ? `/files/${id}/${encodeURIComponent(names.get(n)!)}` : m)
 
-  const given: Fields = { title: str(payload.title, 300), head_sha: str(payload.head_sha, 64), summary: link(String(payload.summary ?? '').slice(0, 20_000)), deploy: link(deploy) }
+  const given: Fields = { title: str(payload.title, 300), head_sha: str(payload.head_sha, 64), summary: link(String(payload.summary ?? '').slice(0, 20_000)), deploy: link(deploy),
+    preview: previewUrl(payload.preview), stack: stackOf(payload.stack, number) }
   // a blank field keeps what it was (keep, above); fields_by: who wrote the PR's fields, null once a kept one may be someone else's
   const fields = { ...given }
   let by: string | null = user.id
@@ -996,7 +1018,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const rows = list.map((a, i) => {
     const line = Number.isInteger(a.line) && (a.line as number) > 0 ? a.line as number : null
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
-    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk] as const
+    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk, tryPath(a.try)] as const
   })
   // the uploader's previous files: their rows go with the new rows in, their bytes after the new ones are written (below)
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ? and user_id is ?').all(id, user.id) as { pull: string; name: string; backend: string }[]
@@ -1004,15 +1026,15 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   db.exec('begin')
   try {
     if (existing) {
-      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, deploy = ?, fields_by = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
-        .run(fields.title, fields.head_sha, fields.summary, fields.deploy, by, user.id, now(), daysFromNow(RETENTION_DAYS), id)
+      db.prepare('update pulls set title = ?, head_sha = ?, summary = ?, deploy = ?, preview = ?, stack = ?, fields_by = ?, user_id = ?, updated_at = ?, expires_at = ? where id = ?')
+        .run(fields.title, fields.head_sha, fields.summary, fields.deploy, fields.preview, fields.stack, by, user.id, now(), daysFromNow(RETENTION_DAYS), id)
       db.prepare('delete from annotations where pull_id = ? and user_id is ?').run(id, user.id)
     } else {
-      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, user_id, created_at, updated_at, expires_at, fields_by)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, fields.title, fields.head_sha,
-        fields.summary, fields.deploy, user.id, now(), now(), daysFromNow(RETENTION_DAYS), by)
+      db.prepare(`insert into pulls (id, repository_id, number, title, head_sha, summary, deploy, preview, stack, user_id, created_at, updated_at, expires_at, fields_by)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, fields.title, fields.head_sha,
+        fields.summary, fields.deploy, fields.preview, fields.stack, user.id, now(), now(), daysFromNow(RETENTION_DAYS), by)
     }
-    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, try_path, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r, user.id)
     if (rows.length) db.prepare('update users set notes_at = ? where id = ? and notes_at is null').run(now(), user.id) // the setup checklist
     db.prepare('delete from files where pull_id = ? and user_id is ?').run(id, user.id)
@@ -1044,7 +1066,7 @@ const limits = () => `Files: png, jpg, gif, webp (real images) up to ${MAX_FILE 
 const TOOLS = [
   {
     name: 'get_notes', title: 'Read DiffNotes notes',
-    description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, annotations (path, line, end_line, side, title, body, risk) and attached files. ' +
+    description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, preview, stack, annotations (path, line, end_line, side, title, body, risk, try) and attached files. ' +
       'Use it before re-annotating after new commits, to keep what still applies. Bodies, the summary and the deploy card link files as /files/…: ' +
       'mine marks your own notes and files: your next upload replaces those, teammates\' stay, so never re-send theirs. ' +
       'To keep one of your files, attach it again and write it as attachment:<name>. ' +
@@ -1078,7 +1100,13 @@ const TOOLS = [
             title: { type: 'string', description: 'The PR title' },
             head_sha: { type: 'string', description: 'The PR head commit the notes describe' },
             summary: { type: 'string', description: 'Markdown: what the PR does and why, two or three sentences' },
-            deploy: { type: 'string', description: 'Markdown deploy card for whoever ships it: migrations, new env vars, feature flags, the order of steps, how to roll back. Leave out when shipping needs nothing special' },
+            preview: { type: 'string', description: 'The PR\'s preview deploy (https URL: Vercel, Netlify, Render…), from its GitHub deployments or the preview bot\'s comment; notes link into it with try' },
+            stack: {
+              type: 'array', maxItems: 20, description: 'For a stacked PR: every PR in its stack, bottom (closest to the main branch) first, this one included',
+              items: { type: 'object', required: ['number'], properties: { number: { type: 'integer', minimum: 1 }, title: { type: 'string' } } },
+            },
+            deploy: { type: 'string', description: 'Markdown deploy card for whoever ships it: migrations, new env vars, feature flags, the order of steps, how to roll back, one list item each starting with its kind ' +
+              '(- migration: add_express_fee, reversible / - env: EXPRESS_FEE=499 / - flag: / - step: / - rollback:), drawn as tagged rows. Leave out when shipping needs nothing special' },
             annotations: {
               type: 'array', maxItems: MAX_ANNOTATIONS,
               items: {
@@ -1091,6 +1119,7 @@ const TOOLS = [
                   title: { type: 'string', description: 'A few words' },
                   body: { type: 'string', description: 'Markdown, plain words' },
                   risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+                  try: { type: 'string', description: 'With preview: the path that shows this change on the preview deploy, e.g. /checkout?step=2' },
                 },
               },
             },
@@ -1233,7 +1262,7 @@ app.get('/api/admin/stats', (c) => {
       (select count(*) from pulls p join repositories r on r.id = p.repository_id where r.account_id = a.id) as pulls,
       (select count(*) from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id where r.account_id = a.id) as files,
       (select coalesce(sum(f.size), 0) from files f join pulls p on p.id = f.pull_id join repositories r on r.id = p.repository_id where r.account_id = a.id) as bytes
-    from accounts a order by a.created_at`).all() as { files: number; bytes: number }[])
+    from accounts a order by bytes desc, a.created_at`).all() as { files: number; bytes: number }[]) // the biggest first
   const users = db.prepare(`select u.id, u.email, u.name, u.admin, u.created_at,
       (select count(*) from memberships m where m.user_id = u.id) as accounts,
       (select max(t.last_used_at) from tokens t where t.user_id = u.id) as token_used_at,
@@ -1250,7 +1279,9 @@ app.get('/api/admin/stats', (c) => {
       upload_bytes: accounts.reduce((n, a) => n + a.bytes, 0), db_bytes: fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : 0,
       disk_free_bytes: disk.bavail * disk.bsize, disk_total_bytes: disk.blocks * disk.bsize,
     },
-    retention_days: RETENTION_DAYS, version: VERSION, accounts, users,
+    retention_days: RETENTION_DAYS, max_account_bytes: MAX_ACCOUNT, version: VERSION, accounts, users,
+    // what the files would cost a month at each provider's list price; storage: where uploads go now
+    prices: { as_of: PRICES_AS_OF, storage: storageType(process.env), providers: PRICES },
   })
 })
 
@@ -1277,7 +1308,7 @@ app.get('/api/admin/storage', (c) => {
   const env = s3FromEnv(process.env), cfg = env ?? legacyS3()
   const counts = db.prepare('select backend, count(*) as files, coalesce(sum(size), 0) as bytes from files group by backend').all()
   return c.json({
-    storage: { kind: env ? 's3' : 'disk', type: (process.env.STORAGE_TYPE ?? '').trim().toLowerCase() || 'disk', ...(cfg && { source: env ? 'env' : 'settings', endpoint: cfg.endpoint, region: cfg.region, bucket: cfg.bucket, prefix: cfg.prefix, key_id: cfg.key_id }) },
+    storage: { kind: env ? 's3' : 'disk', type: storageType(process.env), ...(cfg && { source: env ? 'env' : 'settings', endpoint: cfg.endpoint, region: cfg.region, bucket: cfg.bucket, prefix: cfg.prefix, key_id: cfg.key_id }) },
     counts, retention_days: RETENTION_DAYS,
   })
 })

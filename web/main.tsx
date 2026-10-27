@@ -8,14 +8,16 @@ import { version } from '../package.json'
 
 declare global {
   var dnMarkdown: (md: string) => string
+  var dnDeploy: (md: string) => string
+  var dnPreviewUrl: (preview: string, path: string) => string
   var dnPreview: (name: string, text: string) => string
   var dnCompare: (root: ParentNode) => void
   var dnNoteRef: (ref: string, notes: { path: string; line: number | null; end_line: number | null; side: string }[]) => number
 }
 
 type User = { id: string; email: string; name: string; admin: number }
-type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]; authors?: { name: string; avatar: string | null }[]
+type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null; try?: string | null }
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; preview?: string; stack?: { number: number; title: string; notes: boolean }[]; updated_at: string; expires_at: string; annotations: Annotation[]; authors?: { name: string; avatar: string | null }[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -52,10 +54,10 @@ const bytes = (n: number) => {
 const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) =>
   <a href={to} className={className} onClick={(e) => { if (!e.metaKey && !e.ctrlKey) { e.preventDefault(); go(to) } }}>{children}</a>
 // Markdown, cut to a few lines when long with a show more / less toggle (re-measured when images load)
-function Md({ text }: { text: string }) {
+function Md({ text, deploy }: { text: string; deploy?: boolean }) {
   const ref = useRef<HTMLDivElement>(null), [long, setLong] = useState(false), [open, setOpen] = useState(false)
   // once per text, not on every show more / less: the same string keeps React off the HTML, so what dnCompare added stays
-  const html = useMemo(() => dnMarkdown(text), [text])
+  const html = useMemo(() => (deploy ? dnDeploy : dnMarkdown)(text), [text, deploy])
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -380,7 +382,7 @@ function Privacy() {
     <h2>A DiffNotes server</h2>
     <ul>
       <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub; the server then fetches your GitHub photo itself, to show to your teammates),
-        sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (30 days by default).
+        sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (365 days by default).
         Its operator decides where it runs and who can access it.</li>
       <li>Notes and files are visible only to members of the account that owns the repository, except a live-demo pull request
         the server's operator may set (<code>DEMO_PR</code>), readable by everyone signed in to that server.</li>
@@ -706,8 +708,14 @@ function PullPage({ id }: { id: string }) {
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
       {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
         data.can_delete_all ? 'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.'
-          : 'Delete your notes and files on this pull request? Teammates\' notes stay.')}>{data.can_delete_all ? 'delete notes' : 'delete my notes'}</button>}</p>
-    {data.deploy && <div className="card deploy"><h3>deploy</h3><Md text={data.deploy} /></div>}
+          : 'Delete your notes and files on this pull request? Teammates\' notes stay.')}>{data.can_delete_all ? 'delete notes' : 'delete my notes'}</button>}
+      {data.preview && <>{' '}<a className="btn" href={data.preview} target="_blank" rel="noopener noreferrer">preview deploy ↗</a></>}</p>
+    {!!data.stack?.length && <nav className="pr-stack" aria-label="Stacked pull requests">{data.stack.map((s, i) => <span key={s.number}>
+      {i > 0 && <span className="hint">→</span>}
+      {s.number === data.number ? <b aria-current="page">#{s.number} {s.title}</b>
+        : <a href={prUrl(data.repository, s.number)} target="_blank" rel="noreferrer" title={s.notes ? 'has DiffNotes notes' : undefined}>#{s.number} {s.title}{s.notes && ' · DN'}</a>}
+    </span>)}</nav>}
+    {data.deploy && <div className="card deploy"><h3>deploy</h3><Md text={data.deploy} deploy /></div>}
     {data.summary && <div className="card"><Md text={data.summary} /></div>}
     {risky.length > 0 && <div className="card risks">
       <h3>where to look hardest</h3>
@@ -722,6 +730,7 @@ function PullPage({ id }: { id: string }) {
           {n.risk && <span className={`risk risk-${n.risk}`}>{n.risk} risk</span>}</div>
         {n.title && <div className="title">{n.title}</div>}
         <Md text={n.body} />
+        {data.preview && n.try && <a className="btn try" href={dnPreviewUrl(data.preview, n.try)} target="_blank" rel="noopener noreferrer">try it on the preview ↗</a>}
       </div>)}
     </div>)}
     {!!data.files?.length && <>
@@ -879,10 +888,15 @@ type AdminStats = {
   totals: Record<'users' | 'accounts' | 'repositories' | 'pulls' | 'annotations' | 'tokens' | 'sessions' | 'invites' | 'uploads_24h' | 'uploads_7d'
     | 'files' | 'upload_bytes' | 'db_bytes' | 'disk_free_bytes' | 'disk_total_bytes', number>
   retention_days: number
+  max_account_bytes: number
+  prices: { as_of: string; storage: string; providers: Record<string, { name: string; gb_month: number; free_gb: number }> }
   version: string
-  accounts: { id: string; name: string; owner: string | null; members: number; repositories: number; pulls: number; bytes: number; created_at: string }[]
+  accounts: { id: string; name: string; owner: string | null; members: number; repositories: number; pulls: number; files: number; bytes: number; created_at: string }[]
   users: { id: string; email: string; name: string; admin: number; accounts: number; created_at: string; token_used_at: string | null; signed_in_at: string | null }[]
 }
+// a month's storage at a list price (GB = 10^9 bytes, as providers bill); free: the bucket's free GB, for the total only
+const monthly = (b: number, p: { gb_month: number; free_gb: number }, free = false) => Math.max(0, b / 1e9 - (free ? p.free_gb : 0)) * p.gb_month
+const usd = (n: number) => (n === 0 ? '$0' : n < 0.01 ? '< $0.01' : `$${n.toFixed(2)}`)
 function Admin({ user }: { user: User }) {
   const { data, error, reload } = useLoad<AdminStats>('/api/admin/stats')
   const [err, setErr] = useState(''), [q, setQ] = useState(''), [only, setOnly] = useState('')
@@ -893,6 +907,7 @@ function Admin({ user }: { user: User }) {
   if (error) return <p className="error">{error}</p>
   if (!data) return null
   const t = data.totals, used = t.disk_total_bytes - t.disk_free_bytes
+  const price = data.prices.providers[data.prices.storage] // none on disk or MinIO: no bucket bill
   const users = data.users.filter((u) => (!only || (only === 'super admin') === !!u.admin) && matches(q, u.name, u.email))
   return <>
     <div className="head"><h1>server</h1><span className="chip hot">super admin</span></div>
@@ -914,12 +929,21 @@ function Admin({ user }: { user: User }) {
     <p className="hint">retention: {data.retention_days} days after the last upload. diffnotes {data.version}.</p>
     <h2>accounts</h2>
     <div className="scroll"><table className="grid">
-      <thead><tr><th>account</th><th>owner</th><th className="num">members</th><th className="num">repos</th><th className="num">PRs</th><th className="num">size</th><th>created</th></tr></thead>
+      <thead><tr><th>account</th><th>owner</th><th className="num">members</th><th className="num">repos</th><th className="num">PRs</th><th className="num">files</th><th className="num">size</th><th>of quota</th>{price && <th className="num">≈ / month</th>}<th>created</th></tr></thead>
+      {/* the biggest first; of quota: MAX_ACCOUNT_MB, past which uploads to the account are refused */}
       <tbody>{data.accounts.map((a) => <tr key={a.id}>
         <td><Link to={`/accounts/${a.id}`}>{a.name}</Link></td><td>{a.owner ?? '—'}</td><td className="num">{a.members}</td>
-        <td className="num">{a.repositories}</td><td className="num">{a.pulls}</td><td className="num">{bytes(a.bytes)}</td><td>{fmt(a.created_at)}</td>
+        <td className="num">{a.repositories}</td><td className="num">{a.pulls}</td><td className="num">{a.files}</td><td className="num">{bytes(a.bytes)}</td>
+        <td title={`${bytes(a.bytes)} of ${bytes(data.max_account_bytes)}`}><div className="meter"><i style={{ width: `${Math.min(100, (a.bytes / Math.max(1, data.max_account_bytes)) * 100)}%` }} /></div></td>
+        {price && <td className="num">{usd(monthly(a.bytes, price))}</td>}<td>{fmt(a.created_at)}</td>
       </tr>)}</tbody>
+      <tfoot><tr><th colSpan={5}>all accounts</th><th className="num">{t.files}</th><th className="num">{bytes(t.upload_bytes)}</th><th />
+        {price && <th className="num">{usd(monthly(t.upload_bytes, price, true))}</th>}<th /></tr></tfoot>
     </table></div>
+    <p className="hint">≈ / month: storage at {price ? `${price.name}'s` : 'list'} price, the total after the bucket's free {price?.free_gb ?? 0} GB; uploads and
+      downloads of files this small cost nothing extra on B2 and R2. All of today's files ({bytes(t.upload_bytes)}) a month at list prices
+      as of {fmt(`${data.prices.as_of}T00:00`)}: {Object.values(data.prices.providers).map((p) => `${p.name} $${(p.gb_month * 1000).toFixed(2)}/TB ${usd(monthly(t.upload_bytes, p, true))}`).join(' · ')}
+      {!price && (data.prices.storage === 'disk' ? ' (files are on this server\'s disk now: no bucket bill)' : ' (your own MinIO: no list price)')}.</p>
     <h2>users</h2>
     <Filter q={q} setQ={setQ} roles={['super admin', 'user']} role={only} setRole={setOnly} found={users.length} of={data.users.length} />
     <div className="scroll"><table className="grid">

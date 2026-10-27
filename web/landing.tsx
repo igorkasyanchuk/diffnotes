@@ -22,7 +22,7 @@ const BENEFITS: [string, string][] = [
   ['diagrams in the diff', 'A flow or a state change drawn right above the code that implements it, from a Mermaid flowchart the agent writes. No library, no network.'],
   ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones, and reviewers see what changed since their last visit.'],
   ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
-  ['your server, your data', 'Run your own server and code context never leaves your infrastructure (or try it on diffnotes.dev). Notes expire on their own (after 30 days by default).'],
+  ['your server, your data', 'Run your own server and code context never leaves your infrastructure (or try it on diffnotes.dev). Notes expire on their own (after a year by default).'],
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 

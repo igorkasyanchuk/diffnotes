@@ -13,7 +13,7 @@ services:
       # server
       PUBLIC_URL: https://reviews.example.com   # your https:// origin
       ADMIN_EMAIL: you@company.com              # the first admin, only used when there are no users yet
-      RETENTION_DAYS: 30
+      RETENTION_DAYS: 365
       # ADMIN_PASSWORD: ""                      # default: random, printed once in the logs
       # PORT: 3000
       # DATA_DIR: /data

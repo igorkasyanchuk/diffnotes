@@ -16,7 +16,7 @@ services:
       - key: ADMIN_EMAIL
         sync: false
       - key: RETENTION_DAYS
-        value: "30"
+        value: "365"
       # optional, add when needed (Render sets PORT itself):
       # ADMIN_PASSWORD, MAX_FILE_MB, MAX_VIDEO_MB, MAX_FILES, MAX_ANNOTATIONS, MAX_PULL_MB, MAX_BODY_KB, MAX_ACCOUNT_MB, MAX_PULLS,
       # MAX_ACCOUNTS, MIN_FREE_DISK_MB,

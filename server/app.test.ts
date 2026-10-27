@@ -29,7 +29,7 @@ describe('diffnotes', () => {
     const d = (await call('/api/dashboard', { cookie: admin })).data
     expect(d.accounts).toHaveLength(1)
     expect(d.accounts[0].role).toBe('owner')
-    expect(d.retention_days).toBe(30)
+    expect(d.retention_days).toBe(365)
     accountId = d.accounts[0].id
   })
 
@@ -500,6 +500,10 @@ describe('diffnotes', () => {
     expect((await call('/api/admin/stats', { cookie: member })).status).toBe(404)
     const st = (await call('/api/admin/stats', { cookie: admin })).data
     expect(st.totals).toMatchObject({ accounts: 2, pulls: 1, annotations: 2, upload_bytes: 10 })
+    // the biggest account first; list prices for the cost estimate, files on disk here
+    expect(st.accounts.map((a: { bytes: number }) => a.bytes)).toEqual([...st.accounts.map((a: { bytes: number }) => a.bytes)].sort((x, y) => y - x))
+    expect(st.prices).toMatchObject({ storage: 'disk', providers: { b2: { gb_month: 0.00695, free_gb: 10 } } })
+    expect(st.max_account_bytes).toBeGreaterThan(0)
     expect(st.totals.disk_free_bytes).toBeGreaterThan(0)
     expect(st.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(st.accounts.find((a: { name: string }) => a.name === 'Other').owner).toBe('admin@example.com')

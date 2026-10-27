@@ -33,8 +33,10 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   "head_sha": "commit the notes were written for",
   "summary": "Markdown",
   "deploy": "Markdown, optional: what shipping it takes",
+  "preview": "https://pr-42.shop.vercel.app",
+  "stack": [{ "number": 41, "title": "Fee table" }, { "number": 42, "title": "Express picker" }],
   "annotations": [
-    { "path": "app/a.ts", "line": 10, "end_line": 14, "side": "RIGHT", "title": "optional", "body": "Markdown", "risk": "high" }
+    { "path": "app/a.ts", "line": 10, "end_line": 14, "side": "RIGHT", "title": "optional", "body": "Markdown", "risk": "high", "try": "/checkout" }
   ]
 }
 ```
@@ -42,7 +44,14 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
 - `line` / `end_line`: new-side line numbers; `side: "LEFT"` for removed lines; no `line` = a note on the whole file.
 - `risk` (optional): `high`, `medium` or `low`; anything else is dropped. The extension and the web app list risky notes first.
 - `deploy` (optional): the deploy card, Markdown: migrations, new env vars, feature flags, the order of steps, how to
-  roll back. Shown pinned at the top of the summary box and on the PR's page.
+  roll back. Shown pinned at the top of the summary box and on the PR's page. List items starting with a kind
+  (`- migration:`, `- env:`, `- flag:`, `- step:`, `- rollback:`) show that kind as a tag.
+- `preview` (optional): the PR's preview deploy, an `https://` URL (anything else is dropped). A note's `try`, a path
+  under the preview URL (`/checkout?step=2` opens `<preview>/checkout?step=2`, also when the preview has a path of its
+  own; not `//host`, else dropped), becomes *try it on the preview ↗* under the note.
+- `stack` (optional): for a stacked PR, every PR of the stack bottom first, this one included, `[{number, title}]`, at
+  most 20; kept only with this PR and at least one other in it. `GET` adds `notes` per entry: that PR has notes in
+  this account too.
 - The repository's [rules](accounts.md#repository-rules) can require a risk on every note, a deploy card, or an image
   or video when a note is on certain paths; an upload that misses one gets `422` saying what to add.
 - `attachment:<file name>` anywhere in `summary`, `deploy` or `body` becomes the uploaded file's URL.
@@ -52,7 +61,7 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   `[text](#note:<path>:<line>)` links to another note of the PR (the one whose lines hold `<line>`, the new side first;
   `#note:<path>` alone: the file's note, else its first); a click scrolls to it in the diff and on the PR's page.
 - Every note and file has its author. Each PUT replaces the caller's own notes and files on the PR (teammates' stay)
-  and restarts the expiry. Title, `head_sha`, summary and deploy card are the PR's: the latest upload sets them, and
+  and restarts the expiry. Title, `head_sha`, summary, deploy card, preview and stack are the PR's: the latest upload sets them, and
   while teammates' notes are there a blank one keeps what it was. Limits per PR (`MAX_ANNOTATIONS`, `MAX_FILES`) count
   everyone's notes and files.
 - A repository is looked up in the uploader's accounts (the same name can be connected in several accounts). Not

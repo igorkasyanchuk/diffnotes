@@ -5,7 +5,10 @@
 Screenshots and files uploaded with notes are stored **on disk** (`DATA_DIR/uploads`, the default) or in an
 **S3-compatible bucket**, set in the server's environment: `STORAGE_TYPE` and that provider's variables. Not in the
 web app: the keys never reach the database or its backups, and a stolen super admin session can't redirect uploads.
-**Server admin → file storage** shows what is in use (never the secret).
+**Server admin → file storage** shows what is in use (never the secret). The accounts table on **Server admin** lists
+each account's files, their size against `MAX_ACCOUNT_MB`, the biggest first, and roughly what they cost a month at
+your provider's list price (Backblaze B2 $6.95/TB, Cloudflare R2 $15/TB, AWS S3 $23/TB as of 27 Oct 2026, storage
+only, hard-coded in `server/storage.ts`).
 
 - Each file remembers whether it went to disk or to the bucket, so moving from disk to a bucket never breaks older
   files. The way back does: without `STORAGE_TYPE` the server has no keys for the bucket, so its files are unreadable
@@ -55,7 +58,7 @@ go to disk. To keep using it, set the same bucket, keys and prefix in the enviro
 
 ## Expiry
 
-Files expire with their PR, `RETENTION_DAYS` (30) after its last upload:
+Files expire with their PR, `RETENTION_DAYS` (365) after its last upload:
 
 an hourly job removes expired PRs and deletes their files from disk or from the bucket. Re-uploading a PR replaces the
 uploader's files right away.

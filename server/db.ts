@@ -12,7 +12,9 @@ export const EXT_TYPES: Record<string, string> = {
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data')
 export const UPLOADS = path.join(DATA_DIR, 'uploads')
-export const RETENTION_DAYS = Number(process.env.RETENTION_DAYS ?? 30)
+// a blank or bad value is the default, like the MAX_* limits: 0 would expire every upload at once, NaN fail every upload
+const retention = Number(process.env.RETENTION_DAYS || 365)
+export const RETENTION_DAYS = retention > 0 ? retention : 365
 fs.mkdirSync(UPLOADS, { recursive: true })
 
 export const DB_FILE = path.join(DATA_DIR, 'diffnotes.db')
@@ -91,7 +93,10 @@ for (const sql of ['alter table annotations add column risk text', "alter table 
   // an open link (email ''): anyone who has it joins until it expires, any number of people
   'alter table invites add column open integer not null default 0',
   // when the user's agent (skill, MCP) and browser extension first used a token: the web app's setup checklist ticks them (notes_at below)
-  'alter table users add column agent_at text', 'alter table users add column extension_at text'])
+  'alter table users add column agent_at text', 'alter table users add column extension_at text',
+  // the PR's preview deploy (https URL) and its stack (JSON [{number, title}], bottom first); a note's path on the preview
+  "alter table pulls add column preview text not null default ''", "alter table pulls add column stack text not null default ''",
+  'alter table annotations add column try_path text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 db.exec('create unique index if not exists users_github on users(github_id)')
 // every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's

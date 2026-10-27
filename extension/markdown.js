@@ -256,6 +256,19 @@
   globalThis.dnPreview = (name, text, resolve) =>
     /\.md$/i.test(name) ? markdown(text, resolve) : /\.csv$/i.test(name) ? csv(text) : `<pre>${esc(String(text ?? ''))}</pre>`
   globalThis.dnMarkdown = markdown
+  // a note's try path on the PR's preview deploy, under the preview's own path (a preview served at
+  // owner.github.io/repo/pr-42/ keeps it): /checkout → …/pr-42/checkout; '' → the preview itself
+  globalThis.dnPreviewUrl = (preview, path) => {
+    if (!path) return preview
+    const u = new URL(preview)
+    u.search = u.hash = ''
+    if (!u.pathname.endsWith('/')) u.pathname += '/'
+    // ./ keeps it relative: /https://evil.example or /javascript:… without the slash would be a URL of its own
+    return new URL(`./${path.replace(/^\/+/, '')}`, u).href
+  }
+  // a deploy card: list items starting with a kind (`- migration: add_fee`) get that kind as a tag
+  globalThis.dnDeploy = (src, resolve) => markdown(src, resolve).replace(/<li>(migration|env|flag|step|rollback)s?:\s*/gi,
+    (_, k) => `<li class="dn-dep"><span class="dn-dep-tag dn-dep-${k.toLowerCase()}">${k.toLowerCase()}</span> `)
   // #note:path, #note:path:line → the index of the note it names in notes ({path, line, end_line, side}), or -1.
   // A line picks the note whose range holds it (the new side first), else the nearest one in that file; no line, the
   // file's note, else its first. The ref may be URL-encoded (a path with spaces).
