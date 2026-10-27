@@ -520,6 +520,43 @@ describe('GitHub sign-in', () => {
   })
 })
 
+describe('GitHub photos', () => {
+  it('serves the photo of a GitHub user you share an account with, through this server', async () => {
+    const { createAccount, createUser } = await import('./db.ts')
+    const me = (await call('/api/me', { cookie: admin })).data.user.id
+    const loner = createUser('loner@example.com', 'loner-pass')
+    createAccount('Alone', loner)
+    db.prepare('update users set github_id = ? where id = ?').run('90583231', me)
+    db.prepare('update users set github_id = ? where id = ?').run('90000009', loner)
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(png, { headers: { 'content-type': 'image/png' } }))
+    try {
+      const r = await call(`/api/users/${me}/avatar`, { cookie: admin })
+      expect(r.status).toBe(200)
+      expect(r.res.headers.get('content-type')).toBe('image/png')
+      expect(fetch).toHaveBeenCalledWith('https://avatars.githubusercontent.com/u/90583231?s=64&v=4', expect.anything())
+      await call(`/api/users/${me}/avatar`, { cookie: admin })
+      expect(fetch).toHaveBeenCalledTimes(1) // kept for a day
+      expect((await call(`/api/users/${loner}/avatar`, { cookie: admin })).status).toBe(404) // no account in common
+      expect((await call(`/api/users/${devId}/avatar`, { cookie: admin })).status).toBe(404) // no GitHub sign-in
+      expect((await call(`/api/users/${me}/avatar`)).status).toBe(401)
+      // the members list and the dashboard point at it
+      expect((await call(`/api/accounts/${accountId}`, { cookie: admin })).data.members.find((m: { id: string }) => m.id === me).avatar).toBe(`/api/users/${me}/avatar`)
+      // GitHub answering something else than a photo, or not at all: 404, the page shows initials
+      db.prepare('update users set github_id = ? where id = ?').run('90000042', me)
+      fetch.mockResolvedValueOnce(new Response('<html>', { headers: { 'content-type': 'text/html' } }))
+      expect((await call(`/api/users/${me}/avatar`, { cookie: admin })).status).toBe(404)
+      fetch.mockRejectedValueOnce(new Error('offline'))
+      expect((await call(`/api/users/${me}/avatar`, { cookie: admin })).status).toBe(404)
+      fetch.mockResolvedValueOnce(new Response(new Uint8Array(300 * 1024), { headers: { 'content-type': 'image/png' } }))
+      expect((await call(`/api/users/${me}/avatar`, { cookie: admin })).status).toBe(404)
+    } finally {
+      fetch.mockRestore()
+      db.prepare('update users set github_id = null where id in (?, ?)').run(me, loner)
+    }
+  })
+})
+
 describe('live demo (DEMO_PR)', () => {
   it('lets every signed-in user read the demo PR and its files, which never expire', async () => {
     const { createAccount, createUser, now } = await import('./db.ts')

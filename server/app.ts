@@ -498,13 +498,37 @@ app.get('/api/dashboard', (c) => {
   const total = (db.prepare(`select count(*) as n ${from}`).get(user.id) as { n: number }).n
   const page = Math.min(Math.max(1, Math.floor(Number(c.req.query('page')) || 1)), Math.max(1, Math.ceil(total / PER_PAGE)))
   const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, ${UPLOADER} as uploader,
-    (select count(*) from annotations n where n.pull_id = p.id) as annotations
+    ${UPLOADER_AVATAR} as uploader_avatar, (select count(*) from annotations n where n.pull_id = p.id) as annotations
     ${from} order by p.updated_at desc, p.id limit ? offset ?`).all(user.id, PER_PAGE, (page - 1) * PER_PAGE)
   // invitations waiting for this user: by their email, or by their GitHub login
   const invites = db.prepare(`select i.token, a.name as account, i.role from invites i join accounts a on a.id = i.account_id
     join users u on u.id = ? where i.expires_at > ? and ((i.email != '' and i.email = u.email) or i.github = u.github_login)
     and not exists (select 1 from memberships m where m.account_id = i.account_id and m.user_id = u.id) order by i.created_at`).all(user.id, now())
   return c.json({ accounts, pulls, total, page, per_page: PER_PAGE, invites, retention_days: RETENTION_DAYS })
+})
+
+// A GitHub user's photo, fetched by this server and kept for a day, so the app's pages still load nothing from third
+// parties (PAGE_CSP). Yours, or someone's you share an account with; anyone else, or no GitHub sign-in: 404 (initials).
+// ponytail: in memory, the 500 latest; a restart fetches them again
+const avatars = new Map<string, { type: string; body: ArrayBuffer; at: number }>()
+const PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+app.get('/api/users/:id/avatar', async (c) => {
+  const me = c.get('user').id, id = c.req.param('id')
+  const gh = (db.prepare(`select github_id from users u where u.id = ?1 and (u.id = ?2 or exists (select 1 from memberships a
+    join memberships b on b.account_id = a.account_id where a.user_id = ?2 and b.user_id = u.id))`).get(id, me) as { github_id: string | null } | undefined)?.github_id
+  if (!gh || !/^\d+$/.test(gh)) fail(404, 'No photo')
+  let hit = avatars.get(gh!)
+  if (!hit || hit.at < Date.now() - 86400_000) {
+    const res = await fetch(`https://avatars.githubusercontent.com/u/${gh}?s=64&v=4`, { signal: AbortSignal.timeout(5000) }).catch(() => null)
+    const type = res?.headers.get('content-type')?.split(';')[0] ?? ''
+    if (!res?.ok || !PHOTO_TYPES.includes(type)) fail(404, 'No photo')
+    const body = await res!.arrayBuffer().catch(() => fail(404, 'No photo'))
+    if (body.byteLength > 256 * 1024) fail(404, 'No photo')
+    avatars.delete(gh!)
+    avatars.set(gh!, hit = { type, body, at: Date.now() })
+    if (avatars.size > 500) avatars.delete(avatars.keys().next().value!)
+  }
+  return c.body(hit!.body, 200, { 'content-type': hit!.type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' })
 })
 
 app.post('/api/accounts', async (c) => {
@@ -517,7 +541,7 @@ app.post('/api/accounts', async (c) => {
 app.get('/api/accounts/:id', (c) => {
   const id = c.req.param('id'), user = c.get('user'), my = role(id, user)
   const account = db.prepare('select id, name from accounts where id = ?').get(id)
-  const members = db.prepare(`select u.id, u.email, u.name, m.role from memberships m join users u on u.id = m.user_id
+  const members = db.prepare(`select u.id, u.email, u.name, m.role, ${AVATAR} as avatar from memberships m join users u on u.id = m.user_id
     where m.account_id = ? order by u.email`).all(id)
   const repositories = (db.prepare(`select r.id, r.full_name, r.rules, (select count(*) from pulls p where p.repository_id = r.id) as pulls
     from repositories r where r.account_id = ? order by r.full_name`).all(id) as { rules: string }[]).map((r) => ({ ...r, rules: JSON.parse(r.rules) }))
@@ -532,7 +556,7 @@ app.get('/api/accounts/:id/overview', (c) => {
   const id = c.req.param('id'), user = c.get('user')
   role(id, user)
   const pulls = db.prepare(`select p.id, p.number, p.title, p.updated_at, p.expires_at, r.full_name as repository, ${UPLOADER} as uploader,
-    (select count(*) from annotations n where n.pull_id = p.id) as annotations,
+    ${UPLOADER_AVATAR} as uploader_avatar, (select count(*) from annotations n where n.pull_id = p.id) as annotations,
     (select count(*) from files f where f.pull_id = p.id) as files, (select coalesce(sum(f.size), 0) from files f where f.pull_id = p.id) as bytes
     from pulls p join repositories r on r.id = p.repository_id
     where r.account_id = ? order by p.updated_at desc`).all(id) as { repository: string; annotations: number; files: number; bytes: number; expires_at: string }[]
@@ -691,6 +715,9 @@ const owns = (p: Pull, user: User) => holds(p.id, user.id) || (p.user_id === use
 
 // who uploaded a PR (its last upload): the name, else the email; null once that user is gone
 const NAME = `coalesce(nullif(u.name, ''), u.email)`, UPLOADER = `(select ${NAME} from users u where u.id = p.user_id)`
+// their GitHub photo, through this server (/api/users/:id/avatar), for users who sign in with GitHub; else null (initials)
+const AVATAR = `case when u.github_id is not null then '/api/users/' || u.id || '/avatar' end`
+const UPLOADER_AVATAR = `(select ${AVATAR} from users u where u.id = p.user_id)`
 
 function pullOut(p: Pull, user: User) {
   const member = isMember(p.account_id, user), admin = member && isAdminOf(p, user)
@@ -704,10 +731,10 @@ function pullOut(p: Pull, user: User) {
     updated_at: p.updated_at, expires_at: p.expires_at, annotations, files,
     // who wrote its notes and files, the last uploader first; the uploader alone when there are none (a summary only).
     // Members only: the live demo is read by everyone signed in
-    authors: member ? (db.prepare(`select ${NAME} as name from users u where u.id in
+    authors: member ? db.prepare(`select ${NAME} as name, ${AVATAR} as avatar from users u where u.id in
       (select user_id from annotations where pull_id = ?2 union select user_id from files where pull_id = ?2)
       or (u.id = ?1 and not exists (select 1 from annotations where pull_id = ?2 union all select 1 from files where pull_id = ?2))
-      order by u.id = ?1 desc, name collate nocase`).all(p.user_id, p.id) as { name: string }[]).map((a) => a.name) : [],
+      order by u.id = ?1 desc, name collate nocase`).all(p.user_id, p.id) : [],
     can_delete: admin || (member && owns(p, user)), can_delete_all: admin,
   }
 }

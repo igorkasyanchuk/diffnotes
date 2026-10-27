@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub photos**: people who sign in with GitHub show their photo next to their name (dashboard, latest uploads,
+  members, a PR's authors). The server fetches it and serves it to teammates only, so the app's pages still load
+  nothing from third parties; others keep their initials.
+
+### Changed
+
+- The dashboard's pull requests line up in columns.
+- Landing: *start in 5 minutes* (this server) and *self-host it* (your own) are two separate panels with an “or” between.
+- `authors` on a PR is now a list of `{name, avatar}` (was names).
+
 ## [1.3.0] - 2026-10-27
 
 ### Added

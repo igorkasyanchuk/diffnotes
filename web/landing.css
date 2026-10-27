@@ -14,7 +14,7 @@
 .lp-benefits h3::before { content: '+ '; color: var(--prompt); }
 .lp-benefits p { color: var(--muted); margin: 0; font-size: 13px; }
 
-#install { scroll-margin-top: 72px; } /* clears the sticky .top header */
+#install, #self-host { scroll-margin-top: 72px; } /* clears the sticky .top header */
 .lp-install { list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: i; }
 .lp-install li { counter-increment: i; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 14px 16px; }
 .lp-step { display: flex; gap: 10px; align-items: center; }
@@ -36,3 +36,17 @@
 .btn.chrome { display: inline-flex; align-items: center; gap: 8px; }
 .lp-demo { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel); color: var(--ink); font-size: 13px; }
 .lp-demo:hover { border-color: var(--accent); text-decoration: none; }
+/* the two ways in (this server, your own): separate panels with an "or" between, so they don't read as one flow */
+.lp-path { margin-top: 40px; padding: 22px 24px 18px; border: 1px solid var(--line-2); border-top: 3px solid var(--accent); border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.lp-path.lp-self { border-top-color: var(--prompt); }
+.lp-path-head { margin-bottom: 14px; }
+.lp-path-head h2 { margin: 6px 0 4px; font-size: 22px; text-transform: none; letter-spacing: -0.01em; color: var(--ink); }
+.lp-path-head h2::before { content: '# '; color: var(--accent); }
+.lp-self .lp-path-head h2::before { color: var(--prompt); }
+.lp-path-head .hint { margin: 0; }
+.lp-path-tag { font-size: 11px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-fill); }
+.lp-self .lp-path-tag { border-color: var(--prompt); color: var(--prompt); background: color-mix(in srgb, var(--prompt) 10%, transparent); }
+.lp-or { display: flex; align-items: center; gap: 14px; margin: 28px 0 -12px; color: var(--soft); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+.lp-or::before, .lp-or::after { content: ''; flex: 1; border-top: 1px dashed var(--line-2); }
+@media (max-width: 560px) { .lp-path { padding: 14px 10px 10px; } .lp-path .lp-install li { padding: 12px 10px; } }

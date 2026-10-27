@@ -15,7 +15,7 @@ declare global {
 
 type User = { id: string; email: string; name: string; admin: number }
 type Annotation = { id: number; path: string; line: number | null; end_line: number | null; side: string; title: string; body: string; risk: 'low' | 'medium' | 'high' | null }
-type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]; authors?: string[]
+type Pull = { id: string; repository: string; number: number; title: string; head_sha?: string; can_delete?: boolean; can_delete_all?: boolean; summary: string; deploy?: string; updated_at: string; expires_at: string; annotations: Annotation[]; authors?: { name: string; avatar: string | null }[]
   files?: { name: string; type: string; size: number; url: string }[] }
 
 async function api<T = any>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> {
@@ -148,14 +148,17 @@ function Attachment({ f }: { f: { name: string; type: string; size: number; url:
       : html !== undefined && <div className="md preview" dangerouslySetInnerHTML={{ __html: html }} />}
   </div>
 }
-// who wrote it: initials on a colour of their own (no image: the app's pages load nothing from third parties)
-const Avatar = ({ name }: { name: string }) => {
+// who wrote it: their GitHub photo (src: served by this server, app.ts AVATAR), else initials on a colour of their own
+const Avatar = ({ name, src }: { name: string; src?: string | null }) => {
+  const [broken, setBroken] = useState(false)
+  if (src && !broken) return <img className="avatar" src={src} alt="" title={name} loading="lazy" onError={() => setBroken(true)} />
   const initials = name.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join('').toUpperCase() || '?'
   let h = 0
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360
   return <span className="avatar" style={{ '--h': h } as React.CSSProperties} title={name} aria-hidden="true">{initials}</span>
 }
-const Author = ({ name }: { name: string | null | undefined }) => name ? <span className="author"><Avatar name={name} />{name}</span> : <span className="hint">—</span>
+const Author = ({ name, avatar }: { name: string | null | undefined; avatar?: string | null }) =>
+  name ? <span className="author"><Avatar name={name} src={avatar} /><span className="author-name">{name}</span></span> : <span className="hint">—</span>
 const Stat = ({ label, value }: { label: string; value: ReactNode }) => <div className="stat"><b>{value}</b><span>{label}</span></div>
 
 function useLoad<T>(url: string) {
@@ -376,7 +379,7 @@ function Privacy() {
     </ul>
     <h2>A DiffNotes server</h2>
     <ul>
-      <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub),
+      <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub; the server then fetches your GitHub photo itself, to show to your teammates),
         sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (30 days by default).
         Its operator decides where it runs and who can access it.</li>
       <li>Notes and files are visible only to members of the account that owns the repository, except a live-demo pull request
@@ -390,19 +393,20 @@ function Privacy() {
   </div>
 }
 
-const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: string | null })[] }) =>
-  <div className="list">
+// one grid for every row (.pulls in styles.css): repository, title, uploader, notes, date and link line up as columns
+const PullList = ({ pulls }: { pulls: (Pull & { annotations: number; uploader?: string | null; uploader_avatar?: string | null })[] }) =>
+  <div className="list pulls">
     {pulls.length ? pulls.map((p) => <div key={p.id}>
       <span className="mono hint">{p.repository}#{p.number}</span>
       <span className="grow"><Link to={`/pulls/${p.id}`}>{p.title || 'untitled'}</Link></span>
-      {p.uploader && <Author name={p.uploader} />}
+      <Author name={p.uploader} avatar={p.uploader_avatar} />
       <span className="chip hot">{p.annotations} notes</span>
       <span className="hint">{fmt(p.updated_at)}</span>
       <a href={prUrl(p.repository, p.number)} target="_blank" rel="noreferrer">{forge(p.repository)} ↗</a>
     </div>) : <div className="empty">nothing yet. the <Link to="/welcome">setup steps</Link> get your agent annotating pull requests in about 5 minutes.</div>}
   </div>
 
-type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number; uploader: string | null })[]; retention_days: number
+type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pull & { annotations: number; uploader: string | null; uploader_avatar: string | null })[]; retention_days: number
   total: number; page: number; per_page: number; invites: { token: string; account: string; role: string }[] }
 function Dashboard() {
   const urlPage = () => Math.max(1, Number(new URLSearchParams(location.search).get('page')) || 1)
@@ -450,7 +454,7 @@ function Dashboard() {
 
 type Acc = {
   account: { id: string; name: string }; role: string
-  members: { id: string; email: string; name: string; role: string }[]
+  members: { id: string; email: string; name: string; role: string; avatar: string | null }[]
   repositories: { id: string; full_name: string; pulls: number; rules: Rules }[]
   invites: { token: string; email: string; github: string | null; open: number; role: string; expires_at: string }[]
 }
@@ -458,7 +462,7 @@ type Overview = {
   totals: Record<'members' | 'admins' | 'invites' | 'repositories' | 'pulls' | 'annotations' | 'files' | 'bytes' | 'expiring_soon', number>
   retention_days: number
   repositories: { repository: string; pulls: number; annotations: number; files: number; bytes: number }[]
-  recent: (Pull & { annotations: number; uploader: string | null; files: number; bytes: number })[]
+  recent: (Pull & { annotations: number; uploader: string | null; uploader_avatar: string | null; files: number; bytes: number })[]
 }
 const TABS = ['overview', 'members', 'repositories', 'settings'] as const
 function Account({ id, user }: { id: string; user: User }) {
@@ -510,7 +514,7 @@ function AccountOverview({ id }: { id: string }) {
       <thead><tr><th>pull request</th><th>by</th><th className="num">notes</th><th className="num">files</th><th className="num">size</th><th>updated</th><th>expires</th></tr></thead>
       <tbody>{data.recent.map((p) => <tr key={p.id}>
         <td className="wrap"><Link to={`/pulls/${p.id}`}>{p.repository}#{p.number}</Link><div className="hint">{p.title}</div></td>
-        <td className="wrap"><Author name={p.uploader} /></td><td className="num">{p.annotations}</td><td className="num">{p.files}</td><td className="num">{bytes(p.bytes)}</td>
+        <td className="wrap"><Author name={p.uploader} avatar={p.uploader_avatar} /></td><td className="num">{p.annotations}</td><td className="num">{p.files}</td><td className="num">{bytes(p.bytes)}</td>
         <td>{fmt(p.updated_at)}</td><td>{fmt(p.expires_at)}</td>
       </tr>)}</tbody>
     </table></div> : <div className="list"><div className="empty">{t.pulls ? 'shown to the account\'s members only' : 'no uploads yet'}</div></div>}
@@ -561,7 +565,7 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
     <div className="list">
       {!shown.length && <div className="empty">no member matches</div>}
       {shown.map((m) => <div key={m.id}>
-        <span className="grow author"><Avatar name={m.name || m.email} />{m.name || m.email} <span className="hint">{m.name && m.email}</span></span>
+        <span className="grow author"><Avatar name={m.name || m.email} src={m.avatar} />{m.name || m.email} <span className="hint">{m.name && m.email}</span></span>
         {admin && m.role !== 'owner' && m.id !== user.id
           ? <select className="inline" value={m.role} onChange={(e) => change(m.id, e.target.value)}><option>admin</option><option>member</option></select>
           : <span className={`chip${m.role === 'member' ? '' : ' hot'}`}>{m.role}</span>}
@@ -698,7 +702,7 @@ function PullPage({ id }: { id: string }) {
   return <>
     <p className="hint">{data.repository}#{data.number}{data.head_sha && <> · written for commit <code>{data.head_sha.slice(0, 7)}</code></>} · updated {fmt(data.updated_at)} · expires {fmt(data.expires_at)}</p>
     <h1>{data.title || 'untitled pull request'}</h1>
-    {!!data.authors?.length && <p className="authors">notes by {data.authors.map((a, i) => <Author key={i} name={a} />)}</p>}
+    {!!data.authors?.length && <p className="authors">notes by {data.authors.map((a, i) => <Author key={i} name={a.name} avatar={a.avatar} />)}</p>}
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
       {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
         data.can_delete_all ? 'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.'

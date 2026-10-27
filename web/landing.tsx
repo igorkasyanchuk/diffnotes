@@ -70,9 +70,11 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       {BENEFITS.map(([t, d]) => <div key={t} className="card"><h3>{t}</h3><p>{d}</p></div>)}
     </div>
 
-    <h2 id="install">start in 5 minutes</h2>
-    <p className="hint">Use this server ({location.host}): nothing to install on your side but the skill and the extension.
-      Want your own? <a href="#self-host">Self-host it</a>, the steps are the same against your address.</p>
+    {/* two separate ways in, each its own panel: this server (most people), or your own (then the same steps) */}
+    <section className="lp-path" id="install">
+      <div className="lp-path-head"><span className="lp-path-tag">option 1 · on {location.host}</span>
+        <h2>start in 5 minutes</h2>
+        <p className="hint">Use this server: nothing to install on your side but the skill and the extension.</p></div>
     <ol className="lp-install">
       <li>
         <div className="lp-step"><span className="lp-time">~30 s</span><b>{signedIn ? 'you are signed in' : signup ? 'create a free account' : 'sign in'}</b></div>
@@ -96,11 +98,17 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
         <Code wrap text={AGENT_PROMPT} />
       </li>
     </ol>
+    </section>
 
-    <h2 id="self-host">self-host it (optional)</h2>
-    <p className="hint">Keep code context on your own infrastructure. One container with a volume, free and open source (MIT), also for commercial use.</p>
+    <div className="lp-or"><span>or</span></div>
+
+    <section className="lp-path lp-self" id="self-host">
+      <div className="lp-path-head"><span className="lp-path-tag">option 2 · your own server</span>
+        <h2>self-host it</h2>
+        <p className="hint">Keep code context on your own infrastructure. One container with a volume, free and open source (MIT), also for commercial use.</p></div>
     <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
-    <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps above with your server's address.</p>
+    <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps of option 1 with your server's address.</p>
+    </section>
     <p>{cta}</p>
   </>
 }

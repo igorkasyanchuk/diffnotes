@@ -63,7 +63,7 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   Less than `MIN_FREE_DISK_MB` free on the server's volume: `507` (an empty upload, which only removes yours, still passes). A multipart `payload` is held to `MAX_BODY_KB` like a JSON body.
 
 `GET` returns the stored notes with their `id`, `risk`, `mine` (yours: what your next upload replaces) and `can_delete`,
-the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove), `can_delete_all` and `authors` (who wrote its notes and files, the last uploader first). A note is removed by its author or an
+the files with `mine` too, plus the PR's `can_delete` (anything of it you may remove), `can_delete_all` and `authors` (who wrote its notes and files, the last uploader first: `{name, avatar}`, `avatar` a URL on this server for people who sign in with GitHub, else `null`). A note is removed by its author or an
 account owner or admin; `DELETE` of the PR removes everything for an owner or admin, your own notes and files for anyone
 else (the PR goes with the last of them; `403` with none of yours).
 
