@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-27
+
 ### Added
 
 - **Extension: 11 more note themes**: outline, card, tinted, dashed, blue, green, purple, mono, contrast, terminal and
@@ -147,7 +149,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.2.0
 [1.1.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.1.0
 [1.0.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.0.0
