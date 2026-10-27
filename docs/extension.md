@@ -44,6 +44,12 @@ Build and run the generated project in Xcode, then enable it in Safari → Setti
 build, first allow unsigned extensions in Safari's Develop menu). Safari has no sandboxed extension pages, so live
 `.html` demos and screen recordings show a hint instead: open them from **open in DiffNotes**.
 
+## How notes look
+
+The popup's **Notes look** picks one of six themes, from the most to the least visible: **loud** (tinted, thick
+border), **sticky** (a yellow sticky note), **standard**, **quiet** (a line at the left only), **compact** (small and
+tight) and **ghost** (faded until you hover it). It applies to open pages right away and is kept in the browser.
+
 ## Several servers
 
 The popup lists every connected server with your email on it; add more with the same form (different teams, clients,

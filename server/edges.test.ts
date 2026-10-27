@@ -433,6 +433,33 @@ describe('GitHub sign-in', () => {
       expect((await call(`/api/invites/${byLogin}/accept`, { cookie: h.cookie, body: {} })).status).toBe(200)
       expect((await call('/api/dashboard', { cookie: h.cookie })).data).toMatchObject({ accounts: [{ id: accountId }], invites: [] })
 
+      // an open link: anyone joins until it expires (signed in, a new user, or an existing one with its password) and it stays
+      expect((await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { open: true, minutes: 7 } })).status).toBe(400)
+      const { token: openLink } = (await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { open: true, minutes: 5 } })).data
+      expect((await call(`/api/invites/${openLink}`)).data).toMatchObject({ open: true, signed_in: false })
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'nope', password: 'x' } })).status).toBe(400)
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'walkin@example.com', password: 'short' } })).status).toBe(400)
+      // GitHub sign-in is on: a typed email makes no user (that would squat it), and says so like a wrong password
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'walkin@example.com', password: 'walkin-pass', name: 'Walk' } })).data.error).toContain('continue with GitHub')
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'boss@example.com', password: 'boss-password' } })).status).toBe(200)
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'boss@example.com', password: 'wrong-pass' } })).status).toBe(401)
+      // without GitHub sign-in the form makes new users
+      delete process.env.GITHUB_CLIENT_ID
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'walkin2@example.com', password: 'walkin-pass', name: 'Walk' } })).status).toBe(200)
+      process.env.GITHUB_CLIENT_ID = 'cid'
+      // a short password says the same for an email with a user and one without: no telling which emails exist
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'walkin@example.com', password: 'short' } })).status).toBe(400)
+      expect((await call(`/api/invites/${openLink}/accept`, { body: { email: 'boss@example.com', password: 'short' } })).status).toBe(400)
+      const other = (await call('/api/accounts', { cookie: h.cookie, body: { name: 'other team' } })).data.id
+      const { token: otherLink } = (await call(`/api/accounts/${other}/invites`, { cookie: h.cookie, body: { open: true, minutes: 1440 } })).data
+      expect((await call(`/api/invites/${otherLink}/accept`, { cookie: j.cookie, body: {} })).status).toBe(200) // signed in: joins as is
+      expect((await call('/api/me', { cookie: j.cookie })).data.accounts.map((x: { id: string }) => x.id)).toContain(other)
+      expect((await call(`/api/accounts/${accountId}`, { cookie: admin })).data.invites.some((i: { token: string; open: number }) => i.token === openLink && i.open)).toBe(true)
+      // a GitHub sign-in headed to an open link gets a user even with sign-up closed
+      expect((await roundTrip({ id: 13, login: 'walker' }, [mail('walker@example.com')], { next: `?next=/invite/${openLink}` })).to).toBe(`/invite/${openLink}`)
+      db.prepare('update invites set expires_at = ? where token = ?').run('2000-01-01T00:00:00.000Z', openLink)
+      expect((await call(`/api/invites/${openLink}`)).status).toBe(404)
+
       // open sign-up: a new user with a team account of their own, no password until they set one
       process.env.ALLOW_SIGNUP = '1'
       const n = await roundTrip(octo, [mail('octo@example.com')])

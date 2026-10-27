@@ -70,7 +70,7 @@ screen stretched to the viewport, controls hidden, one scene per shot (scene dot
 
 | Permission | Justification |
 |---|---|
-| `storage` | Keeps the DiffNotes servers the user connected and their access tokens, which notes the user folded, whether notes are switched off, and, for pull requests with notes opened in the last 60 days, their repository and number with hashes of the notes shown (to mark notes changed since the last visit). Stored locally in the browser only. |
+| `storage` | Keeps the DiffNotes servers the user connected and their access tokens, which notes the user folded, whether notes are switched off, how notes look, and, for pull requests with notes opened in the last 60 days, their repository and number with hashes of the notes shown (to mark notes changed since the last visit). Stored locally in the browser only. |
 | Host `https://github.com/*`, `https://gitlab.com/*`, `https://bitbucket.org/*` | The content script runs on pull request pages of these sites to draw the notes next to the changed lines of the diff. It only reads the page to find files and line numbers. |
 | Optional host `https://*/*` | Requested at runtime for exactly one origin, the DiffNotes server the user types in the popup (each team runs its own server, so the address isn't known in advance). Used to fetch that server's notes and files with the user's token, and to remove notes when the user asks (authors and admins only). Removed again when the user removes the server. |
 | Optional host `http://localhost/*`, `http://127.0.0.1/*` | The same, for a DiffNotes server running on the user's own machine (development and trials). Plain `http://` is allowed only for these. |

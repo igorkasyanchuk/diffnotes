@@ -53,6 +53,12 @@ then waits on their **dashboard** under *invitations for you* and they press **j
 login can accept it: the link alone (or a password) does not. A login belongs to whoever signed in with it last, since
 GitHub logins can be renamed and taken.
 
+**Open link**: under the invitations, pick how long it works (5, 10 or 30 minutes, 1 hour or 1 day) → **create link**
+(copied right away). Anyone who has it joins as a **member** until it expires, any number of people: signed in already
+(one click), with GitHub (which makes their user even with sign-up closed), or with the email and password of their
+DiffNotes user. Without GitHub sign-in on the server, the form makes new users too; with it, new people come with GitHub,
+since a typed email isn't proven and would let anyone holding the link claim an address and catch its invitations. Revoke it to stop it early. Handy for a meeting; don't post it anywhere public.
+
 ## Sign in with GitHub
 
 Off unless the server has an OAuth app. On GitHub: Settings → Developer settings → **OAuth Apps** → **New OAuth App**,

@@ -26,6 +26,9 @@ const BENEFITS: [string, string][] = [
   ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
 ]
 
+// what to ask a coding agent once the skill is installed (landing and settings, with a copy button)
+export const AGENT_PROMPT = 'Use the diffnotes skill to annotate this pull request for its reviewers: explain each changed file and the non-obvious lines in plain language, flag the risky parts (auth, money, migrations), add before / after screenshots of UI changes, then upload the notes to DiffNotes.'
+
 export const STORE = 'https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd'
 const MAIN = 'https://diffnotes.dev' // where the README badge links, from every server
 const ChromeLogo = () => <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -46,7 +49,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
   const cta = signedIn ? <a href="/dashboard" className="btn primary">open dashboard →</a> : <a href="/login" className="btn primary">{signup ? 'create a free account →' : 'sign in →'}</a>
   return <>
     <section className="lp-hero">
-      <div className="lp-tags"><span>free</span><span>self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
+      <div className="lp-tags"><span>free</span><span>hosted or self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
       <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
       <div className="lp-quick">
         <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
@@ -59,7 +62,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
     <section className="lp-after">
       <p className="lp-lead">A coding agent attaches plain-language notes, screenshots and live demos to the lines it changed. Reviewers see them
         right inside the diff on GitHub, GitLab or Bitbucket, through a small browser extension. Nothing is posted to the PR.</p>
-      <p>{cta} <a href="#install" className="btn">install in 3 minutes</a></p>
+      <p>{cta} <a href="#install" className="btn">start in 3 minutes</a></p>
     </section>
 
     <h2>why developers like it</h2>
@@ -67,25 +70,37 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       {BENEFITS.map(([t, d]) => <div key={t} className="card"><h3>{t}</h3><p>{d}</p></div>)}
     </div>
 
-    <h2 id="install">install in 3 minutes</h2>
+    <h2 id="install">start in 3 minutes</h2>
+    <p className="hint">Use this server ({location.host}): nothing to install on your side but the skill and the extension.
+      Want your own? <a href="#self-host">Self-host it</a>, the steps are the same against your address.</p>
     <ol className="lp-install">
       <li>
-        <div className="lp-step"><span className="lp-time">~1 min</span><b>run the server</b></div>
-        <p className="hint">One container with a volume. Free and open source (MIT), also for commercial use.</p>
-        <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
-        <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs.</p>
+        <div className="lp-step"><span className="lp-time">~30 s</span><b>{signedIn ? 'you are signed in' : signup ? 'create a free account' : 'sign in'}</b></div>
+        <p className="hint">{signedIn ? 'Good, nothing to do here.' : signup ? 'One click with GitHub: your user and a team account to invite people into.'
+          : 'This server is invite-only: ask its admin for an invitation, then sign in.'}</p>
+        {!signedIn && <p>{cta}</p>}
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>give your agent the skill</b></div>
-        <p className="hint">Installs for Claude Code, Codex, Cursor and other Agent Skills tools. Then make a token in settings.</p>
-        <Code prompt text={'curl -fsSL https://reviews.example.com/install.sh | sh'} />
+        <p className="hint">Installs for Claude Code, Codex, Cursor and other Agent Skills tools. Then make a token in <a href="/settings#tokens">settings</a> and export it as it shows.</p>
+        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
-        <p className="hint">Install it from the Chrome Web Store (or load it in Firefox), paste your server and token in its popup. Open any annotated PR's “Files changed”.</p>
+        <p className="hint">Install it from the Chrome Web Store (or load it in Firefox), then paste the one line settings shows next to your token into its popup.</p>
         <p><AddToChrome /></p>
       </li>
+      <li>
+        <div className="lp-step"><span className="lp-time">~1 min</span><b>ask your agent to explain a PR</b></div>
+        <p className="hint">On a branch with an open pull request (GitHub, GitLab or Bitbucket). Then open the PR's “Files changed”.</p>
+        <Code wrap text={AGENT_PROMPT} />
+      </li>
     </ol>
+
+    <h2 id="self-host">self-host it (optional)</h2>
+    <p className="hint">Keep code context on your own infrastructure. One container with a volume, free and open source (MIT), also for commercial use.</p>
+    <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
+    <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps above with your server's address.</p>
     <p>{cta}</p>
   </>
 }

@@ -106,7 +106,12 @@ label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .error { color: var(--bad); font-size: 13px; }
 .error::before { content: '! '; }
 .hint { color: var(--soft); font-size: 12px; }
-.ok { color: var(--prompt); font-size: 13px; }
+/* what just happened (toast() in main.tsx) */
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 12px); max-width: calc(100vw - 32px); z-index: 50;
+  padding: 8px 14px; border: 1px solid var(--prompt); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25); opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { border-color: var(--bad); color: var(--bad); }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; }
 .list { display: grid; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
@@ -158,7 +163,7 @@ table.grid tr:hover td { background: var(--panel-2); }
 /* a long line scrolls under the copy button: hide it there, fading in from the left */
 .code:not(.wrap) .copy { background: var(--panel); box-shadow: 0 0 0 4px var(--panel); }
 .code:not(.wrap) .copy::before { content: ''; position: absolute; right: calc(100% + 4px); top: -4px; bottom: -4px; width: 28px; background: linear-gradient(to right, transparent, var(--panel)); }
-.code.wrap pre { white-space: pre-wrap; word-break: break-all; }
+.code.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .token .code pre { margin: 0 0 6px; background: var(--panel); }
 
 /* the landing page lives in landing.css; these keyframes are shared (.cursor here, .gh-term there) */

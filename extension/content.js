@@ -246,6 +246,18 @@
     if (!error) dock(box)
   }
 
+  // How loud the notes are (popup: loud, sticky, standard, quiet, compact, ghost): a class on <html>, content.css styles it
+  const theme = (t) => {
+    const cl = document.documentElement.classList
+    cl.remove(...[...cl].filter((c) => c.startsWith('dn-theme-')))
+    if (t && t !== 'standard') cl.add(`dn-theme-${t}`)
+    // notes change height with the theme: measure them again for show more
+    document.querySelectorAll('[data-dn-measured]').forEach((b) => delete b.dataset.dnMeasured)
+    clampAll()
+  }
+  chrome.storage.local.get('noteTheme').then((s) => theme(s.noteTheme), () => {})
+  chrome.storage.onChanged.addListener((ch) => { if (ch.noteTheme) theme(ch.noteTheme.newValue) })
+
   // Notes on/off for the whole diff, remembered across PRs. Every switch on the page shows the same state.
   let hidden = false
   chrome.storage.local.get('hideNotes').then((s) => setHidden(!!s.hideNotes, false))

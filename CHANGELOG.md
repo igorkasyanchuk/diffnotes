@@ -18,6 +18,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   in with GitHub, then shows on their dashboard to join.
 - **Extension: one-line connect**: Settings shows `{"server":…,"token":…}` for a new token; pasted into the popup's
   Server field it fills both. What was typed survives the popup closing.
+- **Open invite links**: anyone with the link joins as a member until it expires (5 min to 1 day), signed in, with
+  GitHub or with an email and password.
+- **Extension: note themes**: loud, sticky, standard, quiet, compact or ghost, picked in the popup.
+- **Feedback everywhere**: the web app says what just happened (saved, copied, removed, invited) and buttons show
+  when they're working; the extension popup says what connecting is doing.
+- **Landing**: start on this server in four steps (with a prompt to give your agent), self-hosting as the option.
 - **Badge**: *reviewed with DiffNotes* (`/badge.svg`) with Markdown, HTML and PR-template snippets on `/badge`.
 
 ### Security

@@ -29,7 +29,10 @@ $('server').addEventListener('input', () => {
   const v = $('server').value.trim()
   if (v.startsWith('{')) try {
     const { server, token } = JSON.parse(v)
-    if (typeof server === 'string' && typeof token === 'string') { $('server').value = server; $('token').value = token; $('submit').focus() }
+    if (typeof server === 'string' && typeof token === 'string') {
+      $('server').value = server; $('token').value = token; $('submit').focus()
+      $('status').textContent = 'Server and token filled in: press Connect'
+    }
   } catch { /* still typing */ }
   settingsLink()
   saveDraft()
@@ -43,12 +46,21 @@ chrome.storage.session.get('draft').then(({ draft }) => {
   settingsLink()
 })
 show()
+// how the notes look on the diff (content.js applies it to open pages right away)
+chrome.storage.local.get('noteTheme').then(({ noteTheme }) => { $('theme').value = noteTheme ?? 'standard' })
+$('theme').addEventListener('change', async () => {
+  await chrome.storage.local.set({ noteTheme: $('theme').value })
+  $('status').textContent = `Notes look ${$('theme').value} now, on open pages too`
+})
 // a connect the background finished after the permission prompt closed this popup shows up as soon as it lands
 chrome.storage.onChanged.addListener((changes) => { if (changes.servers) show() })
 
 $('connect').addEventListener('submit', async (e) => {
   e.preventDefault()
   $('error').textContent = ''
+  // say what is happening: the permission prompt and the token check each take a moment
+  const say = (text) => { $('status').textContent = text }
+  $('submit').disabled = true
   try {
     const url = new URL($('server').value.trim()), server = url.origin, token = $('token').value.trim()
     // the token goes with every request: plain http only to this computer
@@ -57,10 +69,13 @@ $('connect').addEventListener('submit', async (e) => {
     // saved before the prompt: if it closes this popup, background.js connects once the permission is granted
     await chrome.storage.session.set({ draft: { server, token } })
     // servers are self-hosted, so each origin is asked for when it is connected
+    say(`Asking for access to ${url.host}…`)
     if (!(await chrome.permissions.request({ origins: [`${server}/*`] }))) throw new Error('Permission to reach the server was denied')
+    say('Checking the token…')
     const { error } = await chrome.runtime.sendMessage({ type: 'connect' })
     if (error) throw new Error(error)
     $('connect').reset()
+    say(`Connected to ${url.host} ✓`)
     show()
-  } catch (err) { $('error').textContent = err.message }
+  } catch (err) { say(''); $('error').textContent = err.message } finally { $('submit').disabled = false }
 })

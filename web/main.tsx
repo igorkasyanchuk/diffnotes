@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
-import { BadgePage, Code, DemoPage, Landing } from './landing.tsx'
+import { AGENT_PROMPT, BadgePage, Code, DemoPage, Landing } from './landing.tsx'
 import { version } from '../package.json'
 
 declare global {
@@ -155,12 +155,30 @@ function useLoad<T>(url: string) {
   return { data, error, reload: () => setN((x) => x + 1) }
 }
 
-// a form whose submit calls fn and shows its error
-function useSubmit(fn: () => Promise<unknown>) {
+// what just happened (saved, copied, removed, or why not), for a few seconds at the bottom of the screen
+const toast = (text: string, bad = false) => dispatchEvent(new CustomEvent('dn:toast', { detail: { text, bad } }))
+function Toaster() {
+  const [t, setT] = useState<{ text: string; bad: boolean } | null>(null)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const on = (e: Event) => { setT((e as CustomEvent).detail); clearTimeout(timer); timer = setTimeout(() => setT(null), 3000) }
+    addEventListener('dn:toast', on)
+    return () => { removeEventListener('dn:toast', on); clearTimeout(timer) }
+  }, [])
+  return <div className={`toast${t ? ' on' : ''}${t?.bad ? ' bad' : ''}`} role="status" aria-live="polite">{t?.text}</div>
+}
+// navigator.clipboard is undefined on plain-http origins (a self-hosted server on a LAN address) and Safari refuses it
+// after an await: the link isn't on the page, so it shows in a prompt to copy by hand
+const copy = async (text: string, what: string) => {
+  try { await navigator.clipboard.writeText(text); toast(`${what} ✓`) } catch { prompt('Copy the link:', text) }
+}
+
+// a form whose submit calls fn and shows its error; `done` is said once it worked
+function useSubmit(fn: () => Promise<unknown>, done?: string) {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const submit = async (e?: FormEvent) => {
     e?.preventDefault(); setBusy(true); setError('')
-    try { await fn() } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+    try { await fn(); if (done) toast(done) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
   return { submit, error, busy }
 }
@@ -251,7 +269,7 @@ function Login({ sign }: { sign: SignIn }) {
       <label>email<input autoFocus autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <label>password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
       {error && <div className="error">{error}</div>}
-      <button className="primary" disabled={busy}>sign in</button>
+      <button className="primary" disabled={busy}>{busy ? 'signing in…' : 'sign in'}</button>
       <p className="hint">{!sign.signup && <>No account? Ask a teammate for an invitation link.<br /></>}
         Forgot your password? Your server admin runs <code>npm run reset-password</code>.</p>
     </form>
@@ -259,17 +277,37 @@ function Login({ sign }: { sign: SignIn }) {
 }
 
 function Invite({ token, sign }: { token: string; sign: SignIn }) {
-  const { data, error: loadError } = useLoad<{ email: string; github: string | null; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
-  const [name, setName] = useState(''), [password, setPassword] = useState('')
-  const { submit, error, busy } = useSubmit(async () => { await api(`/api/invites/${token}/accept`, { name, password }); location.href = '/dashboard' })
+  const { data, error: loadError } = useLoad<{ email: string; github: string | null; open: boolean; expires_at: string; account: string; exists: boolean; signed_in: boolean }>(`/api/invites/${token}`)
+  const [name, setName] = useState(''), [password, setPassword] = useState(''), [email, setEmail] = useState('')
+  const { submit, error, busy } = useSubmit(async () => {
+    await api(`/api/invites/${token}/accept`, { name, password, email }); location.href = '/dashboard'
+  })
   if (loadError) return <p className="error">{loadError}</p>
   if (!data) return null
+  // an open link: anyone joins, signed in already or with an email (a new user, or an existing one with its password)
+  if (data.open) return <div className="narrow">
+    <h1>join {data.account}</h1>
+    <p className="hint">Anyone with this link can join as a member until {new Date(data.expires_at).toLocaleString()}.</p>
+    {/* with GitHub on, new people join with GitHub (it proves their email); the form is for existing users */}
+    {!data.signed_in && sign.github && <><p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton></p>
+      <div className="or">or with your DiffNotes email and password</div></>}
+    <form className="stack" onSubmit={submit}>
+      {!data.signed_in && <>
+        <label>email<input type="email" autoComplete="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+        {!sign.github && <label>your name <span className="hint">(new users)</span><input value={name} onChange={(e) => setName(e.target.value)} /></label>}
+        <label>password <span className="hint">{sign.github ? '' : '(yours, or a new one with 8+ characters)'}</span>
+          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+      </>}
+      {error && <div className="error">{error}</div>}
+      <button className="primary" disabled={busy}>{busy ? 'joining…' : 'join'}</button>
+    </form>
+  </div>
   // an invite by GitHub login: only a GitHub sign-in as that login joins
   if (data.github) return <div className="narrow">
     <h1>join {data.account}</h1>
     <p className="hint">Invitation for GitHub user @{data.github}.{data.signed_in && ' You are signed in as this user.'}</p>
     {data.signed_in
-      ? <form className="stack" onSubmit={submit}>{error && <div className="error">{error}</div>}<button className="primary" disabled={busy}>join</button></form>
+      ? <form className="stack" onSubmit={submit}>{error && <div className="error">{error}</div>}<button className="primary" disabled={busy}>{busy ? 'joining…' : 'join'}</button></form>
       : sign.github ? <p><GitHubButton next={`/invite/${token}`}>continue with GitHub</GitHubButton></p>
         : <p className="error">GitHub sign-in is off on this server: ask for an invitation by email.</p>}
   </div>
@@ -284,7 +322,7 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
       {!data.signed_in && <label>{data.exists ? 'password' : 'choose a password (8+ characters)'}
         <input type="password" autoComplete={data.exists ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} /></label>}
       {error && <div className="error">{error}</div>}
-      <button className="primary" disabled={busy}>join</button>
+      <button className="primary" disabled={busy}>{busy ? 'joining…' : 'join'}</button>
     </form>
   </div>
 }
@@ -297,7 +335,7 @@ function Privacy() {
     <h2>The browser extension</h2>
     <ul>
       <li>It stores, in your browser only (<code>chrome.storage.local</code>), the addresses of the DiffNotes servers you connect and the
-        access token you paste for each, plus which notes you folded, whether notes are switched off, and, for pull requests with notes you
+        access token you paste for each, plus which notes you folded, whether notes are switched off, how notes look, and, for pull requests with notes you
         opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token.</li>
       <li>It talks only to the servers you connect. On a GitHub, GitLab or Bitbucket pull request page it sends that server the
         repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.
@@ -338,7 +376,7 @@ type Dash = { accounts: { id: string; name: string; role: string }[]; pulls: (Pu
 function Dashboard() {
   const { data, reload } = useLoad<Dash>('/api/dashboard')
   const [name, setName] = useState('')
-  const { submit, error } = useSubmit(async () => { await api('/api/accounts', { name }); setName(''); reload() })
+  const { submit, error, busy } = useSubmit(async () => { await api('/api/accounts', { name }); setName(''); reload() }, 'account created')
   if (!data) return null
   return <>
     <h1>dashboard</h1>
@@ -362,7 +400,7 @@ function Dashboard() {
     </div>
     <form className="row" onSubmit={submit}>
       <input placeholder="new account (team) name" value={name} onChange={(e) => setName(e.target.value)} />
-      <button>create</button>
+      <button disabled={busy}>{busy ? 'creating…' : 'create'}</button>
     </form>
     {error && <div className="error">{error}</div>}
   </>
@@ -372,7 +410,7 @@ type Acc = {
   account: { id: string; name: string }; role: string
   members: { id: string; email: string; name: string; role: string }[]
   repositories: { id: string; full_name: string; pulls: number; rules: Rules }[]
-  invites: { token: string; email: string; github: string | null; role: string; expires_at: string }[]
+  invites: { token: string; email: string; github: string | null; open: number; role: string; expires_at: string }[]
 }
 type Overview = {
   totals: Record<'members' | 'admins' | 'invites' | 'repositories' | 'pulls' | 'annotations' | 'files' | 'bytes' | 'expiring_soon', number>
@@ -439,21 +477,29 @@ function AccountOverview({ id }: { id: string }) {
 
 type TabProps = { id: string; data: Acc; admin: boolean; reload: () => void }
 // a refusal (403 once a role changed, 404 already gone) is said, not dropped as an unhandled rejection
-const del = async (url: string, reload: () => void, what = 'Are you sure?') => {
+const del = async (url: string, reload: () => void, what = 'Are you sure?', done = 'removed') => {
   if (!confirm(what)) return
-  try { await api(url, undefined, 'DELETE'); reload() } catch (e) { alert((e as Error).message) }
+  try { await api(url, undefined, 'DELETE'); toast(done); reload() } catch (e) { toast((e as Error).message, true) }
 }
 
 function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
-  const [email, setEmail] = useState(''), [role, setRole] = useState('member'), [err, setErr] = useState('')
+  const [email, setEmail] = useState(''), [role, setRole] = useState('member'), [err, setErr] = useState(''), [minutes, setMinutes] = useState('60')
+  const link = (token: string) => `${location.origin}/invite/${token}`
   // an address, or a GitHub login (with or without @)
   const invite = useSubmit(async () => {
     const who = email.trim(), byLogin = !who.includes('@') || who.startsWith('@')
-    await api(`/api/accounts/${id}/invites`, { ...(byLogin ? { github: who } : { email: who }), role }); setEmail(''); reload()
+    const { token } = await api(`/api/accounts/${id}/invites`, { ...(byLogin ? { github: who } : { email: who }), role }); setEmail(''); reload()
+    if (byLogin) toast(`invited @${who.replace(/^@/, '')}: they join after signing in with GitHub`)
+    else await copy(link(token), `invitation for ${who} created, link copied`)
+  })
+  // an open link: anyone who has it joins as a member until it expires
+  const open = useSubmit(async () => {
+    const { token } = await api(`/api/accounts/${id}/invites`, { open: true, minutes: Number(minutes) }); reload()
+    await copy(link(token), 'open link created and copied')
   })
   const change = async (m: string, next: string) => {
     setErr('')
-    try { await api(`/api/accounts/${id}/members/${m}`, { role: next }, 'PUT'); reload() } catch (e) { setErr((e as Error).message) }
+    try { await api(`/api/accounts/${id}/members/${m}`, { role: next }, 'PUT'); toast(`role changed to ${next}`); reload() } catch (e) { setErr((e as Error).message) }
   }
   return <>
     <div className="list">
@@ -472,20 +518,29 @@ function Members({ id, data, admin, user, reload }: TabProps & { user: User }) {
       <h2>invitations</h2>
       {!!data.invites.length && <div className="list">
         {data.invites.map((i) => <div key={i.token}>
-          <span className="grow">{i.github ? `@${i.github}` : i.email} <span className="hint">{i.github && 'pending GitHub sign-in · '}until {fmt(i.expires_at)}</span></span>
-          <span className="chip">{i.role}</span>
-          <button className="link" onClick={() => navigator.clipboard.writeText(`${location.origin}/invite/${i.token}`)}>copy link</button>
-          <button className="link danger" onClick={() => del(`/api/accounts/${id}/invites/${i.token}`, reload)}>revoke</button>
+          <span className="grow">{i.open ? 'anyone with the link' : i.github ? `@${i.github}` : i.email} <span className="hint">
+            {i.github && 'pending GitHub sign-in · '}until {i.open ? new Date(i.expires_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : fmt(i.expires_at)}</span></span>
+          <span className={`chip${i.open ? ' hot' : ''}`}>{i.open ? 'open link' : i.role}</span>
+          <button className="link" onClick={() => copy(link(i.token), 'invitation link copied')}>copy link</button>
+          <button className="link danger" onClick={() => del(`/api/accounts/${id}/invites/${i.token}`, reload, 'Revoke this invitation? Its link stops working.', 'invitation revoked')}>revoke</button>
         </div>)}
       </div>}
       <form className="row" onSubmit={invite.submit}>
         <input placeholder="teammate@company.com or GitHub login" value={email} onChange={(e) => setEmail(e.target.value)} />
         <select value={role} onChange={(e) => setRole(e.target.value)}><option>member</option><option>admin</option></select>
-        <button>invite</button>
+        <button disabled={invite.busy}>{invite.busy ? 'inviting…' : 'invite'}</button>
       </form>
       {invite.error && <div className="error">{invite.error}</div>}
-      <p className="hint">send them the link (copy link); it works for 7 days. Invited by GitHub login: it waits on their dashboard
+      <p className="hint">send them the link (copied when you invite); it works for 7 days. Invited by GitHub login: it waits on their dashboard
         once they sign in with GitHub, and they join from there.</p>
+      <form className="row" onSubmit={open.submit}>
+        <span className="hint">open link, anyone who has it joins as a member, for</span>
+        <select value={minutes} onChange={(e) => setMinutes(e.target.value)}>
+          {[['5', '5 minutes'], ['10', '10 minutes'], ['30', '30 minutes'], ['60', '1 hour'], ['1440', '1 day']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button disabled={open.busy}>{open.busy ? 'creating…' : 'create link'}</button>
+      </form>
+      {open.error && <div className="error">{open.error}</div>}
     </>}
   </>
 }
@@ -495,19 +550,19 @@ const ruleChips = (r: Rules) => [r.risk && 'risk on every note', r.deploy && 'de
 // what every upload to a repository must carry; the server answers 422 with what is missing and the agent adds it
 function RulesForm({ id, rules, done }: { id: string; rules: Rules; done: () => void }) {
   const [r, setR] = useState(rules)
-  const save = useSubmit(async () => { await api(`/api/repositories/${id}/rules`, r, 'PUT'); done() })
+  const save = useSubmit(async () => { await api(`/api/repositories/${id}/rules`, r, 'PUT'); done() }, 'rules saved')
   return <form className="rules" onSubmit={save.submit}>
     <label><input type="checkbox" checked={!!r.risk} onChange={(e) => setR({ ...r, risk: e.target.checked })} /> every note rates its risk</label>
     <label><input type="checkbox" checked={!!r.deploy} onChange={(e) => setR({ ...r, deploy: e.target.checked })} /> a deploy card (migrations, env vars, flags, rollback)</label>
     <label>screenshots or a recording when a note touches <input placeholder="web/**, **/*.css" value={r.screenshots ?? ''} onChange={(e) => setR({ ...r, screenshots: e.target.value })} /></label>
-    <div><button>save rules</button></div>
+    <div><button disabled={save.busy}>{save.busy ? 'saving…' : 'save rules'}</button></div>
     {save.error && <div className="error">{save.error}</div>}
   </form>
 }
 
 function Repositories({ id, data, admin, reload }: TabProps) {
   const [repo, setRepo] = useState(''), [editing, setEditing] = useState('')
-  const add = useSubmit(async () => { await api(`/api/accounts/${id}/repositories`, { full_name: repo }); setRepo(''); reload() })
+  const add = useSubmit(async () => { await api(`/api/accounts/${id}/repositories`, { full_name: repo }); setRepo(''); reload() }, 'repository added')
   return <>
     <div className="list">
       {data.repositories.length ? data.repositories.map((r) => <div key={r.id}>
@@ -515,13 +570,13 @@ function Repositories({ id, data, admin, reload }: TabProps) {
         {ruleChips(r.rules).map((c) => <span key={c} className="chip hot" title="every upload must have it">{c}</span>)}
         <span className="chip">{r.pulls} PRs</span>
         {admin && <button className="link" onClick={() => setEditing(editing === r.id ? '' : r.id)}>rules</button>}
-        {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Delete ${r.full_name}? Its pull requests, notes and uploaded files are deleted too. There is no undo.`)}>delete</button>}
+        {admin && <button className="link danger" onClick={() => del(`/api/repositories/${r.id}`, reload, `Delete ${r.full_name}? Its pull requests, notes and uploaded files are deleted too. There is no undo.`, `${r.full_name} deleted`)}>delete</button>}
         {editing === r.id && <RulesForm id={r.id} rules={r.rules} done={() => { setEditing(''); reload() }} />}
       </div>) : <div className="empty">no repositories yet. they are added on the first upload{admin && ', or here'}.</div>}
     </div>
     {admin && <>
       <form className="row" onSubmit={add.submit}>
-        <input placeholder="owner/name, gitlab.com/group/project or a repository URL" value={repo} onChange={(e) => setRepo(e.target.value)} /><button>add</button>
+        <input placeholder="owner/name, gitlab.com/group/project or a repository URL" value={repo} onChange={(e) => setRepo(e.target.value)} /><button disabled={add.busy}>{add.busy ? 'adding…' : 'add'}</button>
       </form>
       {add.error && <div className="error">{add.error}</div>}
     </>}
@@ -529,23 +584,22 @@ function Repositories({ id, data, admin, reload }: TabProps) {
 }
 
 function AccountSettings({ id, data, user, reload }: Omit<TabProps, 'admin'> & { user: User }) {
-  const [name, setName] = useState(data.account.name), [saved, setSaved] = useState(false)
-  const rename = useSubmit(async () => { await api(`/api/accounts/${id}`, { name }, 'PUT'); setSaved(true); reload() })
+  const [name, setName] = useState(data.account.name)
+  const rename = useSubmit(async () => { await api(`/api/accounts/${id}`, { name }, 'PUT'); reload() }, 'account renamed')
   const remove = useSubmit(async () => {
     if (prompt(`Type the account name to delete it with all its repositories, notes and files: ${data.account.name}`) !== data.account.name) return
-    await api(`/api/accounts/${id}`, undefined, 'DELETE'); go('/dashboard')
+    await api(`/api/accounts/${id}`, undefined, 'DELETE'); toast('account deleted'); go('/dashboard')
   })
   return <>
     <h2>name</h2>
     <form className="row narrow" onSubmit={rename.submit}>
-      <input value={name} onChange={(e) => { setName(e.target.value); setSaved(false) }} /><button>save</button>
+      <input value={name} onChange={(e) => setName(e.target.value)} /><button disabled={rename.busy}>{rename.busy ? 'saving…' : 'save'}</button>
     </form>
     {rename.error && <div className="error">{rename.error}</div>}
-    {saved && <div className="ok">saved</div>}
     {(data.role === 'owner' || !!user.admin) && <>
       <h2>danger zone</h2>
       <p className="hint">Deleting the account removes its repositories, every annotation and every uploaded file. There is no undo.</p>
-      <button className="danger" onClick={() => remove.submit()}>delete account</button>
+      <button className="danger" disabled={remove.busy} onClick={() => remove.submit()}>{remove.busy ? 'deleting…' : 'delete account'}</button>
       {remove.error && <div className="error">{remove.error}</div>}
     </>}
   </>
@@ -592,10 +646,10 @@ function PullPage({ id }: { id: string }) {
 function Settings({ me }: { me: Me }) {
   const { data, reload } = useLoad<{ id: string; name: string; created_at: string; last_used_at: string | null }[]>('/api/tokens')
   const [name, setName] = useState(''), [fresh, setFresh] = useState('')
-  const make = useSubmit(async () => { setFresh((await api('/api/tokens', { name })).token); setName(''); reload() })
+  const make = useSubmit(async () => { setFresh((await api('/api/tokens', { name })).token); setName(''); reload() }, 'token created: copy it now, it is shown only once')
   useEffect(() => { if (location.hash === '#tokens') document.getElementById('tokens')?.scrollIntoView() }, [])
-  const [cur, setCur] = useState(''), [next, setNext] = useState(''), [done, setDone] = useState(false)
-  const pass = useSubmit(async () => { await api('/api/password', { current: cur, password: next }, 'PUT'); setCur(''); setNext(''); setDone(true) })
+  const [cur, setCur] = useState(''), [next, setNext] = useState('')
+  const pass = useSubmit(async () => { await api('/api/password', { current: cur, password: next }, 'PUT'); setCur(''); setNext('') }, 'password changed, other sessions signed out')
   const owned = me.accounts.filter((a) => a.role === 'owner')
   const [delPass, setDelPass] = useState('')
   const remove = useSubmit(async () => {
@@ -615,17 +669,19 @@ function Settings({ me }: { me: Me }) {
     <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${fresh || 'paste-your-token-here'}`} />
     <p>3. in the browser extension's popup, paste this one line into the Server field (it fills both fields), then press Connect:</p>
     <Code text={JSON.stringify({ server: location.origin, token: fresh || 'make-a-token-below' })} />
+    <p>4. on a branch with a pull request, ask your agent:</p>
+    <Code wrap text={AGENT_PROMPT} />
     <h2 id="tokens">tokens</h2>
     {fresh && <div className="token"><Code text={fresh} /><span className="hint">copy it now: it is shown only once.</span></div>}
     <div className="list">
       {data?.length ? data.map((t) => <div key={t.id}>
         <span className="grow">{t.name}</span>
         <span className="hint">{t.last_used_at ? `used ${fmt(t.last_used_at)}` : 'never used'}</span>
-        <button className="link danger" onClick={() => del(`/api/tokens/${t.id}`, reload, 'Delete this token? Agents and extensions using it stop working.')}>delete</button>
+        <button className="link danger" onClick={() => del(`/api/tokens/${t.id}`, reload, 'Delete this token? Agents and extensions using it stop working.', 'token deleted')}>delete</button>
       </div>) : <div className="empty">no tokens yet</div>}
     </div>
     <form className="row" onSubmit={make.submit}>
-      <input placeholder="name, e.g. work laptop" value={name} onChange={(e) => setName(e.target.value)} /><button>new token</button>
+      <input placeholder="name, e.g. work laptop" value={name} onChange={(e) => setName(e.target.value)} /><button disabled={make.busy}>{make.busy ? 'creating…' : 'new token'}</button>
     </form>
     <h2>password</h2>
     {!me.has_password && <p className="hint">You sign in with GitHub. A password is optional: set one to sign in with your email too.</p>}
@@ -633,7 +689,6 @@ function Settings({ me }: { me: Me }) {
       {me.has_password && <label>current password<input type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} /></label>}
       <label>new password<input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></label>
       {pass.error && <div className="error">{pass.error}</div>}
-      {done && <div className="ok">password changed, other sessions signed out</div>}
       <button disabled={pass.busy}>{me.has_password ? 'change password' : 'set password'}</button>
     </form>
     <h2>danger zone</h2>
@@ -661,7 +716,7 @@ function Admin({ user }: { user: User }) {
   const [err, setErr] = useState('')
   const flag = async (id: string, admin: boolean) => {
     setErr('')
-    try { await api(`/api/admin/users/${id}`, { admin }, 'PUT'); reload() } catch (e) { setErr((e as Error).message) }
+    try { await api(`/api/admin/users/${id}`, { admin }, 'PUT'); toast(admin ? 'made super admin' : 'super admin removed'); reload() } catch (e) { setErr((e as Error).message) }
   }
   if (error) return <p className="error">{error}</p>
   if (!data) return null
@@ -760,7 +815,7 @@ function App() {
     return <PublicLayout signedIn={!!me} signup={sign.signup}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
       : path === '/privacy' ? <Privacy /> : path === '/badge' ? <BadgePage />
       : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }} />
-      : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}</PublicLayout>
+      : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}<Toaster /></PublicLayout>
   }
   let page: ReactNode
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />
@@ -768,7 +823,7 @@ function App() {
   else if (path === '/settings') page = <Settings me={me} />
   else if (path === '/admin' && me.user.admin) page = <Admin user={me.user} />
   else page = <Dashboard />
-  return <AppLayout me={me} path={path}>{page}<Gallery /></AppLayout>
+  return <AppLayout me={me} path={path}>{page}<Gallery /><Toaster /></AppLayout>
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)

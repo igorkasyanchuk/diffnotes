@@ -5,7 +5,8 @@
 ## Access
 
 - **Invite-only** by default. The first admin is created on first boot; everyone else needs an invitation link (7 days,
-  one use), unless GitHub sign-in runs with `ALLOW_SIGNUP=1` ([accounts](accounts.md#sign-in-with-github)).
+  one use) or an account's open link (anyone who has it joins as a member until it expires, 5 minutes to 1 day; an
+  admin revokes it), unless GitHub sign-in runs with `ALLOW_SIGNUP=1` ([accounts](accounts.md#sign-in-with-github)).
 - **Per account.** A PR's notes and files are visible only to members of the account that owns its repository (super
   admins too only where they are members; the one exception is the `DEMO_PR` live demo, readable by every signed-in
   user). Other users get `404`, so they can't even tell a PR is annotated.
@@ -17,7 +18,9 @@
   requests whose `Origin` is another site.
 - **Login throttling**: per IP and email one failure a second and 10 in 10 minutes; per IP 100, per email 50 in 10
   minutes (high enough that a stranger can't lock you out). Accepting an invitation as an existing user uses the same
-  budgets; changing your password allows 10 wrong current passwords in 10 minutes. The counters live in the server's
+  budgets; an open link's email form makes at most 20 new users per IP an hour (through GitHub, 30 sign-ins per IP in
+  10 minutes); changing your password allows 10 wrong current
+  passwords in 10 minutes. The counters live in the server's
   memory: they reset on restart, and they hold only because DiffNotes runs as
   [exactly one instance](install.md#one-instance-only).
 - **CSRF**: cookie-signed-in writes are refused unless the browser says they come from the same origin

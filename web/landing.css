@@ -21,7 +21,7 @@
 .lp-step b::before { content: counter(i) '. '; color: var(--accent); }
 .lp-time { font-size: 11px; padding: 1px 8px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--prompt); }
 .lp-install .hint { margin: 6px 0; }
-.lp-install pre { white-space: pre-wrap; word-break: break-all; }
+.lp-install pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 560px) { .lp-h1 { font-size: 28px; } }
 .lp-quick { display: flex; gap: 8px; justify-content: center; align-items: stretch; flex-wrap: wrap; max-width: 640px; margin: 22px auto 6px; }
