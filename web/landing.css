@@ -52,3 +52,5 @@
 @media (max-width: 560px) { .lp-path { padding: 14px 10px 10px; } .lp-path .lp-install li { padding: 12px 10px; } }
 .lp-soon { margin: -2px 0 0; font-size: 11px; color: var(--soft); }
 .lp-soon b { color: var(--muted); font-weight: 600; }
+.lp-end { margin: 48px auto 8px; max-width: 620px; text-align: center; }
+.lp-end .btn { padding: 10px 20px; font-size: 14px; margin: 4px; }

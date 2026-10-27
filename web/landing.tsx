@@ -110,7 +110,11 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
     <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
     <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps of option 1 with your server's address.</p>
     </section>
-    <p>{cta}</p>
+    {/* the closing call to action: centred, on its own, after both ways in */}
+    <div className="lp-end">
+      <p className="lp-lead">{signedIn ? 'Your dashboard has your annotated pull requests and the setup steps.' : 'Free on this server, or on yours. Your agent’s next pull request can carry its notes.'}</p>
+      <p>{cta}{demo && <> <a href="/demo" className="btn">see the live demo</a></>}</p>
+    </div>
   </>
 }
 
