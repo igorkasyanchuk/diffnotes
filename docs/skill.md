@@ -21,7 +21,9 @@ export DIFFNOTES_URL=https://reviews.example.com
 export DIFFNOTES_TOKEN=dn_…
 ```
 
-Run the install again to update the skill. It also removes a copy installed under the old name, `reviews42`; that one read
+Run the install again to update the skill. Each copy carries the version it was installed at (`metadata.version`: the release plus a hash of the skill with your server's limits in it, so a change between releases or a changed limit counts); when the
+server has moved on (`/skill/version`), the agent tells you to re-run the install. It never fetches and follows a newer
+skill on its own: instructions change only when you install them. It also removes a copy installed under the old name, `reviews42`; that one read
 `REVIEWS42_URL` / `REVIEWS42_TOKEN`, so rename them to `DIFFNOTES_URL` / `DIFFNOTES_TOKEN` (old `r42_…` tokens keep working).
 
 ## Use

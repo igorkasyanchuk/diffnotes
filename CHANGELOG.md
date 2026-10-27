@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-28
+
 ### Added
 
 - **`.diffnotes.yml`**: a repository says how its PRs are annotated (language, tone, paths to skip, where screenshots
@@ -15,6 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   GitHub deployments or the preview bot's comment.
 - **Stacked pull requests**: `stack` lists the PRs of a stack, bottom first; the summary box and the PR's page show it
   with this PR highlighted and mark the others that have notes.
+- **Skill versions**: the served skill carries its version (the release plus a hash of the skill and this server's
+  limits) and `/skill/version` says the current one; an
+  installed copy that is older asks you to re-run the install (it never follows the server's copy on its own).
 - **Server admin**: each account's files, size against its quota and the estimated monthly storage cost at B2, R2
   or S3 list prices (as of 27 Oct 2026), the biggest account first, with totals.
 
@@ -23,6 +28,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Notes and files are kept 365 days** after a PR's last upload by default (was 30); set `RETENTION_DAYS` for less. PRs and files
   now live longer against `MAX_PULLS` and `MAX_ACCOUNT_MB`: raise them if accounts fill up.
 - **Deploy card**: list items starting with `migration:`, `env:`, `flag:`, `step:` or `rollback:` show that kind as a tag.
+
+### Security
+
+- Skill: branch names (which a PR's author picks, and which may hold shell syntax such as `x$(…)`) are read from the
+  CLI into quoted variables and never typed into a command; `git fetch` / `git merge-base` used to take them as typed.
+  Re-run the install to get it.
+- Extension: what another connected server sends (notes, preview, stack) is checked before it is drawn, so a bad value
+  shows nothing instead of breaking the box; preview links never leave the preview's own path or host.
 
 ## [1.3.1] - 2026-10-27
 
@@ -183,7 +196,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/igorkasyanchuk/diffnotes/releases/tag/v1.2.0

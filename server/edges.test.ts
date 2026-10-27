@@ -95,6 +95,12 @@ describe('pages', () => {
     expect(privacy.data).not.toContain('stats.example')
     expect((await call('/install.sh')).data).toContain('https://dn.example/skill/SKILL.md')
     expect((await call('/skill/SKILL.md')).data).not.toContain('{{HOST}}')
+    // stamped with the release, which /skill/version serves for installed copies to compare with
+    const { version } = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../package.json'), 'utf8'))
+    const served = (await call('/skill/version')).data as string
+    expect(served).toMatch(new RegExp(`^${version.replaceAll('.', '\\.')}\\+[0-9a-f]{8}$`)) // the release + the file's hash
+    expect((await call('/skill/SKILL.md')).data).toContain(`version: "${served}"`)
+    expect((await call('/skill/SKILL.md')).data).not.toContain('{{VERSION}}')
   })
 })
 

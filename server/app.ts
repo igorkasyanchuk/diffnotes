@@ -761,7 +761,7 @@ const demoTarget = () => {
 export const demoPull = () => {
   const m = demoName()
   if (!m) return
-  // a PR whose last upload, title, summary and deploy card (fields_by: null once a blank upload kept a teammate's) and
+  // a PR whose last upload, title, summary, deploy card, preview and stack (fields_by: null once a blank upload kept a teammate's) and
   // every note and file a super admin wrote: a teammate's content there would turn public otherwise
   const byAdmin = (t: string) => `not exists (select 1 from ${t} x left join users u on u.id = x.user_id where x.pull_id = p.id and u.admin is not 1)`
   return db.prepare(`${PULL_SELECT} join users pu on pu.id = p.user_id where r.full_name = ? and p.number = ? and pu.admin = 1
@@ -972,7 +972,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const deploy = str(payload.deploy, 20_000) // blank or not a string: no card
   const notes = list.map((a, i) => ({ path: str(a.path, 500) || fail(400, `annotations[${i}].path is required`), risk: RISKS.includes(a.risk as string) ? a.risk as string : null }))
   const rules = repoFound ? JSON.parse((db.prepare('select rules from repositories where id = ?').get(repoFound) as { rules: string }).rules) as Rules : {}
-  // the PR's own fields (title, commit, summary, deploy card) are the latest upload's; while teammates' notes or files
+  // the PR's own fields (title, commit, summary, deploy card, preview, stack) are the latest upload's; while teammates' notes or files
   // are there, a blank one keeps what it was (their upload may have set it, and its summary link their files). A kept
   // deploy card meets the rule: removing only your notes (an empty upload) needn't re-send a teammate's card
   const keep = theirNotes + taken.length > 0
@@ -1315,18 +1315,24 @@ app.get('/api/admin/storage', (c) => {
 
 // --- skill install, health, static web app
 
-const skill = (c: Context) => fs.readFileSync(path.join(ROOT, 'skill/diffnotes/SKILL.md'), 'utf8')
-  .replaceAll('{{HOST}}', host(c))
-  // this server's limits, so the agent sizes files to what it will accept
+// this server's limits, so the agent sizes files to what it will accept
+const SKILL_SRC = fs.readFileSync(path.join(ROOT, 'skill/diffnotes/SKILL.md'), 'utf8')
   .replaceAll('{{MAX_FILE_MB}}', String(MAX_FILE / MB)).replaceAll('{{MAX_VIDEO_MB}}', String(MAX_VIDEO / MB))
   .replaceAll('{{MAX_PULL_MB}}', String(MAX_PULL / MB)).replaceAll('{{MAX_FILES}}', String(MAX_FILES)).replaceAll('{{MAX_ANNOTATIONS}}', String(MAX_ANNOTATIONS))
+// the skill's version: the release plus a hash of the skill with those limits in it, so a skill changed between
+// releases (main deploys on every push) or a changed limit counts as newer too
+const SKILL_VERSION = `${VERSION}+${sha256(SKILL_SRC).slice(0, 8)}`
+const skill = (c: Context) => SKILL_SRC.replaceAll('{{HOST}}', host(c)).replaceAll('{{VERSION}}', SKILL_VERSION)
 app.get('/skill/SKILL.md', (c) => c.text(skill(c), 200, { 'content-type': 'text/markdown; charset=utf-8' }))
+// the skill's version (the release plus that hash): an installed copy compares its own with it and, when they differ,
+// asks the user to re-run install.sh (it never fetches and follows the server's copy itself)
+app.get('/skill/version', (c) => c.text(SKILL_VERSION))
 app.get('/install.sh', (c) => c.text(`#!/bin/sh
 # Installs the DiffNotes skill for Claude Code (~/.claude/skills), Codex and other Agent Skills tools (~/.agents/skills) and Cursor.
 set -e
 for d in "$HOME/.claude/skills" "$HOME/.agents/skills" $( [ -d "$HOME/.cursor" ] && echo "$HOME/.cursor/skills" ); do
   # rm: the same skill under its name before the rename (reviews42), which would stay installed beside it, never updated
-  mkdir -p "$d/diffnotes" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/diffnotes/SKILL.md" && echo "installed: $d/diffnotes" && rm -rf "$d/reviews42"
+  mkdir -p "$d/diffnotes" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/diffnotes/SKILL.md" && echo "installed: $d/diffnotes (${SKILL_VERSION})" && rm -rf "$d/reviews42"
 done
 [ -z "$REVIEWS42_TOKEN" ] || echo "Rename REVIEWS42_URL / REVIEWS42_TOKEN to DIFFNOTES_URL / DIFFNOTES_TOKEN in your shell profile: the skill reads only the new names."
 echo "Now set DIFFNOTES_TOKEN (make one at ${host(c)}/settings) in your shell profile."

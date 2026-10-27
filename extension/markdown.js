@@ -264,7 +264,12 @@
     u.search = u.hash = ''
     if (!u.pathname.endsWith('/')) u.pathname += '/'
     // ./ keeps it relative: /https://evil.example or /javascript:… without the slash would be a URL of its own
-    return new URL(`./${path.replace(/^\/+/, '')}`, u).href
+    // (a leading \ is a / too: \\evil.example would give …//evil.example, a protocol-relative redirect on some hosts)
+    const to = new URL(`./${String(path).replace(/^[\/\\]+/, '')}`, u), rest = to.pathname.slice(u.pathname.length)
+    // and under the preview's path: ../ (or %2e%2e/, or ..%2f for a host that decodes it) would climb out of …/pr-42/
+    // to another site on the same host; nor …//evil.example another way (/.//evil.example, /a/..//evil.example).
+    // A bad one: the preview itself
+    return to.pathname.startsWith(u.pathname) && !rest.startsWith('/') && !/%2f|%5c/i.test(rest) ? to.href : preview
   }
   // a deploy card: list items starting with a kind (`- migration: add_fee`) get that kind as a tag
   globalThis.dnDeploy = (src, resolve) => markdown(src, resolve).replace(/<li>(migration|env|flag|step|rollback)s?:\s*/gi,

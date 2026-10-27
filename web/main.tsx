@@ -940,7 +940,7 @@ function Admin({ user }: { user: User }) {
       <tfoot><tr><th colSpan={5}>all accounts</th><th className="num">{t.files}</th><th className="num">{bytes(t.upload_bytes)}</th><th />
         {price && <th className="num">{usd(monthly(t.upload_bytes, price, true))}</th>}<th /></tr></tfoot>
     </table></div>
-    <p className="hint">≈ / month: storage at {price ? `${price.name}'s` : 'list'} price, the total after the bucket's free {price?.free_gb ?? 0} GB; uploads and
+    <p className="hint">{price && `≈ / month: storage at ${price.name}'s price, the total after the bucket's free ${price.free_gb} GB. `}Uploads and
       downloads of files this small cost nothing extra on B2 and R2. All of today's files ({bytes(t.upload_bytes)}) a month at list prices
       as of {fmt(`${data.prices.as_of}T00:00`)}: {Object.values(data.prices.providers).map((p) => `${p.name} $${(p.gb_month * 1000).toFixed(2)}/TB ${usd(monthly(t.upload_bytes, p, true))}`).join(' · ')}
       {!price && (data.prices.storage === 'disk' ? ' (files are on this server\'s disk now: no bucket bill)' : ' (your own MinIO: no list price)')}.</p>

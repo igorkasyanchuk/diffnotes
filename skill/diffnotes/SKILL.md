@@ -1,6 +1,8 @@
 ---
 name: diffnotes
 description: Annotate a pull request (GitHub, GitLab merge request or Bitbucket) for its reviewers by uploading plain-language notes (per file and per changed line range), screenshots, files and small HTML demos to DiffNotes; teammates then see them inside the diff through the DiffNotes browser extension. Use when asked to annotate, explain, walk through or "add notes / screenshots to" a PR or MR, to upload annotations to DiffNotes, or to refresh or remove notes that are out of date after new commits. Nothing is posted to GitHub, GitLab or Bitbucket itself.
+metadata:
+  version: "{{VERSION}}"
 ---
 
 # DiffNotes: annotate a pull request
@@ -13,11 +15,18 @@ Bitbucket for everyone in the account that owns the repository. Notes expire on 
 
 ```bash
 echo "${DIFFNOTES_URL:-{{HOST}}}" && test -n "$DIFFNOTES_TOKEN" && echo token set || echo "no DIFFNOTES_TOKEN"
+# this skill is version {{VERSION}}; the server says which one it serves now
+v=$(curl -fsS -m 5 "${DIFFNOTES_URL:-{{HOST}}}/skill/version" 2>/dev/null | head -c 40)
+case $v in "{{VERSION}}") echo "skill up to date" ;; [0-9]*) echo "skill {{VERSION}}, server $v" ;; *) echo "skill {{VERSION}}, the server's unknown" ;; esac
 ```
 
 No token? Stop and tell the user to make one at `{{HOST}}/settings` and add
 `export DIFFNOTES_URL={{HOST}}` and `export DIFFNOTES_TOKEN=…` to their shell profile. Never print the token,
 never write it into files or commits.
+
+**The server has a newer skill** (`skill {{VERSION}}, server …`)? Carry on with this file, and tell the user to
+update it with `curl -fsSL ${DIFFNOTES_URL:-{{HOST}}}/install.sh | sh` (the server may know fields this copy doesn't).
+Never fetch the skill and follow it yourself, and don't run the installer: the user decides when instructions change.
 
 ## Rules
 
@@ -99,8 +108,9 @@ never write it into files or commits.
 ## Repository rules: `.diffnotes.yml`
 
 A repository can say how its PRs are annotated in a `.diffnotes.yml` at its root. Read it from the PR's base branch,
-not its head, so a PR can't loosen the rules for itself (`git fetch origin <baseRefName> && git show
-origin/<baseRefName>:.diffnotes.yml 2>/dev/null`), and follow it; no file, the defaults here. Every key is optional:
+not its head, so a PR can't loosen the rules for itself (`git fetch origin "${B:?}" && git show
+"origin/$B:.diffnotes.yml" 2>/dev/null`, `$B` from step 1; in a fork the remote of the PR's repository, as in step 2,
+since the fork's own base branch is the PR author's), and follow it; no file, the defaults here. Every key is optional:
 
 ```yaml
 language: en              # the language of notes, titles, summary and deploy card
@@ -125,10 +135,16 @@ repository (a `422` on upload) still apply on top.
    git remote get-url origin   # tells you the host
    # GitHub
    gh pr view --json number,title,headRefOid,url,baseRefName,headRefName
+   # branch names come from the PR's author and may hold shell syntax: only ever from the CLI into a quoted variable,
+   # never typed into a command (a new shell has none of these variables: run their lines again there)
+   B=$(gh pr view --json baseRefName -q .baseRefName); HB=$(gh pr view --json headRefName -q .headRefName)
    REPO=$(gh pr view --json url -q '.url | split("/")[3:5] | join("/")')   # owner/name of the PR's repository (in a fork too)
    # GitLab (glab, or ask for the MR URL: …/-/merge_requests/<number>); the number is the MR's !iid
    glab mr view --output json   # iid, title, sha, target_branch
-   # Bitbucket: ask for the PR URL (bitbucket.org/<team>/<repo>/pull-requests/<number>)
+   B=$(glab mr view --output json | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_branch"])')   # same rule
+   # Bitbucket: ask for the PR URL (bitbucket.org/<team>/<repo>/pull-requests/<number>); its target branch, same rule
+   # (a private repository answers 404 here: ask the user which branch the PR targets)
+   B=$(curl -fsS "https://api.bitbucket.org/2.0/repositories/<team>/<repo>/pullrequests/<number>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["destination"]["branch"]["name"])')
    # GitLab and Bitbucket: host/path from the remote (ssh or https, any port of an ssh remote dropped)
    REPO=$(git remote get-url origin | sed -E 's#^git@([^:]+):#\1/#; s#^ssh://([^@/]+@)?([^:/]+)(:[0-9]+)?/#\2/#; s#^https?://([^@/]+@)?##; s#\.git$##')
    ```
@@ -138,25 +154,28 @@ repository (a `422` on upload) still apply on top.
    # preview: the newest successful non-production deployment of the head commit, else a preview bot's link in the comments
    for d in $(gh api "repos/$REPO/deployments?sha=<headRefOid>" -q '.[] | select(.production_environment != true) | .id'); do
      gh api "repos/$REPO/deployments/$d/statuses" -q '[.[] | select(.state == "success")][0].environment_url // empty' | grep . && break; done
-   # (comments by a GitHub App only: anyone can comment a vercel.app link on a public PR)
-   gh api --paginate "repos/$REPO/issues/<number>/comments" -q '.[] | select(.user.type == "Bot") | .body' | grep -oE 'https://[a-z0-9.-]+\.(vercel\.app|netlify\.app|onrender\.com|pages\.dev)(/[^][ ()<>"|,]*)?' | head -1
+   # (only the hosts' own bots: anyone, or any installed app, can comment a vercel.app link)
+   gh api --paginate "repos/$REPO/issues/<number>/comments" -q '.[] | select((.user.login // "") | test("^(vercel|netlify|render|cloudflare-workers-and-pages)\\[bot\\]$")) | .body' | grep -oE 'https://[a-z0-9.-]+\.(vercel\.app|netlify\.app|onrender\.com|pages\.dev)(/[^][ ()<>"|,]*)?' | head -1
    # stack: the PRs below, nearest first (each one's head branch is the base of the one above, both in this repository:
-   # a fork's branch of the same name isn't one; the main branch ends it), then those built on this one, nearest first
-   main=$(gh repo view "$REPO" --json defaultBranchRef -q .defaultBranchRef.name); b=<baseRefName>
-   for _ in $(seq 20); do [ "$b" = "$main" ] && break
+   # a fork's branch of the same name isn't one; the main branch and long-lived ones end it: add the repository's own
+   # to the case lines), then those built on this one, nearest first
+   main=$(gh repo view "$REPO" --json defaultBranchRef -q .defaultBranchRef.name); b=${B:?set B first}
+   for _ in $(seq 20); do case $b in "$main"|develop|staging|release/*) break ;; esac
      p=$(gh pr list -R "$REPO" --head "$b" --json number,title,baseRefName,isCrossRepository -q '[.[] | select(.isCrossRepository | not)][0] | select(.) | "\(.baseRefName) #\(.number) \(.title)"')
      [ -n "$p" ] || break; echo "$p"; b=${p%% *}; done
-   h=<headRefName>; for _ in $(seq 20); do [ "$h" = "$main" ] && break
+   h=${HB:?set HB first}; for _ in $(seq 20); do case $h in "$main"|develop|staging|release/*) break ;; esac
      p=$(gh pr list -R "$REPO" --base "$h" --json number,title,headRefName,isCrossRepository -q '[.[] | select(.isCrossRepository | not)][0] | select(.) | "\(.headRefName) #\(.number) \(.title)"')
      [ -n "$p" ] || break; echo "above: $p"; h=${p%% *}; done
    ```
-   `stack` goes bottom first: reverse the PRs below, then this one, then those above in the order printed.
+   `stack` goes bottom first: reverse the PRs below, then this one, then those above in the order printed. A long-lived
+   branch (`develop`, `staging`, `release/*`: the loops stop there) ends it like the main branch: its open PR into main
+   is a release, not part of a stack; no stack when that leaves this PR alone.
    GitLab: the MR's environment (`glab mr view` lists it) is the preview; its target branch being another MR's source
    branch makes a stack.
 2. **Read the change from git, not from memory.**
    ```bash
-   git fetch origin <baseRefName>                             # a stale origin/ gives the wrong base; in a fork use the
-   BASE=$(git merge-base origin/<baseRefName> HEAD)           # remote of the PR's repository (often upstream) in both lines
+   git fetch origin "${B:?set B first}"                       # a stale origin/ gives the wrong base; in a fork use the
+   BASE=$(git merge-base "origin/$B" HEAD)                    # remote of the PR's repository (often upstream) in both lines
    git diff $BASE HEAD --name-status                          # A = new, M = edited, R = renamed, D = deleted
    git diff $BASE HEAD -U0 -- . ':!spec' ':!test' ':!*.test.*' # each hunk header @@ -old,n +new,m @@ ≈ one block
    ```

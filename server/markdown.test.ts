@@ -30,6 +30,13 @@ describe('preview links', () => {
     // never another host or scheme, whatever follows the slash
     expect(url('https://x.dev/', '/https://evil.example/a')).toBe('https://x.dev/https://evil.example/a')
     expect(url('https://x.dev/', '/javascript:alert(1)')).toBe('https://x.dev/javascript:alert(1)')
+    // nor above the preview's own path
+    expect(url('https://o.github.io/repo/pr-42/', '/../../other/')).toBe('https://o.github.io/repo/pr-42/')
+    expect(url('https://o.github.io/repo/pr-42/', '/%2e%2e/a')).toBe('https://o.github.io/repo/pr-42/')
+    expect(url('https://o.github.io/repo/pr-42/', '/..%2f..%2fother/')).toBe('https://o.github.io/repo/pr-42/')
+    expect(url('https://x.dev/', '/\\\\evil.example/a')).toBe('https://x.dev/evil.example/a')
+    expect(url('https://x.dev/', '/.//evil.example/a')).toBe('https://x.dev/')
+    expect(url('https://o.github.io/repo/pr-42?x=1', '/a/..//evil.example')).toBe('https://o.github.io/repo/pr-42?x=1')
   })
 })
 

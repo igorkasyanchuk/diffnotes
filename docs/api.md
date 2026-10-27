@@ -17,6 +17,7 @@ session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `POST` | `/mcp` | the same notes for MCP clients (see [MCP](#mcp)); `GET` answers `405` |
 | `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
+| `GET` | `/skill/version` | the skill's version (the release plus a hash of the skill as this server serves it), which installed copies compare with their own |
 | `GET` | `/healthz` | `ok` when the database answers (local callers only with `CLOUDFLARE_ONLY=1`) |
 
 `<repository>` is `owner/name` on GitHub (`rails/rails`) and `host/path` on GitLab and Bitbucket:

@@ -12,9 +12,10 @@ export const EXT_TYPES: Record<string, string> = {
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data')
 export const UPLOADS = path.join(DATA_DIR, 'uploads')
-// a blank or bad value is the default, like the MAX_* limits: 0 would expire every upload at once, NaN fail every upload
+// a blank or bad value is the default, like the MAX_* limits: 0 would expire every upload at once, NaN (or Infinity, 1e9:
+// past the last date there is) fail every upload
 const retention = Number(process.env.RETENTION_DAYS || 365)
-export const RETENTION_DAYS = retention > 0 ? retention : 365
+export const RETENTION_DAYS = retention > 0 && retention < 1e6 ? retention : 365
 fs.mkdirSync(UPLOADS, { recursive: true })
 
 export const DB_FILE = path.join(DATA_DIR, 'diffnotes.db')

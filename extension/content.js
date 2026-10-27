@@ -79,7 +79,8 @@
   // the PR's preview deploy (https only), at a path on it (a note's try: /checkout, the server keeps it a path; the box: '',
   // the preview itself, so one deployed under a path (…/pr-42/) isn't cut to its host's root)
   const previewLink = (preview, path, text = 'try it on the preview ↗') => {
-    if (!/^https:\/\//i.test(preview ?? '') || !URL.canParse(preview) || path == null) return null
+    // another connected server's reply is checked too: a non-string or bad value draws no link instead of breaking the box
+    if (typeof preview !== 'string' || !/^https:\/\//i.test(preview) || !URL.canParse(preview) || typeof path !== 'string') return null
     const a = el('a', 'dn-link dn-try', text)
     a.href = dnPreviewUrl(preview, path)
     a.target = '_blank'
@@ -375,6 +376,7 @@
       const open = el('a', 'dn-link', many ? `open on ${new URL(p.server).host}` : 'open in DiffNotes')
       open.href = `${p.server}/pulls/${p.id}`
       open.target = '_blank'
+      open.rel = 'noopener noreferrer'
       return open
     })
     const removes = pull.pulls.filter((p) => p.can_delete).map((p) => {
@@ -402,12 +404,15 @@
         setTimeout(() => { copy.textContent = 'copy summary' }, 1500)
       })
     })
-    const preview = previewLink(pull.pulls.find((p) => p.preview)?.preview, '', 'preview ↗')
+    // the first server's valid one: a bad value from one doesn't hide another's
+    const preview = pull.pulls.map((p) => previewLink(p.preview, '', 'preview ↗')).find(Boolean)
     bar.append(title, ...changedLink(), notesSwitch(), expand, collapse, ...(summaries.length ? [copy] : []), ...(preview ? [preview] : []), ...opens, ...removes)
     // sum: what the summary switch hides (stack, deploy card, risk map, summary); a server's error and notes not placed in the diff always show
     const body = el('div', 'dn-box-body'), sum = el('div', 'dn-box-sum')
     // a stacked PR: the stack, bottom first, this one marked; the others link to their own diff (where their notes show)
-    const stack = pull.pulls.find((p) => p.stack?.length)?.stack
+    // (a list of PR numbers, else none: another server's string or null entry would throw and break the box, and a
+    // number that isn't one would put any path of this site in the link)
+    const stack = pull.pulls.map((p) => p.stack).find((s) => Array.isArray(s) && s.length && s.every((x) => Number.isSafeInteger(x?.number)))
     if (stack) {
       const row = el('div', 'dn-stack')
       row.append(el('span', 'dn-risks-title', 'Stack'))
@@ -740,7 +745,10 @@
     const res = await chrome.runtime.sendMessage({ type: 'pull', repo: m.repo, number: m.number }).catch(() => null)
     if (current !== key) return
     if (res?.pulls?.length) {
-      const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number }))
+      // another connected server's notes are checked too: one that isn't an object with a path is left out, a body is
+      // text (a null note or body would throw below and break every server's box)
+      const pulls = res.pulls.map((p) => ({ ...p, repo: m.repo, number: m.number,
+        annotations: p.annotations.filter((a) => typeof a?.path === 'string').map((a) => ({ ...a, body: String(a.body ?? '') })) }))
       pull = { pulls, errors: res.errors, annotations: pulls.flatMap((p) => p.annotations.map((a) => ({ ...a, server: p.server, preview: p.preview, canDelete: a.can_delete ?? p.can_delete,
         fold: hash([key, p.server, a.path, a.side, a.line, a.end_line, a.risk, a.title, a.body].join('\n')),
         anchor: hash([key, p.server, a.path, a.side, a.line].join('\n')) }))) }
