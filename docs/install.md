@@ -100,6 +100,7 @@ This table is the one reference for configuration: everything is an environment 
 | `BUGSINK_DSN` | unset | your own Sentry-compatible DSN (Bugsink, GlitchTip, Sentry); 500s are reported with the route pattern only |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | unset | a GitHub OAuth app: **sign in with GitHub** ([accounts](accounts.md#sign-in-with-github)); callback `<PUBLIC_URL>/auth/github/callback` |
 | `DEMO_PR` | unset | `owner/name#12` or the PR's URL: a live demo for visitors. That PR's notes are readable by every signed-in user and never expire, as long as its last upload, its title, summary, deploy card, preview and stack and every note and file on it are by super admins (a teammate's upload there turns it off); `/demo` explains the steps |
+| `EXTENSION_IDS` | unset | more browser extensions **Sign in and connect** may hand a token to, besides the store's (Chrome Web Store `fmnbgmeahjhfakpcmhimjjjplimdiibd`, Firefox `diffnotes@diffnotes.dev`, always allowed): Chrome ids (32 letters `a`–`p`, from `chrome://extensions`, e.g. an unpacked copy) and Firefox add-on ids, comma separated. Pasting a token always works |
 | `ALLOW_SIGNUP` | unset | `1` with GitHub sign-in: anyone with a GitHub account may sign up and gets a team account of their own |
 | **File storage** ([storage](storage.md)) | | |
 | `STORAGE_TYPE` | `disk` | `disk` (`DATA_DIR/uploads`), `b2` (Backblaze B2), `r2` (Cloudflare R2), `s3` (AWS S3) or `minio` (MinIO or any other S3-compatible service) |

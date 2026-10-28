@@ -16,6 +16,9 @@
   Settings to revoke it. A token only reads and writes notes and files (`/api/v1/*`, `/files/*`, `/mcp`): it can't make
   more tokens, change the password or use `/admin`. `/mcp` takes the token only, never the session cookie, and refuses
   requests whose `Origin` is another site.
+- **Extension sign-in** (`/connect`): **allow** gives a one-time code (PKCE, two minutes, kept in memory) only to the
+  redirect address of the store's extensions (or one in `EXTENSION_IDS`); 20 allows per user and 20 failed code trades per IP in 10
+  minutes. The token it makes is an ordinary one (Settings lists it); the extension's **Remove** deletes it.
 - **Login throttling**: per IP and email one failure a second and 10 in 10 minutes; per IP 100, per email 50 in 10
   minutes (high enough that a stranger can't lock you out). Accepting an invitation as an existing user uses the same
   budgets; an open link's email form makes at most 20 new users per IP an hour (through GitHub, 30 sign-ins per IP in

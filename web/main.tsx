@@ -214,6 +214,7 @@ const Footer = () => <footer className="foot">
   <a href="/skill/SKILL.md">agent skill</a>
   <Link to="/demo">demo</Link>
   <Link to="/badge">badge</Link>
+  <Link to="/docs">docs</Link>
   <Link to="/privacy">privacy</Link>
   <a href={SOURCE} target="_blank" rel="noreferrer">source</a>
 </footer>
@@ -271,6 +272,45 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
 
 const GitHubButton = ({ next, children }: { next?: string; children: ReactNode }) =>
   <a className="btn gh-signin" href={`/auth/github${next ? `?next=${encodeURIComponent(next)}` : ''}`}><GitHubMark size={18} />{children}</a>
+
+// The DiffNotes popup's "Sign in and connect" opens this page in the browser's sign-in window (app.ts /api/connect):
+// Allow sends a one-time code back to the extension, which trades it for its own token. Nothing to copy.
+function Connect({ me }: { me: Me }) {
+  const q = new URLSearchParams(location.search), redirect = q.get('redirect_uri') ?? '', state = q.get('state') ?? ''
+  const name = (q.get('name') ?? '').slice(0, 40) // anyone can link here: no long text of theirs on this page
+  const [known, setKnown] = useState<boolean>(), [problem, setProblem] = useState(''), [sent, setSent] = useState(false)
+  useEffect(() => { api(`/api/connect?${new URLSearchParams({ redirect_uri: redirect })}`).then(() => setKnown(true), (e) => { setKnown(false); setProblem(e.message) }) }, [redirect])
+  const { submit, error, busy } = useSubmit(async () => {
+    const r = await api<{ location: string }>('/api/connect', { redirect_uri: redirect, state, challenge: q.get('challenge'), name })
+    setSent(true)
+    location.replace(r.location) // the browser catches this address and closes the window
+  })
+  // only to an address the server knows (checked above): never an open redirect
+  const cancel = () => location.replace(`${redirect}?${new URLSearchParams({ error: 'access_denied', state })}`)
+  if (known === undefined) return null
+  return <div className="narrow connect">
+    <p className="prompt">$ connect extension</p>
+    <h1>connect the DiffNotes extension?</h1>
+    {!known ? <><div className="error">{problem}</div><p className="hint">A token always works: make one on <Link to="/settings">settings</Link> and
+      paste it in the popup under <b>Use a token instead</b>.</p></>
+      : sent ? <p>Connected. This window closes on its own; if it doesn't, close it and open the DiffNotes popup.</p>
+      : <form className="stack" onSubmit={submit}>
+        <p>Your browser{name ? <> ({name})</> : ''} asks to show your DiffNotes notes inside pull request diffs.</p>
+        <div className="connect-who"><b>{me.user.email}</b><span className="hint">{me.accounts.map((a) => a.name).join(', ') || 'no account yet'}</span></div>
+        <ul className="connect-can">
+          <li>gets its own token: <b>Settings › Tokens</b> lists it, delete it there to disconnect</li>
+          <li>like every token, it reads and writes notes and files of pull requests in your accounts; never your password, other tokens or server admin</li>
+          <li>the extension uses it to show notes and, when you ask, remove the ones you may remove</li>
+        </ul>
+        <p className="hint">Only press Allow if you just pressed <b>Sign in and connect</b> in the DiffNotes popup.</p>
+        {error && <div className="error">{error}</div>}
+        <div className="row">
+          <button type="button" className="btn" onClick={cancel}>cancel</button>
+          <button className="primary" disabled={busy} autoFocus>{busy ? 'connecting…' : 'allow'}</button>
+        </div>
+      </form>}
+  </div>
+}
 
 function Login({ sign }: { sign: SignIn }) {
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
@@ -370,8 +410,8 @@ function Privacy() {
     <h2>The browser extension</h2>
     <ul>
       <li>It stores, in your browser only (<code>chrome.storage.local</code>), the addresses of the DiffNotes servers you connect and the
-        access token you paste for each, plus which notes you folded, whether notes are switched off, how notes look, and, for pull requests with notes you
-        opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token.</li>
+        access token for each (pasted, or made for it when you press Sign in and connect and allow it on the server), plus which notes you folded, whether notes are switched off, how notes look, and, for pull requests with notes you
+        opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token, and on the server too when the extension made it.</li>
       <li>It talks only to the servers you connect. On a GitHub, GitLab or Bitbucket pull request page it sends that server the
         repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.
         When you remove a note (only offered to its author and account admins), it asks that server to delete it.</li>
@@ -392,6 +432,86 @@ function Privacy() {
     <h2>Contact</h2>
     <p>Questions or requests: open an issue at <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">{SOURCE.replace('https://', '')}/issues</a>,
       or contact the operator of your DiffNotes server about the data it holds.</p>
+  </div>
+}
+
+// /docs: the short guide (setup, the agent, the diff, tips, when notes don't show); the full docs stay on GitHub
+const DOCS = `${SOURCE}/blob/main/docs`
+const KEYS: [string, string][] = [['j / k', 'next / previous note'], ['n', 'notes on / off'], ['o', 'open the current note’s attachment'], ['?', 'all the keys'], ['Esc', 'close a window']]
+function Docs() {
+  const origin = location.origin, own = origin !== 'https://diffnotes.dev'
+  return <div className="docs">
+    <h1>docs</h1>
+    <p>DiffNotes puts your coding agent's notes next to the changed lines of a pull request: why a block changed, what is risky,
+      before / after screenshots, a small live demo. Your agent writes them, the browser extension shows them on GitHub, GitLab and
+      Bitbucket. Nothing is posted to the PR itself.</p>
+    <nav className="docs-toc">{[['start', 'get started'], ['agent', 'the agent'], ['diff', 'in the diff'], ['rules', 'repository rules'],
+      ['team', 'your team'], ['tips', 'tips'], ['trouble', 'when notes don’t show']].map(([id, t]) => <a key={id} href={`#${id}`}>{t}</a>)}</nav>
+
+    <h2 id="start">get started</h2>
+    <ol className="docs-steps">
+      <li><b>Add the extension.</b> <AddToChrome /> <span className="hint">Edge, Brave and Arc install it from the Chrome Web Store too;
+        Firefox and Safari: <a href={`${DOCS}/extension.md`} target="_blank" rel="noreferrer">extension docs</a>.</span></li>
+      <li><b>Connect it.</b> Open its popup, press <b>Sign in and connect</b>{own && <> with <code>{origin}</code> as the server</>}, sign in
+        and press <b>allow</b>. That's all: no token to copy. (Safari: make a token on <Link to="/settings">settings</Link> and paste it.)</li>
+      <li><b>Install the agent skill</b> (Claude Code, Codex, Cursor and other agents that read skills):
+        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} /></li>
+      <li><b>Add your repository</b> to your account (dashboard → your account → repositories). Only its members see its notes.</li>
+    </ol>
+
+    <h2 id="agent">the agent</h2>
+    <p>On a branch with an open pull request, ask your agent:</p>
+    <Code wrap text={AGENT_PROMPT} />
+    <ul>
+      <li>Ask again after new commits: it updates its notes and removes the ones whose lines are gone.</li>
+      <li>Say what you want looked at: “mark anything that touches money as high risk”, “add a deploy card”, “record the new checkout flow”.</li>
+      <li>UI changes: ask for <b>before / after</b> screenshots (they show as one image with a drag handle) or a short screen recording.</li>
+      <li>A small <code>.html</code> demo runs inside the note in a sandbox: no network, no access to the page.</li>
+      <li>Flowcharts: a <code>```mermaid</code> block with <code>flowchart LR</code> is drawn in place.</li>
+    </ul>
+
+    <h2 id="diff">in the diff</h2>
+    <ul>
+      <li>The <b>box above the first file</b> has the summary, the deploy card and <b>where to look hardest</b> (the risky notes, highest first: click one to jump to it).</li>
+      <li><b>expand ⤢</b> opens the whole summary in a large window; <b>copy summary</b> copies it as Markdown for the PR description.</li>
+      <li>Once the box scrolls away, a <b>dock</b> at the bottom keeps the note count, the notes switch and the summary.</li>
+      <li>Notes added or changed since your last visit get a <b>new</b> / <b>updated</b> tag.</li>
+      <li>Click a note's header to fold it; it stays folded until the note changes.</li>
+    </ul>
+    <table className="docs-keys"><tbody>{KEYS.map(([k, what]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{what}</td></tr>)}</tbody></table>
+
+    <h2 id="rules">repository rules</h2>
+    <p>Put a <code>.diffnotes.yml</code> in the repository: the skill reads it from the PR's base branch, so a PR can't loosen its own rules.</p>
+    <Code text={'language: en\nrisk: required     # every note rates its risk\ndeploy: required   # always a deploy card\nskip: [docs/**]    # never annotated\nscreenshots: [web/**]'} />
+    <p className="hint">All keys: <a href={`${DOCS}/skill.md`} target="_blank" rel="noreferrer">skill docs</a>.</p>
+
+    <h2 id="team">your team</h2>
+    <ul>
+      <li>Invite teammates from your account page: by email, GitHub login, or an open link that expires.</li>
+      <li><b>owner</b> and <b>admin</b> manage people and repositories; a <b>member</b> reads, uploads and removes their own notes.</li>
+      <li>Each person connects their own browser and their own agent: every note shows who wrote it.</li>
+      <li>One extension can connect several servers (a client's, your own): their notes show together.</li>
+    </ul>
+
+    <h2 id="tips">tips</h2>
+    <ul>
+      <li><b>Notes look</b> in the popup: loud, sticky, quiet, compact, terminal, paper… The box and the summary follow it too.</li>
+      <li>Busy diff? Switch notes off with <kbd>n</kbd> or the switch, or fold the summary by clicking the box's title.</li>
+      <li>Put the <Link to="/badge">badge</Link> in your README so contributors know PRs come with notes.</li>
+      <li>Want to see it first? The <Link to="/demo">live demo</Link> is a real PR with notes.</li>
+    </ul>
+
+    <h2 id="trouble">when notes don't show</h2>
+    <ul>
+      <li>Open the PR's <b>Files changed</b> tab (GitHub), <b>Changes</b> (GitLab) or <b>Diff</b> (Bitbucket).</li>
+      <li>The extension's popup should list this server with your email. If it says the token was rejected, connect again.</li>
+      <li>The repository must be in an account you belong to, under the same name (<code>owner/name</code>, or <code>host/path</code> for GitLab and Bitbucket).</li>
+      <li>A note whose line changed since it was written is listed in the box under “not shown in the diff yet”.</li>
+      <li>Two copies of the extension (the store one and one loaded from a folder)? Keep one.</li>
+      {own && <li>Sign in and connect closes without connecting? This server's operator lists the extensions it trusts in <code>EXTENSION_IDS</code>
+        (<a href={`${DOCS}/install.md`} target="_blank" rel="noreferrer">install docs</a>); a token works meanwhile.</li>}
+    </ul>
+    <p className="hint">Everything else: <a href={`${SOURCE}#readme`} target="_blank" rel="noreferrer">the full docs on GitHub</a>.</p>
   </div>
 }
 
@@ -808,9 +928,10 @@ function Welcome({ me }: { me: Me }) {
       </>)}
       {item('extension', 'add the browser extension', 'It shows the notes next to the changed lines on GitHub, GitLab and Bitbucket. Nothing is posted to the PR.', <>
         <p>1. <AddToChrome primary /> <span className="hint">Edge, Brave and Arc too; Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox" target="_blank" rel="noreferrer">load it from the repo</a></span></p>
-        <p>2. pin it (the puzzle icon in the toolbar), then: {!tokens.extension && <button type="button" className="primary" disabled={making} onClick={make('extension', 'browser extension')}>make a token for the extension</button>}</p>
-        {tokens.extension && <><p className="hint">open the extension's popup, paste this one line into its Server field and press Connect:</p>
-          <Code text={JSON.stringify({ server: location.origin, token: tokens.extension })} /></>}
+        <p>2. pin it (the puzzle icon in the toolbar), open its popup and press <b>Sign in and connect</b>
+          {location.origin !== 'https://diffnotes.dev' && <> with <code>{location.origin}</code> as the server</>}, then <b>allow</b> on the page it opens.</p>
+        <p className="hint">Safari, or a browser without a sign-in window: {!tokens.extension ? <button type="button" className="btn small" disabled={making} onClick={make('extension', 'browser extension')}>make a token for the extension</button> : 'paste this one line into the popup\'s Server field and press Connect:'}</p>
+        {tokens.extension && <Code text={JSON.stringify({ server: location.origin, token: tokens.extension })} />}
       </>)}
       {item('notes', 'annotate your first pull request', "On a branch with an open pull request, ask your agent this. Then open the PR's “Files changed”: the notes are there.", <>
         <Code wrap text={AGENT_PROMPT} />
@@ -1007,18 +1128,20 @@ function App() {
   // the tab's title; the server writes the public pages' own into the HTML too (app.ts PUBLIC_PAGES), for crawlers
   useEffect(() => {
     const t = ({ '/dashboard': 'dashboard', '/welcome': 'setup', '/settings': 'settings', '/admin': 'server admin', '/login': 'sign in',
-      '/demo': 'Live demo', '/badge': 'Badge', '/privacy': 'Privacy' } as Record<string, string>)[path] // the public ones as app.ts writes them
+      '/demo': 'Live demo', '/connect': 'connect the extension', '/docs': 'Docs', '/badge': 'Badge', '/privacy': 'Privacy' } as Record<string, string>)[path] // the public ones as app.ts writes them
       ?? (path.startsWith('/accounts/') ? 'account' : path.startsWith('/pulls/') ? 'pull request' : path.startsWith('/invite/') ? 'invitation' : '')
     document.title = t ? `${t} · DiffNotes` : 'DiffNotes · AI pull request notes, right in the diff'
   }, [path])
   if (me === undefined) return null
   const m = (re: RegExp) => path.match(re)?.[1]
+  // the extension's sign-in window: no sidebar, it is small
+  if (me && path === '/connect') return <PublicLayout signedIn signup={sign.signup} demo={false}><Connect me={me} /><Toaster /></PublicLayout>
   if (!me || !APP_PATHS.test(path)) {
     const invite = m(/^\/invite\/([\w-]+)$/)
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
-    const login = !me && (path === '/login' || APP_PATHS.test(path))
+    const login = !me && (path === '/login' || path === '/connect' || APP_PATHS.test(path))
     return <PublicLayout signedIn={!!me} signup={sign.signup} demo={!!sign.demo}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
-      : path === '/privacy' ? <Privacy /> : path === '/badge' ? <BadgePage />
+      : path === '/privacy' ? <Privacy /> : path === '/docs' ? <Docs /> : path === '/badge' ? <BadgePage />
       : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }} />
       : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}<Toaster /></PublicLayout>
   }

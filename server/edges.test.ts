@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -163,6 +164,80 @@ describe('people', () => {
     const blocked = throttle('spray:0', 1, 600_000)
     vi.useRealTimers() // before the expect: a failure must not leave the rest of the file on fake time
     expect(blocked).toBe(false)
+  })
+})
+
+describe('extension sign-in (/connect)', () => {
+  const chrome = 'https://fmnbgmeahjhfakpcmhimjjjplimdiibd.chromiumapp.org/'
+  const firefox = `https://${createHash('sha1').update('diffnotes@diffnotes.dev').digest('hex')}.extensions.allizom.org/`
+  const verifier = 'v'.repeat(50), challenge = createHash('sha256').update(verifier).digest('base64url'), state = 's'.repeat(20)
+  const allow = async (redirect_uri = chrome, extra = {}) => {
+    const r = await call('/api/connect', { cookie: dev, body: { redirect_uri, state, challenge, name: 'Chrome on macOS\u0007', ...extra } })
+    return { ...r, code: r.status === 200 ? new URL(r.data.location).searchParams.get('code')! : '' }
+  }
+  const trade = (code: string, v = verifier, redirect_uri = chrome) =>
+    call('/api/v1/connect/token', { body: { code, verifier: v, redirect_uri }, headers: { 'sec-fetch-site': 'cross-site' } })
+
+  it('knows only the listed extensions, and only a signed-in browser may allow one', async () => {
+    const check = (uri: string, o = {}) => call(`/api/connect?redirect_uri=${encodeURIComponent(uri)}`, o)
+    expect((await check(chrome, { cookie: dev })).status).toBe(200)
+    expect((await check(firefox, { cookie: dev })).status).toBe(200)
+    expect((await check(`https://${'a'.repeat(32)}.chromiumapp.org/`, { cookie: dev })).status).toBe(400)
+    expect((await check(`${chrome}x`, { cookie: dev })).status).toBe(400)
+    expect((await check('', { cookie: dev })).data.error).toMatch(/DiffNotes popup/) // opened by hand
+    expect((await check(chrome)).status).toBe(401)
+    expect((await check(chrome, { token })).status).toBe(401) // tokens never reach /api/connect
+    expect((await allow('https://evil.example/')).status).toBe(400)
+    expect((await allow(chrome, { state: 'short' })).status).toBe(400)
+    expect((await allow(chrome, { challenge: 'x' })).status).toBe(400)
+  })
+
+  it('trades a one-time code and its PKCE verifier for a token, once', async () => {
+    const first = await allow()
+    const back = new URL(first.data.location)
+    expect(`${back.origin}${back.pathname}`).toBe(chrome)
+    expect(back.searchParams.get('state')).toBe(state)
+    expect((await trade(first.code, 'w'.repeat(50))).status).toBe(400) // wrong verifier: the code is gone too
+    expect((await trade(first.code)).status).toBe(400)
+    expect((await trade((await allow()).code, verifier, firefox)).status).toBe(400) // another redirect than allowed
+    expect((await trade((await allow()).code, 'short')).status).toBe(400)
+    // a code lives two minutes
+    const late = (await allow()).code, t = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(t + 121_000)
+    const expired = await trade(late)
+    vi.restoreAllMocks() // before the expect: a failure must not leave the clock stopped for the rest of the file
+    expect(expired.status).toBe(400)
+
+    const ok = await trade((await allow()).code)
+    expect(ok.status).toBe(200)
+    expect(ok.data.user.email).toBe('dev@example.com')
+    expect((await call('/api/v1/me', { token: ok.data.token })).data.user.email).toBe('dev@example.com')
+    // named after the browser, control characters dropped, listed on Settings
+    expect((await call('/api/tokens', { cookie: dev })).data.map((t: { name: string }) => t.name)).toContain('browser extension · Chrome on macOS')
+    // the extension's Remove deletes its own token; a cookie has none to delete
+    expect((await call('/api/v1/token', { cookie: dev, method: 'DELETE' })).status).toBe(400)
+    expect((await call('/api/v1/token', { token: ok.data.token, method: 'DELETE' })).status).toBe(200)
+    expect((await call('/api/v1/me', { token: ok.data.token })).status).toBe(401)
+  })
+
+  it('refuses a code for a user deleted meanwhile, and too many tokens', async () => {
+    const { cookie } = await invite(accountId, 'gone@example.com', 'gone-password')
+    const code = new URL((await call('/api/connect', { cookie, body: { redirect_uri: chrome, state, challenge } })).data.location).searchParams.get('code')!
+    expect((await call('/api/me', { cookie, method: 'DELETE', body: { password: 'gone-password' } })).status).toBe(200)
+    expect((await trade(code)).status).toBe(400)
+    const many = await invite(accountId, 'many@example.com', 'many-password')
+    const late = new URL((await call('/api/connect', { cookie: many.cookie, body: { redirect_uri: chrome, state, challenge } })).data.location).searchParams.get('code')!
+    for (let n = 0; n < 50; n++) await call('/api/tokens', { cookie: many.cookie, body: {} })
+    expect((await call('/api/connect', { cookie: many.cookie, body: { redirect_uri: chrome, state, challenge } })).status).toBe(409)
+    expect((await trade(late)).status).toBe(409)
+  })
+
+  it('throttles guessed codes per address', async () => {
+    for (let n = 0; n < 20; n++) await trade(`guess-${n}`)
+    expect((await trade('guess')).status).toBe(429)
+    // and Allow per user: the codes live in memory
+    for (let n = 0; n < 20; n++) await allow()
+    expect((await allow()).status).toBe(429)
   })
 })
 

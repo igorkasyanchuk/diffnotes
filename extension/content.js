@@ -2,6 +2,14 @@
 // apply() runs again whenever the page renders more of the diff (they all render lazily) and only adds what is missing.
 ;(() => {
   let current = '', pull = null, error = null, observer = null, timer = 0, seen = null
+  // Two copies can run on one page: an update or reload leaves the old one behind, or the store and an unpacked copy are
+  // both installed. Each handled every delegated click (show more toggled twice: nothing happened) and drew its own box,
+  // so one copy owns the page (<html data-dn-owner>): the one that got notes for this PR last, else the first with an
+  // error to show. The others draw nothing and handle no events, but keep checking each PR. A copy with no server
+  // connected never owns it, so it can't silence the one that has notes.
+  const me = Math.random().toString(36).slice(2)
+  const mine = () => document.documentElement.dataset.dnOwner === me
+  const onPage = (type, f, capture) => document.addEventListener(type, (e) => { if (mine()) f(e) }, capture)
   // Notes folded by hand stay folded after a reload while their content is the same: keyed by a hash of the PR and the
   // note (a.fold, set in check()), not its id (a re-upload makes new ids), so a note that changed opens again. Kept
   // FOLD_DAYS from the fold (shorter than the default 365 days retention: a fold this old is let go). Every tab keeps its copy current through onChanged.
@@ -203,7 +211,7 @@
   const files = () => site.files()
 
   function apply() {
-    if (!pull && !error) return
+    if (!pull && !error || !mine()) return
     const list = files()
     if (error) return renderBox(null, list)
     const placed = new Set()
@@ -310,7 +318,9 @@
       d.dataset.key = box.dataset.key
       // the page may re-render the diff and a new box take this one's place with the same key: always the live one
       const live = () => document.getElementById('dn-box') ?? box
-      const summary = el('button', 'dn-pill-btn', 'summary'), top = el('button', 'dn-pill-btn', '↑')
+      const summary = el('button', 'dn-pill-btn', 'summary'), top = el('button', 'dn-pill-btn', '↑'), big = el('button', 'dn-pill-btn', '⤢')
+      big.title = 'The summary in a large window'
+      big.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); bigSummary() })
       top.title = 'Back to the DiffNotes box'
       summary.addEventListener('click', () => {
         const open = document.getElementById('dn-pop')
@@ -331,7 +341,8 @@
         document.body.append(pop)
       })
       top.addEventListener('click', () => { document.getElementById('dn-pop')?.remove(); live().scrollIntoView({ behavior: 'smooth', block: 'start' }) })
-      d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), ...changedLink(), notesSwitch(), summary, top)
+      d.replaceChildren(el('span', 'dn-badge', 'DN'), el('b', '', `${pull.annotations.length} notes`), ...changedLink(), notesSwitch(), summary,
+        ...(box.querySelector('.dn-box-sum') ? [big] : []), top)
     }
     // watch the box's header bar: once it is above the viewport the dock takes over, even if the tall summary still shows
     const bar = box.firstElementChild
@@ -461,6 +472,11 @@
     if (sum.childElementCount) {
       body.append(sum)
       bar.insertBefore(toggle('summary'), bar.querySelector('.dn-switch').nextSibling)
+      const big = el('button', 'dn-link', 'expand ⤢')
+      big.type = 'button'
+      big.title = 'The summary in a large window'
+      big.addEventListener('click', bigSummary)
+      bar.insertBefore(big, collapse.nextSibling)
       title.addEventListener('click', () => setNoSummary(!noSummary))
     } else title.classList.add('dn-no-sum')
     for (const e of pull.errors) body.append(el('div', 'dn-hint', e))
@@ -482,7 +498,7 @@
     document.querySelectorAll('.dn-note > .dn-body:not([data-dn-measured]), .dn-summary:not([data-dn-measured])').forEach(clamp)
   }
   function clamp(b) {
-    if (!b || b.classList.contains('dn-open')) return
+    if (!b || b.classList.contains('dn-open') || b.closest('.dn-sum-big')) return // the large summary shows all of it
     if (!b.offsetParent) return void delete b.dataset.dnMeasured
     b.dataset.dnMeasured = ''
     let more = b.nextElementSibling?.classList.contains('dn-more') ? b.nextElementSibling : null
@@ -497,14 +513,38 @@
     }
     if (!long && more) more.remove()
   }
+  // The box's summary (stack, deploy card, risk map, summary) in a large window: all of it at full height, images bigger.
+  // A copy, like the dock's pop: delegated clicks (jump, file links, images) work in it; a click outside or Esc closes it.
+  function bigSummary() {
+    const sum = document.querySelector('#dn-box .dn-box-sum')
+    if (!sum) return
+    document.querySelector('.dn-sum-big')?.remove()
+    const box = el('div', 'dn-lightbox dn-sum-big'), doc = el('div', 'dn-doc dn-sum-doc'), head = el('div', 'dn-bar'), close = el('button', 'dn-link', 'close ✕')
+    close.type = 'button'
+    close.addEventListener('click', () => box.remove())
+    const title = pull.pulls.map((p) => p.title).find((t) => typeof t === 'string' && t)
+    head.append(el('span', 'dn-badge', 'DN'), el('b', 'dn-sum-title', title ? `Summary · ${title}` : 'Summary'), close)
+    const copy = sum.cloneNode(true), body = el('div', 'dn-doc-body'), imgs = copy.querySelectorAll('img')
+    // an image still on its way in the box shows up in the copy once it lands
+    sum.querySelectorAll('img').forEach((o, i) => { if (!o.src) o.addEventListener('load', () => { imgs[i].src = o.src }, { once: true }) })
+    copy.querySelectorAll('.dn-more, .dn-demo').forEach((n) => n.remove()) // a cloned demo frame never gets its HTML; its file link still opens it
+    copy.querySelectorAll('.dn-clamped, .dn-open').forEach((n) => n.classList.remove('dn-clamped', 'dn-open'))
+    copy.querySelectorAll('iframe.dn-video').forEach(playIn)
+    body.append(copy)
+    doc.append(head, body)
+    box.append(doc)
+    box.addEventListener('click', (e) => { if (e.target === box) box.remove() })
+    document.body.append(box)
+    close.focus()
+  }
   // jump to the note in the diff (or in the box when it isn't placed), turning notes on if they were off
   function jump(i) {
     if (hidden) setHidden(false)
-    document.getElementById('dn-pop')?.remove()
+    document.querySelectorAll('#dn-pop, .dn-sum-big').forEach((n) => n.remove())
     reveal(document.querySelector(`.dn-row [data-dn="${i}"], .dn-file[data-dn="${i}"], #dn-box [data-dn="${i}"]`), true)
   }
   // risk map and "changed" link; a note's link to another note ([text](#note:path:line), markdown.js), resolved among this PR's notes
-  document.addEventListener('click', (e) => {
+  onPage('click', (e) => {
     const i = e.target.closest?.('[data-dn-jump]')?.dataset.dnJump
     if (i != null) return jump(i)
     const ref = e.target.closest?.('a[data-dn-note]')?.dataset.dnNote
@@ -557,7 +597,7 @@
     box.addEventListener('click', () => box.remove())
     document.body.append(box)
   }
-  document.addEventListener('keydown', (e) => {
+  onPage('keydown', (e) => {
     if (!pull || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
     // composedPath: an input in a shadow root reaches the document as its host. A checkbox (the "Viewed" box) takes no typing
     const t = e.composedPath()[0]
@@ -572,7 +612,7 @@
     e.stopImmediatePropagation()
   }, true)
   // delegated, so the toggle also works in the dock's summary pop (a clone, which has no listeners)
-  document.addEventListener('click', (e) => {
+  onPage('click', (e) => {
     const more = e.target.closest?.('.dn-more'), b = more?.previousElementSibling
     if (!b) return
     const open = b.classList.toggle('dn-open')
@@ -676,7 +716,7 @@
     box.addEventListener('click', () => box.remove())
     document.body.append(box)
   }
-  document.addEventListener('click', (e) => {
+  onPage('click', (e) => {
     const link = e.target.closest?.('.dn-file-link')
     if (link) { e.preventDefault(); preview(link) }
   })
@@ -684,7 +724,7 @@
   // Gallery: a click on an image opens every image of the same note (or summary); ← → move, Esc closes.
   // A note can carry several shots, e.g. one component at mobile and desktop width.
   function gallery(imgs, start) {
-    document.querySelector('.dn-lightbox')?.remove()
+    document.querySelector('.dn-gallery')?.remove() // over the large summary, which stays
     let i = start
     const box = el('div', 'dn-lightbox dn-gallery'), big = el('img'), cap = el('div', 'dn-cap')
     const prev = el('button', 'dn-nav dn-prev', '‹'), next = el('button', 'dn-nav dn-next', '›')
@@ -705,16 +745,17 @@
     document.body.append(box)
     show(i)
   }
-  document.addEventListener('click', (e) => {
+  onPage('click', (e) => {
     const img = e.target.closest?.('.dn-md img')
-    if (!img?.src || img.closest('.dn-lightbox')) return
+    if (!img?.src || img.closest('.dn-lightbox:not(.dn-sum-big)')) return
     const group = [...(img.closest('.dn-note, .dn-summary, .dn-doc-body') ?? img.parentElement).querySelectorAll('.dn-md img, img')].filter((x) => x.src)
     gallery(group, Math.max(0, group.indexOf(img)))
   })
-  document.addEventListener('keydown', (e) => {
+  onPage('keydown', (e) => {
     const g = document.querySelector('.dn-gallery')
     if (g && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); e.stopPropagation(); g.dnShow(e.key === 'ArrowRight' ? 1 : -1) }
-    if (e.key === 'Escape') document.querySelectorAll('.dn-lightbox, #dn-pop').forEach((n) => n.remove())
+    // the top one only: a gallery opened from the large summary goes back to it
+    if (e.key === 'Escape') ([...document.querySelectorAll('.dn-lightbox')].pop() ?? document.getElementById('dn-pop'))?.remove()
   }, true)
 
   function clear() {
@@ -722,8 +763,11 @@
     observer = null
     seen?.disconnect()
     pull = error = seen = cursor = null
-    document.querySelectorAll('.dn-row, .dn-file, #dn-box, #dn-dock, #dn-pop, .dn-cmp-big').forEach((n) => n.remove())
+    // only the owner's drawing: a copy that took the page may show the next PR's notes already
+    if (mine()) { wipe(); delete document.documentElement.dataset.dnOwner } // the next PR's: whoever has notes for it
   }
+  // .dn-lightbox: the large summary, a gallery or preview of the PR left behind (its jumps would land in the next one)
+  const wipe = () => document.querySelectorAll('.dn-row, .dn-file, #dn-box, #dn-dock, #dn-pop, .dn-cmp-big, .dn-lightbox').forEach((n) => n.remove())
 
   // dark fallbacks when the page itself is dark, whatever the OS says (content.css)
   const darkPage = () => {
@@ -754,6 +798,11 @@
         anchor: hash([key, p.server, a.path, a.side, a.line].join('\n')) }))) }
     } else if (res?.errors?.length) error = res.errors.join(' · ')
     else return
+    // notes to show: this copy takes the page, and what another copy drew goes (else its rows would pass for this one's
+    // [data-dn] and hide them). An error only takes a page nobody owns.
+    const owner = document.documentElement.dataset.dnOwner
+    if (!mine() && (pull || !owner)) { if (owner) wipe(); document.documentElement.dataset.dnOwner = me }
+    if (!mine()) return
     await foldsLoaded
     if (current !== key) return
     if (pull) visit(key, pull.annotations, !pull.errors?.length)

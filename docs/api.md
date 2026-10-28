@@ -13,6 +13,8 @@ session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can
 | `DELETE` | `/api/pulls/:id` | the same by PR id (web app's **delete notes**); the extension adds `?id=<pull id>` to the route above, `409` if the PR changed |
 | `DELETE` | `/api/v1/annotations/:id` | remove one note (the extension's **remove note**); the PR and its files stay |
 | `GET` | `/api/v1/me` | who the token belongs to |
+| `DELETE` | `/api/v1/token` | delete the token this request carries (the extension's **Remove** for a token it got from Sign in and connect) |
+| `POST` | `/api/v1/connect/token` | `{code, verifier, redirect_uri}`, no token: the extension trades a one-time code from `/connect` and its PKCE verifier for `{token, user}` ([extension](extension.md#how-sign-in-and-connect-works)) |
 | `PUT` | `/api/repositories/:id/rules` | `{risk, deploy, screenshots}`: what every upload must carry (account admins, web app session) |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `POST` | `/mcp` | the same notes for MCP clients (see [MCP](#mcp)); `GET` answers `405` |

@@ -71,6 +71,7 @@ screen stretched to the viewport, controls hidden, one scene per shot (scene dot
 | Permission | Justification |
 |---|---|
 | `storage` | Keeps the DiffNotes servers the user connected and their access tokens, which notes the user folded, whether notes are switched off, how notes look, and, for pull requests with notes opened in the last 60 days, their repository and number with hashes of the notes shown (to mark notes changed since the last visit). Stored locally in the browser only. |
+| `identity` | **Sign in and connect**: `identity.launchWebAuthFlow` opens the user's own DiffNotes server's sign-in page in the browser's sign-in window; after the user presses Allow there, the server hands back a one-time code (PKCE) that the extension trades for its access token. No Google account or other identity is read. |
 | Host `https://github.com/*`, `https://gitlab.com/*`, `https://bitbucket.org/*` | The content script runs on pull request pages of these sites to draw the notes next to the changed lines of the diff. It only reads the page to find files and line numbers. |
 | Optional host `https://*/*` | Requested at runtime for exactly one origin, the DiffNotes server the user types in the popup (each team runs its own server, so the address isn't known in advance). Used to fetch that server's notes and files with the user's token, and to remove notes when the user asks (authors and admins only). Removed again when the user removes the server. |
 | Optional host `http://localhost/*`, `http://127.0.0.1/*` | The same, for a DiffNotes server running on the user's own machine (development and trials). Plain `http://` is allowed only for these. |
@@ -87,7 +88,7 @@ page with a CSP that blocks scripts from loading anything (`default-src 'none'`)
 | Personally identifiable information | No | |
 | Health information | No | |
 | Financial and payment information | No | |
-| Authentication information | **Yes** | The access tokens the user pastes for their DiffNotes servers, kept in local extension storage and sent only to that server. |
+| Authentication information | **Yes** | The access tokens for the user's DiffNotes servers (pasted, or made by the server when the user signs in and connects), kept in local extension storage and sent only to that server. |
 | Personal communications | No | |
 | Location | No | |
 | Web history | No | The extension reads the current GitHub/GitLab/Bitbucket pull request URL to ask the user's own server for its notes; it sends no history. Locally it keeps the repository and number of pull requests with notes opened in the last 60 days, to mark notes changed since. |

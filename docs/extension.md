@@ -14,11 +14,26 @@ Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
-3. Pin **DiffNotes**, make a token on your server's **Settings** and paste the one line shown there for the extension
-   (`{"server":"https://reviews.example.com","token":"dn_…"}`) into the popup's **Server** field: it fills both fields
-   (or type the address and the token yourself). Press **Connect** and allow access to that server. What you typed is
-   kept if the popup closes meanwhile, and a connect the permission prompt interrupted completes on its own. The token goes with every request, so the server
+3. Pin **DiffNotes**, open its popup and press **Sign in and connect** (the **Server** field says `https://diffnotes.dev`;
+   type your own server's address instead if you run one). Allow access to that server, sign in on the page that opens
+   and press **allow**: the window closes and the server is listed with your email. Nothing to copy. A copy loaded
+   unpacked has an id of its own: a server signs it in only once that id is in its `EXTENSION_IDS` ([install](install.md));
+   until then, use step 4.
+4. No sign-in window (Safari), or you'd rather paste: under **Use a token instead**, make a token on your server's
+   **Settings** and paste the one line shown there for the extension (`{"server":"https://reviews.example.com","token":"dn_…"}`)
+   into **Server**: it fills both fields. Press **Connect**. What you typed is kept if the popup closes meanwhile, and a
+   connect the permission prompt interrupted completes on its own. The token goes with every request, so the server
    must be `https://` (plain `http://` only for `localhost`).
+
+### How Sign in and connect works
+
+The popup opens `<server>/connect` in the browser's sign-in window (`identity.launchWebAuthFlow`) with the extension's
+own redirect address, a random `state` and a PKCE challenge. Signed in there, **allow** gives a one-time code (two
+minutes) that the browser hands back to the extension only; the extension trades it, with the PKCE verifier that never
+left it, at `POST /api/v1/connect/token` for a token named after the browser (`browser extension · Chrome on macOS`),
+listed on **Settings** like any other. The server gives codes only to the redirect addresses of the store's extensions
+and any in `EXTENSION_IDS` ([install](install.md)), so another extension can't open the page and collect a token. **Remove** in the
+popup deletes that token on the server too (a pasted one stays: your agent may use it as well).
 
 The store version updates itself. Unpacked: after `git pull`, press the reload icon on the extension's card.
 
@@ -54,7 +69,7 @@ tight) and **ghost** (faded until you hover it). Shapes: **outline**, **card** (
 
 ## Several servers
 
-The popup lists every connected server with your email on it; add more with the same form (different teams, clients,
+The popup lists every connected server with your email on it; add more with **Sign in and connect** or a token (different teams, clients,
 self-hosted and a colleague's server…). On a PR, all of them are asked: their notes show together, the toolbar badge
 counts them all, and the summary box shows each server's summary under its name. Remove a server with **Remove**.
 

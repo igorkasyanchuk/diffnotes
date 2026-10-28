@@ -92,7 +92,9 @@ if (CLOUDFLARE_ONLY) app.use('*', async (c, next) => {
 // the browser (Sec-Fetch-Site); curl, the skill and the extension send Bearer tokens instead and aren't affected.
 app.use('/api/*', async (c, next) => {
   const site = c.req.header('sec-fetch-site')
-  if (c.req.method !== 'GET' && !c.req.header('authorization') && site && site !== 'same-origin' && site !== 'none') return c.json({ error: 'Cross-site request refused' }, 403)
+  // the extension's code exchange (below) carries no cookie and no token yet: its one-time code and PKCE verifier are the proof
+  if (c.req.method !== 'GET' && !c.req.header('authorization') && site && site !== 'same-origin' && site !== 'none' && c.req.path !== '/api/v1/connect/token')
+    return c.json({ error: 'Cross-site request refused' }, 403)
   await next()
 })
 app.use('/api/*', bodyLimit({ maxSize: MAX_PULL, onError: (c) => c.json({ error: 'Too large' }, 413) }))
@@ -387,6 +389,39 @@ app.post('/api/invites/:token/accept', async (c) => {
   return c.json({ ok: true })
 })
 
+// --- Connecting the browser extension in one click (docs/extension.md). The popup opens /connect?redirect_uri&state&challenge
+// through the browser's identity API (launchWebAuthFlow); the user, signed in here, presses Allow; the browser hands
+// <redirect_uri>?code&state back to the extension, which trades the code and its PKCE verifier for a token. A code is
+// one-time, lives CONNECT_SECONDS, and goes only to the redirect address of an extension in EXTENSION_IDS: another
+// extension can't open this page and collect a token with one click on Allow.
+const CONNECT_SECONDS = 120
+// Chrome (and Edge, Brave, Arc): https://<id>.chromiumapp.org/; Firefox: https://<sha1 hex of the add-on id>.extensions.allizom.org/
+// the store's copies always; EXTENSION_IDS adds more (an unpacked copy, a fork)
+const EXTENSION_REDIRECTS = new Set(`fmnbgmeahjhfakpcmhimjjjplimdiibd,diffnotes@diffnotes.dev,${process.env.EXTENSION_IDS ?? ''}`.split(',')
+  .map((id) => id.trim()).filter(Boolean)
+  .map((id) => (/^[a-p]{32}$/.test(id) ? `https://${id}.chromiumapp.org/` : `https://${createHash('sha1').update(id).digest('hex')}.extensions.allizom.org/`)))
+// ponytail: in memory, per process; a restart only drops sign-ins that are under way (the extension says to connect again)
+const connectCodes = new Map<string, { user: string; challenge: string; redirect: string; name: string; expires: number }>()
+// an unknown one is most often a copy loaded from a folder (an id of its own): a token connects it
+const knownRedirect = (v: unknown) => (typeof v === 'string' && EXTENSION_REDIRECTS.has(v) ? v
+  : fail(400, v ? 'This server doesn’t know this copy of the DiffNotes extension (EXTENSION_IDS): connect it with a token instead'
+    : 'Open the DiffNotes popup and press Sign in and connect there'))
+app.post('/api/v1/connect/token', async (c) => {
+  const body = await json(c), ip = `cx:${clientIp(c)}`
+  if (throttle(ip, 20, 600_000)) fail(429, 'Too many attempts, wait a bit')
+  const key = sha256(str(body.code, 100)), grant = connectCodes.get(key), verifier = str(body.verifier, 128)
+  connectCodes.delete(key) // one try per code, right or wrong
+  if (!grant || grant.expires < Date.now() || grant.redirect !== body.redirect_uri || verifier.length < 43
+    || createHash('sha256').update(verifier).digest('base64url') !== grant.challenge) {
+    recordFailure(ip)
+    fail(400, 'This sign-in expired or was already used: connect again')
+  }
+  const user = db.prepare('select email from users where id = ?').get(grant!.user) as { email: string } | undefined
+  if (!user) return fail(400, 'This sign-in expired or was already used: connect again')
+  if (tokenCount(grant!.user) >= 50) fail(409, 'Too many tokens: delete some on Settings first')
+  return c.json({ token: newToken(grant!.user, grant!.name), user: { email: user.email } })
+})
+
 // --- everything below needs a signed-in user (cookie or token)
 
 app.use('/api/*', auth)
@@ -427,6 +462,31 @@ app.put('/api/password', async (c) => {
   db.prepare('update users set password = ? where id = ?').run(hashPassword(next), user.id)
   // sign out every other browser; this one keeps its session (tokens are managed separately on Settings)
   db.prepare('delete from sessions where user_id = ? and id is not ?').run(user.id, (await getSignedCookie(c, SECRET, 'sid')) || null)
+  return c.json({ ok: true })
+})
+
+// the /connect page: is this an extension we know (before showing Allow), then Allow itself (cookie only: tokens never reach here)
+app.get('/api/connect', (c) => c.json({ ok: !!knownRedirect(c.req.query('redirect_uri')) }))
+app.post('/api/connect', async (c) => {
+  const body = await json(c), redirect = knownRedirect(body.redirect_uri), user = c.get('user')
+  const state = str(body.state, 200), challenge = str(body.challenge, 100)
+  if (!/^[\w-]{16,128}$/.test(state) || !/^[\w-]{43}$/.test(challenge)) fail(400, 'This sign-in link is broken: connect again from the DiffNotes popup')
+  if (tokenCount(user.id) >= 50) fail(409, 'Too many tokens: delete some on Settings first')
+  // codes live in memory: 20 Allows per user per 10 minutes, so a script can't fill it
+  if (throttle(`cn:${user.id}`, 20, 600_000)) fail(429, 'Too many attempts, wait a bit')
+  recordFailure(`cn:${user.id}`)
+  const code = randomBytes(32).toString('base64url'), t = Date.now()
+  for (const [k, g] of connectCodes) if (g.expires < t) connectCodes.delete(k)
+  // control characters out: the name shows on Settings
+  const where = str(body.name, 40).replace(/[\p{Cc}\p{Cf}]/gu, '')
+  connectCodes.set(sha256(code), { user: user.id, challenge, redirect, name: `browser extension${where ? ` · ${where}` : ''}`, expires: t + CONNECT_SECONDS * 1000 })
+  return c.json({ location: `${redirect}?${new URLSearchParams({ code, state })}` })
+})
+// the extension's Remove: its own token goes (a token pasted by hand may be the agent's too, so the extension asks this only for one it got from /connect)
+app.delete('/api/v1/token', (c) => {
+  const bearer = c.req.header('authorization')?.match(/^Bearer (\S+)$/)?.[1]
+  if (!bearer) fail(400, 'Send the token to remove as Authorization: Bearer')
+  db.prepare('delete from tokens where hash = ?').run(sha256(bearer!))
   return c.json({ ok: true })
 })
 
@@ -1359,6 +1419,7 @@ Sitemap: ${host(c)}/sitemap.xml
 const PUBLIC_PAGES: Record<string, { title: string; description: string }> = {
   '/demo': { title: 'Live demo · DiffNotes', description: 'See DiffNotes on a real pull request: plain-language notes, risk levels, before / after screenshots and a clickable demo, right inside the GitHub diff. About a minute.' },
   '/badge': { title: 'Badge · DiffNotes', description: 'A “Reviewed with DiffNotes” badge for your README and pull request template: tell contributors your pull requests come with notes in the diff.' },
+  '/docs': { title: 'Docs · DiffNotes', description: 'Get started with DiffNotes in four steps, ask your agent for notes, read them in the diff, set repository rules, and fix notes that don’t show.' },
   '/privacy': { title: 'Privacy · DiffNotes', description: 'What the DiffNotes browser extension and a DiffNotes server keep, who sees it, and what is never sent anywhere.' },
 }
 const indexed = (p: string) => p === '/' || (p in PUBLIC_PAGES && (p !== '/demo' || !!demoName()))

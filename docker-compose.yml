@@ -38,6 +38,7 @@ services:
       # GITHUB_CLIENT_SECRET: ""
       # ALLOW_SIGNUP: 1                         # anyone with GitHub may sign up
       # DEMO_PR: owner/name#12                  # a live demo PR every signed-in user can read (/demo)
+      # EXTENSION_IDS: ""                       # more extensions Sign in and connect trusts (the store's always)
       # UMAMI_SCRIPT: ""
       # UMAMI_WEBSITE_ID: ""
       # file storage (docs/storage.md): disk by default, or one provider's bucket

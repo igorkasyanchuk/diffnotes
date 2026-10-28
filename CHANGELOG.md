@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-29
+
+### Added
+
+- **Sign in and connect**: the extension's popup connects a server in one click. It opens the server's `/connect` page in
+  the browser's sign-in window; after **allow** the extension gets a one-time code (PKCE, two minutes) and trades it for
+  a token of its own, named after the browser. Only the store's extensions (and any in `EXTENSION_IDS`) can get a
+  code. **Remove** deletes that token on the server too. Pasting a token still works (Safari has no sign-in window).
+- **Large summary**: *expand ⤢* in the box (and ⤢ in the dock) opens the whole summary, deploy card and risk map in a
+  large window; images there are full size, a click on one opens the gallery over it.
+- **Docs page** (`/docs`): get started, asking the agent, the diff, repository rules, team, tips and troubleshooting.
+
+### Changed
+
+- **Note themes style the box too**: the box above the diff, the dock and the summary pop follow the chosen look (sticky,
+  terminal, paper, contrast and the rest), not only the notes.
+
+### Fixed
+
+- **show more did nothing** when two copies of the extension ran on one page (the store one and an unpacked one, or an
+  old copy left after an update): each toggled it once. The newest copy now owns the page and the others draw nothing, unless
+  only an older one has notes for the PR (a second copy with no server connected): that one keeps it.
+
 ## [1.4.0] - 2026-10-28
 
 ### Added
@@ -196,7 +219,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.2.0...v1.3.0

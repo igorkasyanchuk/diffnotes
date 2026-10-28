@@ -17,6 +17,10 @@
     h2 { font-size: 13px; margin: 12px 0 8px; }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid #ddd; }
     .row button { padding: 4px 8px; font-size: 12px; }
+    button.wide { width: 100%; padding: 9px 12px; background: #e8622a; border-color: #e8622a; }
+    button:disabled { opacity: .6; cursor: default; }
+    details { margin: 8px 0; }
+    summary { cursor: pointer; color: #4a505c; font-size: 12px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -49,10 +53,16 @@
   </select></label>
   <form id="connect">
     <h2 id="add-title">Connect a server</h2>
-    <label>Server, or the line from Settings <input id="server" placeholder="https://diffnotes.example.com" required /></label>
-    <label>Token <input id="token" type="password" placeholder="dn_…" required /></label>
-    <button id="submit">Connect</button>
-    <p class="hint">Make a token on your server's <a id="settings" href="#" target="_blank">Settings</a> page and paste the one line it shows for the extension. Notes from every connected server show on GitHub, GitLab and Bitbucket.</p>
+    <label>Server <input id="server" value="https://diffnotes.dev" placeholder="https://diffnotes.example.com" required /></label>
+    <button type="button" id="signin" class="wide">Sign in and connect</button>
+    <p class="hint" id="signin-hint">Opens your server's sign-in page: sign in there and press Allow. Nothing to copy.</p>
+    <details id="by-token">
+      <summary>Use a token instead</summary>
+      <label>Token <input id="token" type="password" placeholder="dn_…" /></label>
+      <button id="submit">Connect</button>
+      <p class="hint">Make a token on your server's <a id="settings" href="#" target="_blank">Settings</a> page and paste the one line it shows for the extension into Server: it fills both fields.</p>
+    </details>
+    <p class="hint">Notes from every connected server show on GitHub, GitLab and Bitbucket.</p>
   </form>
   <div class="status" id="status"></div>
   <div class="error" id="error"></div>

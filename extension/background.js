@@ -1,5 +1,6 @@
 // Talks to the DiffNotes servers for the content script (it holds the tokens; pages never see them).
-// storage.local.servers: [{server, token, user}], one per connected server.
+// storage.local.servers: [{server, token, user, minted}], one per connected server; minted: the token came from
+// "Sign in and connect", so Remove deletes it on the server too (a pasted one may be the agent's as well).
 async function servers() {
   const s = await chrome.storage.local.get(['servers', 'server', 'token', 'user'])
   if (s.servers) return s.servers
@@ -51,7 +52,18 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       chrome.action.setBadgeText({ tabId: sender.tab.id, text: count ? String(count) : '' })
       return { pulls, errors }
     }
+    // connecting and removing servers: the popup only (an extension page, no tab), never a content script on a site
+    if (['connect', 'signin', 'remove'].includes(msg.type) && sender.tab) return { error: 'not from a page' }
     if (msg.type === 'connect') return connect()
+    if (msg.type === 'signin') return signin()
+    if (msg.type === 'remove') {
+      const s = (await servers()).find((x) => x.server === msg.server)
+      if (!s) return { ok: true }
+      if (s.minted) await revoke(s)
+      await chrome.storage.local.set({ servers: (await servers()).filter((x) => x.server !== s.server) })
+      chrome.permissions.remove({ origins: [`${s.server}/*`] }).catch(() => {})
+      return { ok: true }
+    }
     if (msg.type === 'clear') return chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
     // exactly /files/<pull>/<name> on a connected server: a `..` segment would send the token to any other API path
     if (msg.type === 'file' && /^\/files\/[\w-]+\/[\w-][\w.-]*$/.test(msg.url)) {
@@ -86,14 +98,63 @@ async function connect() {
     : !res.ok ? `Server answered ${res.status}` : !user?.email ? `${new URL(server).host} did not answer like a DiffNotes server` : ''
   // a failure stays in the draft, so the popup shows it (and the fields) when it opens again
   if (error) { await chrome.storage.session.set({ draft: { ...draft, error } }); return { error } }
-  await chrome.storage.local.set({ servers: [...(await servers()).filter((x) => x.server !== server), { server, token, user: user.email }] })
-  await chrome.storage.session.remove('draft')
+  await save({ server, token, user: user.email })
   return { ok: true }
 }
 chrome.permissions.onAdded.addListener(async ({ origins = [] }) => {
   const { draft } = await chrome.storage.session.get('draft')
-  if (draft?.server && !draft.error && origins.includes(`${draft.server}/*`)) connect()
+  if (draft?.server && !draft.error && origins.includes(`${draft.server}/*`)) (draft.signin ? signin : connect)()
 })
+// a server connected again replaces its entry; the token the extension made for it before is deleted on the server
+async function save(entry) {
+  const old = (await servers()).find((x) => x.server === entry.server)
+  if (old?.minted && old.token !== entry.token) await revoke(old)
+  // read again after the network call: a server removed or added meanwhile stays so
+  await chrome.storage.local.set({ servers: [...(await servers()).filter((x) => x.server !== entry.server), entry] })
+  await chrome.storage.session.remove('draft')
+}
+// a server that doesn't answer doesn't hold up Remove (its token then stays on Settings)
+const revoke = (s) => fetch(`${s.server}/api/v1/token`, { method: 'DELETE', headers: headers(s.token), signal: AbortSignal.timeout(5000) }).catch(() => {})
+
+// Sign in and connect: the server's /connect page in the browser's sign-in window, a one-time code back on this
+// extension's own redirect address, traded with the PKCE verifier (never in any URL) for a token. Here, not in the
+// popup: the sign-in window takes the focus, which closes the popup. Safari has no identity API: tokens are pasted there.
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)))
+let signingIn = null // one sign-in window at a time: a second click joins the first
+function signin() { return (signingIn ??= signinFlow().finally(() => { signingIn = null })) }
+async function signinFlow() {
+  const { draft } = await chrome.storage.session.get('draft')
+  if (!draft?.server) return { error: 'nothing to connect' }
+  const { server } = draft, host = new URL(server).host
+  const fail = async (error) => { await chrome.storage.session.set({ draft: { ...draft, error } }); return { error } }
+  if (!chrome.identity?.launchWebAuthFlow) return fail('This browser has no sign-in window: use a token instead')
+  const verifier = random(), state = random(), redirect = chrome.identity.getRedirectURL()
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
+  const url = `${server}/connect?${new URLSearchParams({ redirect_uri: redirect, state, challenge, name: browserName() })}`
+  // the user may take minutes to sign in: an extension call every 20 s keeps the service worker from stopping meanwhile
+  const awake = setInterval(() => chrome.runtime.getPlatformInfo(), 20_000)
+  let back
+  try { back = new URL(await chrome.identity.launchWebAuthFlow({ url, interactive: true })) }
+  catch { return fail(`The sign-in window closed before Allow (or ${host} is not a DiffNotes server)`) }
+  finally { clearInterval(awake) }
+  if (back.searchParams.get('state') !== state) return fail('That answer was not for this sign-in: try again')
+  if (back.searchParams.get('error')) return fail('Cancelled on the server')
+  const res = await fetch(`${server}/api/v1/connect/token`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: back.searchParams.get('code'), verifier, redirect_uri: redirect }) }).catch(() => null)
+  const data = await res?.json().catch(() => null)
+  if (!res?.ok || typeof data?.token !== 'string' || typeof data.user?.email !== 'string')
+    return fail(data?.error ?? (res ? `${host} answered HTTP ${res.status}` : `can't reach ${host}`))
+  await save({ server, token: data.token, user: data.user.email, minted: true })
+  return { ok: true }
+}
+// the token's name on the server's Settings, so the user can tell their browsers apart
+function browserName() {
+  const ua = navigator.userAgent, brand = navigator.userAgentData?.brands?.map((b) => b.brand).find((b) => !/Not|Chromium/.test(b))
+  const name = /Firefox\//.test(ua) ? 'Firefox' : /Edg\//.test(ua) ? 'Edge' : brand?.replace('Google ', '') || 'Chrome'
+  const os = /Mac/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /CrOS/.test(ua) ? 'ChromeOS' : /Linux|X11/.test(ua) ? 'Linux' : ''
+  return os ? `${name} on ${os}` : name
+}
 
 // move first-release settings over as soon as the extension updates
 chrome.runtime.onInstalled.addListener(() => { servers() })

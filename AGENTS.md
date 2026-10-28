@@ -64,6 +64,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
 - Repositories: `owner/name` = GitHub, `host/path` = GitLab (any host but bitbucket.org) or Bitbucket; `repoName()`
   (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back. Unique per account (not
   server-wide): always look names up within the caller's accounts.
+- Extension sign-in (`/connect`, app.ts): one-time code + PKCE, codes only to `EXTENSION_IDS` redirect addresses; the
+  background (not the popup) runs `launchWebAuthFlow`. Content scripts: the newest copy on a page owns it (`dnOwner`), a copy that gets notes takes it back.
 - Bearer tokens authenticate only `/api/v1/*`, `/files/*` and `/mcp` (which takes nothing else, never the cookie); cookie writes need `Sec-Fetch-Site: same-origin`.
 - The web app's page gets `PAGE_CSP` and its `__ORIGIN__` filled (app.ts `page()`); keep index.html's SEO tags there.
 - Diff DOM, one adapter per host in `SITES` (`extension/content.js`); if notes stop appearing, re-check these first:

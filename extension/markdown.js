@@ -194,7 +194,8 @@
   globalThis.document?.addEventListener('click', (e) => {
     const open = e.target.closest?.('.dn-cmp-open')
     if (open) {
-      e.preventDefault(); e.stopPropagation()
+      // Immediate: a second copy of the extension on the page (store + unpacked) would open a second large copy
+      e.preventDefault(); e.stopImmediatePropagation()
       const doc = open.ownerDocument, big = doc.createElement('div'), copy = open.parentElement.cloneNode(true)
       const after = open.parentElement.querySelector('.dn-cmp-after')
       copy.querySelector('.dn-cmp-open').remove()
