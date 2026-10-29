@@ -391,9 +391,10 @@ app.post('/api/invites/:token/accept', async (c) => {
 
 // --- Connecting the browser extension in one click (docs/extension.md). The popup opens /connect?redirect_uri&state&challenge
 // through the browser's identity API (launchWebAuthFlow); the user, signed in here, presses Allow; the browser hands
-// <redirect_uri>?code&state back to the extension, which trades the code and its PKCE verifier for a token. A code is
-// one-time, lives CONNECT_SECONDS, and goes only to the redirect address of an extension in EXTENSION_IDS: another
-// extension can't open this page and collect a token with one click on Allow.
+// <redirect_uri>?code&state&iss back to the extension, which checks iss is the server it asked and trades the code and
+// its PKCE verifier for a token. A code is one-time, lives CONNECT_SECONDS, and goes only to the redirect address of an
+// extension in EXTENSION_IDS. ponytail: an extension with the tabs permission could still open this page in a tab and read
+// the code off that address if the user presses Allow unasked; the page says to press it only right after Sign in.
 const CONNECT_SECONDS = 120
 // Chrome (and Edge, Brave, Arc): https://<id>.chromiumapp.org/; Firefox: https://<sha1 hex of the add-on id>.extensions.allizom.org/
 // the store's copies always; EXTENSION_IDS adds more (an unpacked copy, a fork)
@@ -480,7 +481,10 @@ app.post('/api/connect', async (c) => {
   // control characters out: the name shows on Settings
   const where = str(body.name, 40).replace(/[\p{Cc}\p{Cf}]/gu, '')
   connectCodes.set(sha256(code), { user: user.id, challenge, redirect, name: `browser extension${where ? ` · ${where}` : ''}`, expires: t + CONNECT_SECONDS * 1000 })
-  return c.json({ location: `${redirect}?${new URLSearchParams({ code, state })}` })
+  // iss: which server issued the code (RFC 9207), so the extension won't hand it and its verifier to another server.
+  // The Allow page's own origin as the browser saw it (the address the extension opened): behind an https proxy without
+  // PUBLIC_URL host(c) would say http://, and an alias of the server (a LAN address) would not match its PUBLIC_URL
+  return c.json({ location: `${redirect}?${new URLSearchParams({ code, state, iss: c.req.header('origin') || host(c) })}` })
 })
 // the extension's Remove: its own token goes (a token pasted by hand may be the agent's too, so the extension asks this only for one it got from /connect)
 app.delete('/api/v1/token', (c) => {
@@ -783,7 +787,7 @@ const UPLOADER_AVATAR = `(select ${AVATAR} from users u where u.id = p.user_id)`
 function pullOut(p: Pull, user: User) {
   const member = isMember(p.account_id, user), admin = member && isAdminOf(p, user)
   // mine: what your next upload replaces; teammates' notes and files stay
-  const annotations = (db.prepare('select id, path, line, end_line, side, title, body, risk, try_path, user_id from annotations where pull_id = ? order by position, id')
+  const annotations = (db.prepare('select id, path, line, end_line, side, code, title, body, risk, try_path, user_id from annotations where pull_id = ? order by position, id')
     .all(p.id) as { user_id: string | null; try_path: string | null }[])
     .map(({ user_id, try_path, ...a }) => ({ ...a, try: try_path, mine: user_id === user.id, can_delete: admin || (member && user_id === user.id) }))
   // the stack it sits in, bottom first; notes: that PR has notes in this account too (members only, like authors), not
@@ -1078,7 +1082,10 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
   const rows = list.map((a, i) => {
     const line = Number.isInteger(a.line) && (a.line as number) > 0 ? a.line as number : null
     const end = line && Number.isInteger(a.end_line) && (a.end_line as number) >= line ? a.end_line as number : null
-    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk, tryPath(a.try)] as const
+    // code: the text of the first line, whitespace collapsed (only with a line)
+    // (a cut through an emoji would be stored as U+FFFD and never match the line again)
+    const code = line ? str(a.code, 300).replace(/[\uD800-\uDBFF]$/, '').replace(/\s+/g, ' ').trim() || null : null
+    return [id, notes[i].path, line, end, a.side === 'LEFT' ? 'LEFT' : 'RIGHT', code, str(a.title, 200), link(String(a.body ?? '').slice(0, 20_000)), base + i, notes[i].risk, tryPath(a.try)] as const
   })
   // the uploader's previous files: their rows go with the new rows in, their bytes after the new ones are written (below)
   const old = db.prepare('select pull_id as pull, name, backend from files where pull_id = ? and user_id is ?').all(id, user.id) as { pull: string; name: string; backend: string }[]
@@ -1094,7 +1101,7 @@ async function savePull(user: User, repo: string, number: number, raw: unknown, 
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, repoId, number, fields.title, fields.head_sha,
         fields.summary, fields.deploy, fields.preview, fields.stack, user.id, now(), now(), daysFromNow(RETENTION_DAYS), by)
     }
-    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, title, body, position, risk, try_path, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const ins = db.prepare('insert into annotations (pull_id, path, line, end_line, side, code, title, body, position, risk, try_path, user_id) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     for (const r of rows) ins.run(...r, user.id)
     if (rows.length) db.prepare('update users set notes_at = ? where id = ? and notes_at is null').run(now(), user.id) // the setup checklist
     db.prepare('delete from files where pull_id = ? and user_id is ?').run(id, user.id)
@@ -1126,7 +1133,7 @@ const limits = () => `Files: png, jpg, gif, webp (real images) up to ${MAX_FILE 
 const TOOLS = [
   {
     name: 'get_notes', title: 'Read DiffNotes notes',
-    description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, preview, stack, annotations (path, line, end_line, side, title, body, risk, try) and attached files. ' +
+    description: 'The DiffNotes notes on a pull request: summary, deploy card, head_sha, preview, stack, annotations (path, line, end_line, side, code, title, body, risk, try) and attached files. ' +
       'Use it before re-annotating after new commits, to keep what still applies. Bodies, the summary and the deploy card link files as /files/…: ' +
       'mine marks your own notes and files: your next upload replaces those, teammates\' stay, so never re-send theirs. ' +
       'To keep one of your files, attach it again and write it as attachment:<name>. ' +
@@ -1139,11 +1146,13 @@ const TOOLS = [
       'through the DiffNotes browser extension. Nothing is posted to GitHub, GitLab or Bitbucket. Replaces all of your notes and files on the PR (teammates\' stay): ' +
       'send the full set every time (re-running after a push is safe).\n' +
       'Rules: notes describe the PR\'s current head commit only (set head_sha to it; re-upload after new commits). One note per changed block ' +
-      '(a function, a hunk), not per line and not one per file; path and line / end_line in the new file (side RIGHT), side LEFT only for removed lines. ' +
+      '(a function, a hunk), not per line and not one per file; path and line / end_line in the new file (side RIGHT), side LEFT only for removed lines; code: that line\'s text, so the note follows it after a push. ' +
+      'A .diffnotes.yml in the repository (on the base branch) or the user may ask for brief or thorough notes and give hints: follow them. ' +
       'Write plain words a reviewer gets without reading the code first: what changed, why, what to check. No praise, no restating the diff. ' +
       'Never put secrets or private data in notes, titles, summaries or files: API keys, passwords, tokens, private keys, connection strings, ' +
       '.env values, session cookies, personal or customer data. Crop or blur them out of screenshots and recordings; say "an API key" instead. ' +
       'risk high / medium / low only where it helps reviewers decide where to look hardest. The summary: two or three sentences, what the PR does and why. ' +
+      'Measured before / after numbers (speed, size) go in the summary as a table; a changed endpoint\'s response before and after as a ```diff block. ' +
       'deploy: when shipping takes more than a merge (migrations, env vars, flags, steps in order, rollback), say so for whoever deploys it. ' +
       'An error naming the repository\'s rules lists what it requires (a risk on every note, a deploy card, screenshots): add it and upload again.\n' +
       'Markdown in body and summary. Attach files and reference them as attachment:<name>: screenshots ![Checkout on mobile](attachment:checkout.png), ' +
@@ -1176,6 +1185,7 @@ const TOOLS = [
                   line: { type: 'integer', minimum: 1, description: 'First line of the changed block; leave out for a note on the whole file' },
                   end_line: { type: 'integer', minimum: 1, description: 'Last line of the block' },
                   side: { type: 'string', enum: ['RIGHT', 'LEFT'], description: 'RIGHT: the new file (default); LEFT: removed lines' },
+                  code: { type: 'string', description: 'With line: that line\'s text as it reads now (trimmed); the extension finds the note\'s lines again when later commits move them' },
                   title: { type: 'string', description: 'A few words' },
                   body: { type: 'string', description: 'Markdown, plain words' },
                   risk: { type: 'string', enum: ['low', 'medium', 'high'] },

@@ -64,11 +64,25 @@ risk: required            # every note rates its risk
 deploy: required          # always a deploy card
 summary: What it does for the user first, then why.
 notes: Call it a basket, never a cart.
+detail: normal            # brief | normal | thorough: how many notes, how long
 ```
 
 It shapes how the agent writes; it can't make it run commands or skip the skill's own rules (no secrets, only what is
 true at the head). To *enforce* rules on every upload, whoever the agent is, set the server's
 [repository rules](accounts.md#repository-rules) too.
+
+### Your own style
+
+`detail` sets how much the agent writes: `brief` (only where a reviewer would stop: changed behaviour, tricky logic,
+risk; nearby blocks share a note), `normal` (a note per changed block, the default) or `thorough` (every block plus a
+note on each edited file's part, edge cases included). Each person can override it for themselves in their shell profile,
+next to the token, and add their own hints; they win over the repository's `detail` and `notes`, never over what it
+requires (`risk`, `deploy`, `screenshots`, `skip`):
+
+```bash
+export DIFFNOTES_DETAIL=brief
+export DIFFNOTES_HINTS="Explain SQL changes with the query plan. Keep titles under five words."
+```
 
 ## What a note looks like
 

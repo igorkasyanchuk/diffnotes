@@ -64,6 +64,9 @@ describe('links between notes', () => {
 })
 
 describe('dnMarkdown', () => {
+  it('colours + and - lines of a diff block, escaped', () => {
+    expect(md('```diff\n- "a": 1\n+ "b": <2>\n  same\n```')).toBe('<pre><code><span class="dn-diff-del">- &quot;a&quot;: 1</span>\n<span class="dn-diff-add">+ &quot;b&quot;: &lt;2&gt;</span>\n  same</code></pre>')
+  })
   it('renders blocks', () => {
     expect(md('# Title\n###### six')).toBe('<h3>Title</h3><h6>six</h6>')
     expect(md('a\nb\n\nc')).toBe('<p>a b</p><p>c</p>')

@@ -55,7 +55,9 @@
         const code = []
         const lang = line.trim().slice(3).trim().toLowerCase()
         while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i])
-        out.push((lang === 'mermaid' && diagram(code.join('\n'))) || `<pre><code>${esc(code.join('\n'))}</code></pre>`)
+        // ```diff: + and - lines coloured (an API response before and after, a config change)
+        const body = lang === 'diff' ? code.map((l) => /^[+-]/.test(l) ? `<span class="dn-diff-${l[0] === '+' ? 'add' : 'del'}">${esc(l)}</span>` : esc(l)).join('\n') : esc(code.join('\n'))
+        out.push((lang === 'mermaid' && diagram(code.join('\n'))) || `<pre><code>${body}</code></pre>`)
         continue
       }
       if (/^>\s?/.test(line)) { flushPara(); flushList(); quote.push(line.replace(/^>\s?/, '')); continue }

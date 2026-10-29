@@ -295,7 +295,7 @@ function Connect({ me }: { me: Me }) {
       paste it in the popup under <b>Use a token instead</b>.</p></>
       : sent ? <p>Connected. This window closes on its own; if it doesn't, close it and open the DiffNotes popup.</p>
       : <form className="stack" onSubmit={submit}>
-        <p>Your browser{name ? <> ({name})</> : ''} asks to show your DiffNotes notes inside pull request diffs.</p>
+        <p>Your browser{name ? <> (it says: {name})</> : ''} asks to show your notes from <b>{location.host}</b> inside pull request diffs.</p>
         <div className="connect-who"><b>{me.user.email}</b><span className="hint">{me.accounts.map((a) => a.name).join(', ') || 'no account yet'}</span></div>
         <ul className="connect-can">
           <li>gets its own token: <b>Settings › Tokens</b> lists it, delete it there to disconnect</li>

@@ -140,6 +140,10 @@ async function signinFlow() {
   finally { clearInterval(awake) }
   if (back.searchParams.get('state') !== state) return fail('That answer was not for this sign-in: try again')
   if (back.searchParams.get('error')) return fail('Cancelled on the server')
+  // a server whose /connect sends the window on to another server's Allow page must not get that server's code
+  const iss = back.searchParams.get('iss')
+  if (!iss) return fail(`${host} runs an older DiffNotes: update it, or connect with a token`)
+  if (!URL.canParse(iss) || new URL(iss).origin !== new URL(server).origin) return fail(`That sign-in came from another server than ${host}: check the address`)
   const res = await fetch(`${server}/api/v1/connect/token`, { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: back.searchParams.get('code'), verifier, redirect_uri: redirect }) }).catch(() => null)
   const data = await res?.json().catch(() => null)

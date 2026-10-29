@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-29
+
+### Added
+
+- **Notes follow the code**: a note keeps its first line's text (`code`); after a push moves the block, the extension
+  puts the note on the nearest line that reads so (*moved to line N*), or marks it *code changed since*. The skill sends
+  `code` on every line note and its check script verifies it.
+- **Diff blocks in notes**: a ` ```diff ` block colours its `+` and `-` lines; the skill uses it for API examples (a
+  changed endpoint's response before and after) next to the request.
+- **Numbers in the summary**: the skill adds a before / after table when it measured speed, size or load.
+- **Note style**: `detail: brief | normal | thorough` in `.diffnotes.yml`, and per person `DIFFNOTES_DETAIL` and
+  `DIFFNOTES_HINTS` in the shell profile, over the repository's `detail` and `notes` (never over what it requires).
+
+### Security
+
+- **Extension sign-in checks the issuer**: `/connect`'s answer names the server (`iss`) and the extension trades a code only
+  with the server it asked. Before, a malicious server you connected could send the sign-in window on to another server's
+  allow page and collect that server's code and verifier. An older server (no `iss`) asks to update or to paste a token.
+  The allow page names the server and shows the browser's name as what it says it is.
+
 ## [1.5.0] - 2026-10-29
 
 ### Added
@@ -219,7 +239,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.0...v1.3.1

@@ -39,12 +39,15 @@ JSON body, or `multipart/form-data` with a `payload` field (JSON, or a JSON file
   "preview": "https://pr-42.shop.vercel.app",
   "stack": [{ "number": 41, "title": "Fee table" }, { "number": 42, "title": "Express picker" }],
   "annotations": [
-    { "path": "app/a.ts", "line": 10, "end_line": 14, "side": "RIGHT", "title": "optional", "body": "Markdown", "risk": "high", "try": "/checkout" }
+    { "path": "app/a.ts", "line": 10, "end_line": 14, "side": "RIGHT", "code": "if (total <= 0) return", "title": "optional", "body": "Markdown", "risk": "high", "try": "/checkout" }
   ]
 }
 ```
 
 - `line` / `end_line`: new-side line numbers; `side: "LEFT"` for removed lines; no `line` = a note on the whole file.
+- `code` (optional, with `line`): that line's text, whitespace collapsed (300 characters). When a later push moves the
+  block, the extension finds the nearest line that reads so and puts the note there (*moved to line N*); no such line:
+  *code changed since*.
 - `risk` (optional): `high`, `medium` or `low`; anything else is dropped. The extension and the web app list risky notes first.
 - `deploy` (optional): the deploy card, Markdown: migrations, new env vars, feature flags, the order of steps, how to
   roll back. Shown pinned at the top of the summary box and on the PR's page. List items starting with a kind

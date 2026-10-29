@@ -29,10 +29,10 @@ Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/
 
 The popup opens `<server>/connect` in the browser's sign-in window (`identity.launchWebAuthFlow`) with the extension's
 own redirect address, a random `state` and a PKCE challenge. Signed in there, **allow** gives a one-time code (two
-minutes) that the browser hands back to the extension only; the extension trades it, with the PKCE verifier that never
+minutes) and the issuing server's address (`iss`) that the browser hands back to the extension only; the extension trades it, only with that same server, with the PKCE verifier that never
 left it, at `POST /api/v1/connect/token` for a token named after the browser (`browser extension · Chrome on macOS`),
 listed on **Settings** like any other. The server gives codes only to the redirect addresses of the store's extensions
-and any in `EXTENSION_IDS` ([install](install.md)), so another extension can't open the page and collect a token. **Remove** in the
+and any in `EXTENSION_IDS` ([install](install.md)). Press **allow** only right after **Sign in and connect** in the popup. **Remove** in the
 popup deletes that token on the server too (a pasted one stays: your agent may use it as well).
 
 The store version updates itself. Unpacked: after `git pull`, press the reload icon on the extension's card.
@@ -82,6 +82,7 @@ Open a PR's **Files changed** tab:
 | **Summary box** above the first file | the PR summary, linked reports, *notes* and *summary* on/off switches (both remembered; a click on the box's title flips *summary*), expand / collapse all, *copy summary*, open in DiffNotes |
 | **Links between notes** | a note's link to another one (`#note:path:line`, written by the agent) scrolls to that note and flashes it |
 | **Changed since your last visit** | on a PR you opened before, notes added or changed since get a *new* / *updated* tag, and the box and dock say “N changed since your last visit” (a click jumps to the first). Remembered in the browser for 60 days |
+| **Notes follow the code** | after a push moves a note's lines, the note goes to where its first line is now (*moved to line N*); when that line is gone or reads differently, *code changed since* says the note may be out of date |
 | **Copy summary** | copies the PR summary as Markdown for the PR description; attachments become links to your DiffNotes server (readers need to sign in there). Nothing is posted |
 | **File cards** under file headers | notes about a whole file (new, renamed, deleted) |
 | **Line notes** above changed blocks | the “why” for that block; click the header to collapse it; it stays collapsed after a reload until the note changes |

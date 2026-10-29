@@ -66,6 +66,8 @@
     head.append(el('span', 'dn-badge', 'DN'), el('span', 'dn-title', a.title || a.body.split('\n')[0].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_#>]/g, '').slice(0, 120)))
     if (RISKS.includes(a.risk)) head.append(el('span', `dn-risk dn-risk-${a.risk}`, `${a.risk} risk`))
     if (a.changed) head.append(el('span', 'dn-changed', a.changed))
+    if (a.moved) head.append(el('span', 'dn-changed', `moved to line ${a.moved}`))
+    if (a.stale) head.append(el('span', 'dn-changed dn-stale', 'code changed since'))
     head.append(el('span', 'dn-where', where(a)))
     const body = el('div', 'dn-body dn-md')
     body.append(md(a.body, a.server))
@@ -207,6 +209,23 @@
       }).filter(Boolean),
     },
   }
+  // Notes that follow the code: a note keeps its first line's text (a.code). When that line no longer reads so (a later
+  // push moved it), the nearest line within 200 that does takes the note; none does: it stays, marked as changed since.
+  // ponytail: compares a row's whole text (both sides in a split view); lines under 4 letters (`}`) aren't searched, too many look alike
+  const flat = (t) => t.replace(/\s+/g, ' ').trim()
+  function follow(f, a) {
+    const row = f.rowFor(a), code = typeof a.code === 'string' ? flat(a.code) : ''
+    if (code.replace(/[^\p{L}\p{N}]/gu, '').length < 4 || row && flat(row.textContent).includes(code)) return { row }
+    // the rows that read so, from one read of the file's rows per apply(): mostly none, and then no line-by-line lookups
+    // (a note not placed searches again on every re-render, hovering the diff included)
+    f.texts ??= [...f.box.querySelectorAll('tr, [role=row]')].map((r) => [r, flat(r.textContent)])
+    const hits = new Set(f.texts.filter(([, t]) => t.includes(code)).map(([r]) => r))
+    if (hits.size) for (let k = 1; k <= 200; k++) for (const line of [Number(a.line) + k, Number(a.line) - k]) {
+      const r = line > 0 && f.rowFor({ side: a.side, line })
+      if (r && hits.has(r)) return { row: r, moved: line }
+    }
+    return { row, stale: !!row }
+  }
   const site = SITES[location.host] ?? SITES['gitlab.com'] // any other host the extension runs on is a self-hosted GitLab
   const files = () => site.files()
 
@@ -225,8 +244,9 @@
           f.top.before(card)
           return placed.add(i)
         }
-        const row = f.rowFor(a)
+        const { row, moved, stale } = follow(f, a)
         if (!row) return
+        a.moved = moved; a.stale = stale // shown on the note's head
         if (row.tagName === 'TR') {
           const tr = el('tr', 'dn-row'), td = el('td')
           td.colSpan = [...row.children].reduce((n, c) => n + (c.colSpan || 1), 0)

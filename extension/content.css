@@ -39,6 +39,8 @@ html.dn-dark {
 .dn-md .dn-video { display: block; height: 200px; max-width: 100%; aspect-ratio: 16 / 10; /* the width follows the video (playIn); ⛶ plays it large */ margin: 6px 0; border: 1px solid var(--dn-line, #30363d); border-radius: 6px; background: #000; }
 .dn-md code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--dn-muted-bg); padding: 1px 4px; border-radius: 4px; }
 .dn-md pre { background: var(--dn-muted-bg); padding: 8px; border-radius: 6px; overflow: auto; }
+.dn-md .dn-diff-add { display: inline-block; min-width: 100%; background: color-mix(in srgb, #2da44e 18%, transparent); }
+.dn-md .dn-diff-del { display: inline-block; min-width: 100%; background: color-mix(in srgb, #cf222e 16%, transparent); }
 .dn-md ul, .dn-md ol { margin: 4px 0; padding-left: 20px; }
 .dn-md h3, .dn-md h4, .dn-md h5, .dn-md h6 { margin: 8px 0 4px; font-size: 13px; color: var(--dn-soft); }
 .dn-md a { color: var(--dn-link); }
@@ -193,6 +195,8 @@ html.dn-dark .dn-risk-low { background: rgba(46, 160, 67, .16); color: #3fb950; 
 .dn-dg-elabel { fill: var(--dn-soft); font-size: 11px; paint-order: stroke; stroke: var(--dn-bg); stroke-width: 4px; }
 
 /* changed since your last visit */
+.dn-changed.dn-stale { color: #9a6700; background: color-mix(in srgb, #d4a72c 18%, transparent); }
+html.dn-dark .dn-changed.dn-stale { color: #e3b341; }
 .dn-changed { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--dn-link) 15%, transparent); color: var(--dn-link); font: 600 11px/1.6 -apple-system, sans-serif; }
 
 /* the deploy card, pinned at the top of the box */

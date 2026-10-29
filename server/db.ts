@@ -97,7 +97,9 @@ for (const sql of ['alter table annotations add column risk text', "alter table 
   'alter table users add column agent_at text', 'alter table users add column extension_at text',
   // the PR's preview deploy (https URL) and its stack (JSON [{number, title}], bottom first); a note's path on the preview
   "alter table pulls add column preview text not null default ''", "alter table pulls add column stack text not null default ''",
-  'alter table annotations add column try_path text'])
+  'alter table annotations add column try_path text',
+  // the note's first line as it read at upload: the extension finds it again after a push moves it
+  'alter table annotations add column code text'])
   try { db.exec(sql) } catch (e) { if (!/duplicate column/.test(String(e))) throw e }
 db.exec('create unique index if not exists users_github on users(github_id)')
 // every note and file has its author: an upload replaces only the uploader's own. Rows from before were all the PR's

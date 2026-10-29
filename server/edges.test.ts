@@ -197,6 +197,9 @@ describe('extension sign-in (/connect)', () => {
     const back = new URL(first.data.location)
     expect(`${back.origin}${back.pathname}`).toBe(chrome)
     expect(back.searchParams.get('state')).toBe(state)
+    expect(back.searchParams.get('iss')).toMatch(/^https?:\/\//)
+    const proxied = await call('/api/connect', { cookie: dev, headers: { origin: 'https://dn.example' }, body: { redirect_uri: chrome, state, challenge } })
+    expect(new URL(proxied.data.location).searchParams.get('iss')).toBe('https://dn.example') // the page's origin, not http:// behind a proxy
     expect((await trade(first.code, 'w'.repeat(50))).status).toBe(400) // wrong verifier: the code is gone too
     expect((await trade(first.code)).status).toBe(400)
     expect((await trade((await allow()).code, verifier, firefox)).status).toBe(400) // another redirect than allowed
@@ -456,13 +459,14 @@ describe('repository rules and the deploy card', () => {
     const put = (n: number, body: unknown) => call(`/api/v1/pulls/stack/app/${n}`, { token, method: 'PUT', body })
     const get = async (n: number) => (await call(`/api/v1/pulls/stack/app/${n}`, { token })).data
     const first = await put(41, { preview: 'https://pr-41.example.dev', stack: [{ number: 41, title: 'fee table' }, { number: 42, title: 'picker' }],
-      annotations: [{ path: 'a.ts', body: 'x', try: '/checkout?step=2' }] })
+      annotations: [{ path: 'a.ts', body: 'x', try: '/checkout?step=2' }, { path: 'a.ts', line: 3, body: 'y', code: '  if (total  <= 0)\n return ' }, { path: 'a.ts', body: 'z', code: 'no line' }] })
     expect(first.status).toBe(200)
     expect((await put(42, { preview: 'http://pr-42.example.dev', stack: [{ number: 41 }, { number: 42, title: 'picker' }, { number: 43 }, { number: 41 }, 'x', { number: -1 }],
       annotations: [{ path: 'a.ts', body: 'x', try: '//evil.example' }, { path: 'b.ts', body: 'x', try: 'javascript:alert(1)' }, { path: 'c.ts', body: 'x', try: '/a b' }] })).status).toBe(200)
     const one = await get(41), two = await get(42)
     expect(one.preview).toBe('https://pr-41.example.dev/')
     expect(one.annotations[0].try).toBe('/checkout?step=2')
+    expect(one.annotations.map((a: { code: unknown }) => a.code)).toEqual([null, 'if (total <= 0) return', null]) // whitespace collapsed, only with a line
     expect(two.preview).toBe('') // https only
     expect(two.annotations.map((a: { try: unknown }) => a.try)).toEqual([null, null, null]) // a path here, never another host
     expect(two.stack).toEqual([{ number: 41, title: '', notes: true }, { number: 42, title: 'picker', notes: true }, { number: 43, title: '', notes: false }])
