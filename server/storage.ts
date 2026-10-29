@@ -119,17 +119,19 @@ export function storage(uploads: string, config: () => S3Config | null, useS3: (
       const file = path.join(dir(pull), name)
       return fs.existsSync(file) ? fs.readFileSync(file) : null
     },
-    // ponytail: one DELETE per object, 20 at a time (an account delete can hold thousands); DeleteObjects if that gets slow
+    // ponytail: one DELETE per object, 20 at a time (an account delete can hold thousands); DeleteObjects if that gets slow.
+    // Returns the files the bucket didn't delete (after its retries), for the caller to try again later.
     async remove(files: { backend: string; pull: string; name: string }[]) {
-      const cfg = files.some((f) => f.backend === 's3') ? config() : null
+      const cfg = files.some((f) => f.backend === 's3') ? config() : null, failed: typeof files = []
       const drop = async (f: { backend: string; pull: string; name: string }) => {
-        if (f.backend === 's3') { if (cfg) await s3(cfg, 'DELETE', objectKey(cfg, f.pull, f.name)).catch(() => {}) }
+        if (f.backend === 's3') await (cfg ? s3(cfg, 'DELETE', objectKey(cfg, f.pull, f.name)) : Promise.reject(new Error('no bucket'))).catch(() => { failed.push(f) })
         else fs.rmSync(path.join(dir(f.pull), f.name), { force: true })
       }
       for (let i = 0; i < files.length; i += 20) await Promise.all(files.slice(i, i + 20).map(drop))
       for (const p of new Set(files.map((f) => f.pull))) {
         try { fs.rmdirSync(dir(p)) } catch {} // only when empty
       }
+      return failed
     },
   }
 }

@@ -35,7 +35,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
 
 - Keep it small: few files, no dependency for what a few lines do. Mark deliberate shortcuts with `// ponytail:`.
 - Access: everything about a PR is visible only to members of the account that owns its repository; other
-  accounts' rows answer 404. Tokens are stored as sha256 only.
+  accounts' rows answer 404. Tokens and sessions are stored as sha256 only; the extension keeps its tokens in its own
+  IndexedDB (`vault`, background.js), never in `storage.local`, which content scripts can read.
 - Roles per account (`memberships.role`): `owner` (made it; can't be removed or demoted; deletes the account),
   `admin` (invites, changes roles, manages repositories, renames), `member` (reads, uploads, removes its own notes;
   every note and file has its author, `annotations.user_id` / `files.user_id`, and an upload replaces only the uploader's own). `users.admin` = super
@@ -66,7 +67,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
   server-wide): always look names up within the caller's accounts.
 - Extension sign-in (`/connect`, app.ts): one-time code + PKCE, codes only to `EXTENSION_IDS` redirect addresses; the
   background (not the popup) runs `launchWebAuthFlow`. Content scripts: the newest copy on a page owns it (`dnOwner`), a copy that gets notes takes it back.
-- Bearer tokens authenticate only `/api/v1/*`, `/files/*` and `/mcp` (which takes nothing else, never the cookie); cookie writes need `Sec-Fetch-Site: same-origin`.
+- Bearer tokens authenticate only `/api/v1/*`, `/files/*` and `/mcp` (which takes nothing else, never the cookie); cookie writes need `Sec-Fetch-Site: same-origin`
+  (or this site's `Origin`); only a Bearer header skips that check (a Basic auth proxy's doesn't). Invitations by email are listed only to a user whose email GitHub proved.
 - The web app's page gets `PAGE_CSP` and its `__ORIGIN__` filled (app.ts `page()`); keep index.html's SEO tags there.
 - Diff DOM, one adapter per host in `SITES` (`extension/content.js`); if notes stop appearing, re-check these first:
   GitHub React view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`) and classic (`.file-header[data-path]`,

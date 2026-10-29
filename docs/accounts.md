@@ -47,7 +47,9 @@ There is no undo for any of these, and files are removed from disk or the bucket
 
 Account → **members** → email + role → **invite** → **copy link** and send it yourself: DiffNotes sends no emails. The link works for 7 days. New people
 choose a name and password; people who already have a user enter their password to join. With GitHub sign-in on, they
-can also **continue with GitHub** when the invited email is one of their GitHub account's verified emails.
+can also **continue with GitHub** when the invited email is one of their GitHub account's verified emails. An email
+invitation also waits on the dashboard of a user with that email once GitHub proved it is theirs (they signed in with
+GitHub); a user whose email nobody proved gets it only through the link.
 
 With GitHub sign-in on, invite a **GitHub login** instead of an email (`octocat` or `@octocat`): the invitation stays
 pending until that login signs in with GitHub (which makes their user if they have none, even with sign-up closed),

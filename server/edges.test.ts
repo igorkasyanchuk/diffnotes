@@ -30,7 +30,7 @@ if (!built) { fs.mkdirSync(path.dirname(index), { recursive: true }); fs.writeFi
 afterAll(() => { if (!built) fs.rmSync(index) })
 
 const { app, glob, recordFailure, throttle } = await import('./app.ts')
-const { db, setSetting } = await import('./db.ts')
+const { db, getSetting, setSetting } = await import('./db.ts')
 const { call, login, mcp } = client(app)
 
 let admin = '', token = '', accountId = '', devId = '', dev = ''
@@ -155,6 +155,58 @@ describe('people', () => {
     const last = (await call('/api/tokens', { cookie: admin })).data[0]
     expect((await call(`/api/tokens/${last.id}`, { cookie: admin, method: 'DELETE' })).status).toBe(200)
     expect((await call('/api/tokens', { cookie: admin })).data).toHaveLength(49)
+  })
+
+  it('keeps sessions as hashes, takes the cookie name from before, and gives no other scheme or foreign page a cookie write', async () => {
+    const cookie = await login('admin@example.com', 'admin-pass')
+    expect(cookie.startsWith('__Host-sid=')).toBe(true)
+    const id = decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1)).split('.')[0]
+    expect(db.prepare('select 1 from sessions where id = ?').get(id)).toBeUndefined()
+    expect(db.prepare('select 1 from sessions where id = ?').get(createHash('sha256').update(id).digest('hex'))).toBeTruthy()
+    // the old name only for a session from before 1.6.1: a sibling subdomain can set sid, with anyone's signed value
+    const old = cookie.replace('__Host-sid=', 'sid=')
+    expect((await call('/api/me', { cookie: old })).data.user).toBeNull()
+    db.prepare('update sessions set created_at = ? where id = ?').run(new Date(Date.parse(getSetting<string>('sessions_hashed')!) - 1000).toISOString(), createHash('sha256').update(id).digest('hex'))
+    expect((await call('/api/me', { cookie: old })).data.user.email).toBe('admin@example.com') // signed in before 1.6.1
+    expect((await call('/api/me', { cookie, headers: { authorization: 'Basic eDp5' } })).data.user.email).toBe('admin@example.com') // behind a Basic auth proxy
+    const write = (headers: Record<string, string>) => call('/api/password', { cookie, method: 'PUT', body: { current: 'wrong' }, headers })
+    expect((await write({ authorization: 'Basic eDp5', 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+    expect((await write({ origin: 'https://evil.example' })).status).toBe(403) // no Sec-Fetch-Site: an older browser's Origin decides
+    expect((await write({ origin: 'https://dn.example' })).status).toBe(401)
+    // a body's real size counts, whatever content-length says (or when there is none)
+    expect((await call('/api/password', { cookie, method: 'PUT', body: { current: 'x'.repeat(2000) } })).status).toBe(413)
+  })
+
+  it('caps repository names before parsing them, and keys IPv6 clients by /64', async () => {
+    const { net64, repoName } = await import('./app.ts')
+    const t = Date.now()
+    expect(repoName('a/' + '/'.repeat(200_000) + 'b')).toBe('')
+    expect(Date.now() - t).toBeLessThan(100)
+    expect(net64('2001:db8:1:2:3:4:5:6')).toBe('2001:db8:1:2::/64')
+    expect(net64('2001:DB8::1%en0')).toBe('2001:db8:0:0::/64')
+    expect(net64('::1')).toBe('0:0:0:0::/64')
+    expect(net64('::ffff:1.2.3.4')).toBe('::ffff:1.2.3.4')
+    expect(net64('1.2.3.4')).toBe('1.2.3.4')
+  })
+
+  it('lists an invitation by email only once GitHub proved that address', async () => {
+    const squat = await invite(accountId, 'cto@corp.example', 'squat-password')
+    const corp = (await call('/api/accounts', { cookie: admin, body: { name: 'Corp' } })).data.id
+    await call(`/api/accounts/${corp}/invites`, { cookie: admin, body: { email: 'cto@corp.example', role: 'admin' } })
+    expect((await call('/api/dashboard', { cookie: squat.cookie })).data.invites).toEqual([])
+    db.prepare("update users set github_id = 'gh-cto' where email = 'cto@corp.example'").run()
+    expect((await call('/api/dashboard', { cookie: squat.cookie })).data.invites).toMatchObject([{ account: 'Corp', role: 'admin' }])
+    db.prepare('delete from accounts where id = ?').run(corp) // MAX_ACCOUNTS: later tests make theirs
+    db.prepare("delete from users where email = 'cto@corp.example'").run()
+  })
+
+  it('tries files the bucket refused to delete again, hourly', async () => {
+    const { purge } = await import('./app.ts')
+    const add = db.prepare('insert into orphans (backend, pull_id, name) values (?, ?, ?)')
+    add.run('disk', 'gone', 'a.png'); add.run('s3', 'gone', 'b.png') // no bucket configured here: that one stays
+    await purge()
+    expect(db.prepare('select backend from orphans').all()).toEqual([{ backend: 's3' }])
+    db.prepare('delete from orphans').run()
   })
 
   it('sweeps the failure log once it is large', () => {
@@ -498,7 +550,7 @@ describe('GitHub sign-in', () => {
     try {
       const r = await call(`/auth/github/callback?code=c1&state=${state || s.loc.searchParams.get('state')}`, { headers: { cookie: [s.cookie, session].filter(Boolean).join('; ') } })
       const set = r.res.headers.get('set-cookie') ?? ''
-      return { to: r.res.headers.get('location') ?? '', cookie: set.match(/sid=[^;]+/)?.[0] ?? '', link: set.match(/ghlink=[^;]+/)?.[0] ?? '' }
+      return { to: r.res.headers.get('location') ?? '', cookie: set.match(/(?:__Host-)?sid=[^;]+/)?.[0] ?? '', link: set.match(/ghlink=[^;]+/)?.[0] ?? '' }
     } finally { spy.mockRestore() }
   }
   const mail = (email: string, primary = true, verified = true) => ({ email, primary, verified })

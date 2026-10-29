@@ -618,7 +618,8 @@
     document.body.append(box)
   }
   onPage('keydown', (e) => {
-    if (!pull || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
+    // isTrusted: a person's keys, not the site's script dispatching o for a preview the click handler would refuse it
+    if (!e.isTrusted || !pull || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
     // composedPath: an input in a shadow root reaches the document as its host. A checkbox (the "Viewed" box) takes no typing
     const t = e.composedPath()[0]
     if (t instanceof Element && t.closest('input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable]:not([contenteditable="false"])')) return
@@ -647,13 +648,16 @@
   // Safari has no manifest sandbox pages (Chromium has, Firefox since 154): there demo.html would be a privileged
   // extension page whose CSP blocks inline scripts, so a demo stays a link to try on the DiffNotes server instead.
   const sandboxed = !chrome.runtime.getURL('').startsWith('safari')
+  // '*': the sandboxed demo.html has an opaque origin, so the frame's src is checked instead.
+  // ponytail: a site script that navigates the frame without changing its src still gets the message; it is the PR's own demo or video
+  const ours = (f) => f.getAttribute('src') === chrome.runtime.getURL('demo.html')
   function demoFrame(html) {
     if (!sandboxed) return el('div', 'dn-hint', 'Live demos don’t run in Safari: use “open in DiffNotes” to try it.')
     const f = el('iframe', 'dn-demo-frame')
     f.setAttribute('sandbox', 'allow-scripts')
     f.setAttribute('referrerpolicy', 'no-referrer')
     // every load: moving an iframe in the DOM reloads it
-    f.addEventListener('load', () => f.contentWindow.postMessage({ dnDemo: html }, '*'))
+    f.addEventListener('load', () => ours(f) && f.contentWindow.postMessage({ dnDemo: html }, '*'))
     f.src = chrome.runtime.getURL('demo.html')
     return f
   }
@@ -676,7 +680,7 @@
     file(f.dataset.dnServer, f.dataset.dnSrc).then((u) => {
       if (!u) return
       // every load: moving an iframe in the DOM reloads it
-      f.addEventListener('load', () => f.contentWindow.postMessage({ dnVideo: u }, '*'))
+      f.addEventListener('load', () => ours(f) && f.contentWindow.postMessage({ dnVideo: u }, '*'))
       f.src = chrome.runtime.getURL('demo.html')
     })
   }
@@ -692,7 +696,7 @@
   function inlineDemo(link, server) {
     const wrap = el('div', 'dn-demo'), bar = el('div', 'dn-demo-bar'), open = el('button', 'dn-demo-open', 'expand ⤢')
     open.type = 'button'
-    open.addEventListener('click', () => preview(link))
+    open.addEventListener('click', (e) => { if (e.isTrusted) preview(link) }) // a person's click, as for the file links
     bar.append(el('span', 'dn-demo-tag', 'live demo · sandboxed'), open)
     wrap.append(bar)
     // after the paragraph, and after the demos of earlier links in it, so they keep the text's order
@@ -704,7 +708,11 @@
 
   // an attached md / csv / txt file in a modal, an html demo in a sandboxed frame; images open in the lightbox
   async function preview(link) {
-    const url = link.dataset.dnFile, name = decodeURIComponent(url.split('/').pop())
+    const url = link.dataset.dnFile
+    // only a file of this PR on the server that sent it: the link's data-* are the page's DOM, which the site's own
+    // scripts could forge to have the background fetch any file of any connected server into the page
+    if (!pull?.pulls?.some((p) => p.server === link.dataset.dnServer && typeof p.id === 'string' && url?.startsWith(`/files/${p.id}/`))) return
+    const name = decodeURIComponent(url.split('/').pop())
     // through the cache: a video's frame asks for the same file again (fetched once, not twice per open)
     const u = await file(link.dataset.dnServer, url)
     if (!u) return
@@ -738,7 +746,7 @@
   }
   onPage('click', (e) => {
     const link = e.target.closest?.('.dn-file-link')
-    if (link) { e.preventDefault(); preview(link) }
+    if (link) { e.preventDefault(); if (e.isTrusted) preview(link) } // a person's click, not the site's script
   })
 
   // Gallery: a click on an image opens every image of the same note (or summary); ← → move, Esc closes.

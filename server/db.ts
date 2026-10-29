@@ -61,6 +61,8 @@ db.exec(`
     title text not null default '', body text not null default '', position integer not null default 0, risk text);
   create index if not exists annotations_pull on annotations(pull_id);
   -- uploaded files: bytes live on disk or in S3 (backend), this row is what quotas, stats and /files read
+  -- files a bucket refused to delete: the hourly purge tries them again (no row would point at them otherwise)
+  create table if not exists orphans (backend text not null, pull_id text not null, name text not null, primary key (backend, pull_id, name));
   create table if not exists files (
     pull_id text not null references pulls(id) on delete cascade, name text not null, type text not null,
     size integer not null, backend text not null default 'disk', primary key (pull_id, name));
@@ -178,6 +180,12 @@ export const getSetting = <T>(k: string): T | null => {
 }
 export const setSetting = (k: string, v: unknown) =>
   db.prepare('insert into settings (key, value) values (?, ?) on conflict do update set value = excluded.value').run(k, JSON.stringify(v))
+
+// sessions are kept as sha256 of the cookie's id since 1.6.1: the ids from before are hashed once (nobody is signed out).
+// sessions_hashed: since when, so the cookie's old name is taken only for sessions from before (app.ts sessionKey)
+const hashSession = db.prepare('update sessions set id = ? where id = ?')
+for (const { id } of db.prepare('select id from sessions where length(id) != 64').all() as { id: string }[]) hashSession.run(sha256(id), id)
+if (!getSetting('sessions_hashed')) setSetting('sessions_hashed', now())
 
 // password '' = none (signed up with GitHub): only GitHub signs them in until they set one on Settings
 export function createUser(email: string, password: string, name = '', admin = 0) {

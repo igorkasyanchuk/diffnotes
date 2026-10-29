@@ -10,8 +10,11 @@
 - **Per account.** A PR's notes and files are visible only to members of the account that owns its repository (super
   admins too only where they are members; the one exception is the `DEMO_PR` live demo, readable by every signed-in
   user). Other users get `404`, so they can't even tell a PR is annotated.
-- **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind `https://` `PUBLIC_URL`), valid 30
-  days. Changing your password signs out every other session.
+- **Sessions**: an HMAC-signed, `HttpOnly`, `SameSite=Lax` cookie (`__Host-sid`, `Secure`, behind an `https://`
+  `PUBLIC_URL`, so no sibling subdomain can set it), valid 30 days, stored as SHA-256 only: a copy of the database or a
+  backup signs nobody in. Changing your password signs out every other session. Cookie writes need `Sec-Fetch-Site:
+  same-origin` (a browser too old to send it: an `Origin`, when it sends one, must be this site's); only a Bearer token skips that (an
+  `Authorization: Basic` header from a proxy in front doesn't).
 - **Tokens** (skill, MCP clients, extension): random `dn_…` values, shown once, stored only as SHA-256. Delete one on
   Settings to revoke it. A token only reads and writes notes and files (`/api/v1/*`, `/files/*`, `/mcp`): it can't make
   more tokens, change the password or use `/admin`. `/mcp` takes the token only, never the session cookie, and refuses
@@ -96,7 +99,9 @@ img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; 
   `<iframe sandbox="allow-scripts">`, posts the HTML into it, and runs it in a sandboxed `srcdoc` frame inside, which
   inherits the CSP. The demo
   cannot read GitHub's DOM, cookies or storage, cannot call the extension (no `chrome.runtime`), cannot navigate the
-  tab, open popups or submit forms, and cannot load or send anything over the network.
+  tab, open popups or submit forms, and cannot load or send anything over the network. One gap no CSP closes: WebRTC
+  (a STUN request) and DNS prefetching can still tell a server of the demo author's choosing that someone opened it,
+  and from which IP address; it carries nothing from GitHub, the notes or the extension.
 - **In the web app** the server sends `.html` as `text/html` with the same CSP (plus `frame-ancestors 'self'`) only
   when it is loaded in a frame (`Sec-Fetch-Dest: iframe`), and the web app frames it with `sandbox="allow-scripts"`.
   Opened as a page of its own (a link, a new tab) it is served as plain-text source, so a demo can never pose as a
@@ -116,7 +121,9 @@ HTML-escaped first, only `http(s)` and relative URLs survive in links (not `//ho
 from the note's own server (a remote image becomes a link, so no third party learns who read a note), and generated
 tags are protected from later passes. Attached `.md` / `.csv` / `.txt` files go through the same escaping.
 
-The extension holds tokens in its background worker; the sites' pages never see them. It fetches only
+The extension holds tokens in its own IndexedDB, which only its background worker and popup reach (not
+`storage.local`, which its content scripts on the sites can read); the sites' pages never see them. It previews only
+files of the PR on the page, from the server that sent them, on a person's click. It fetches only
 `/files/<pull>/<name>` paths from connected servers, connects only to `https://` servers (`http://` for localhost),
 parses notes in an inert `<template>` so no image loads before its URL points at the right server, and its
 `demo.html` is reachable only through a per-session URL (`use_dynamic_url`), so pages can't detect the extension.

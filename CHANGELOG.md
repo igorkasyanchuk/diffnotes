@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-30
+
+### Security
+
+- **Invitations by email** wait on a dashboard only for a user whose email GitHub proved: someone who made a user for
+  another person's address through their own invitation link no longer catches the invitations other teams send it.
+- **A long repository name** can't stall the server any more (its parsing was quadratic in a run of `/`).
+- **Request bodies** are measured, not taken from `content-length` (a chunked request skipped `MAX_BODY_KB`).
+- **Sessions** are stored as SHA-256 (nobody is signed out by the change); the cookie is `__Host-sid` over https (the old
+  `sid` is taken only for a session from before); only a Bearer token skips the cross-site check (a Basic auth
+  proxy's header doesn't), and a browser without `Sec-Fetch-Site` that sends an `Origin` must send this site's.
+- **Login throttles** key IPv6 clients by /64, sweep at most once a minute and keep at most 50,000 entries.
+- **Files a bucket refused to delete** are kept and tried again by the hourly purge, instead of staying in the bucket.
+- **Extension**: tokens live in the extension's own IndexedDB, out of `storage.local` (which its content scripts can
+  read); a file preview opens only on a person's click and only for a file of the PR on the page; demos and videos are
+  posted only into its own `demo.html`.
+- **Skill**: the base branch is fetched as `refs/heads/$B` (a branch named like a git option can't act as one); what it
+  reads (code, PR text, `.diffnotes.yml`, stored notes) is data, never instructions; a PR's code runs only for a trusted
+  author and without `DIFFNOTES_TOKEN`. The MCP tool descriptions say the same. `install.sh` works with spaces in `$HOME`.
+
 ## [1.6.0] - 2026-10-29
 
 ### Added
@@ -239,7 +259,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.3.1...v1.4.0

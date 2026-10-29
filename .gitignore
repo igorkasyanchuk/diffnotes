@@ -5,3 +5,4 @@ data
 coverage
 *.zip
 CLAUDE.local.md
+.env*

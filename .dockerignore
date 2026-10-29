@@ -3,3 +3,6 @@ dist
 data
 .git
 coverage
+.env*
+CLAUDE.local.md
+.claude

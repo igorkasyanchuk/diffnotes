@@ -1,15 +1,39 @@
 // Talks to the DiffNotes servers for the content script (it holds the tokens; pages never see them).
-// storage.local.servers: [{server, token, user, minted}], one per connected server; minted: the token came from
-// "Sign in and connect", so Remove deletes it on the server too (a pasted one may be the agent's as well).
+// storage.local.servers: [{server, user, minted}], one per connected server (the popup lists them); minted: the token came
+// from "Sign in and connect", so Remove deletes it on the server too (a pasted one may be the agent's as well).
+// The tokens themselves are in this extension's own IndexedDB ({server: token}): content scripts can read storage.local,
+// never the extension's IndexedDB (theirs is the site's).
+const vault = (mode, fn) => new Promise((ok, no) => {
+  const open = indexedDB.open('diffnotes', 1)
+  open.onupgradeneeded = () => open.result.createObjectStore('kv')
+  open.onerror = () => no(open.error)
+  open.onsuccess = () => {
+    try { // a throw in this handler would leave the promise, and every message waiting on it, pending forever
+      const t = open.result.transaction('kv', mode), r = fn(t.objectStore('kv'))
+      t.oncomplete = () => { open.result.close(); ok(r?.result) }
+      t.onerror = t.onabort = () => { open.result.close(); no(t.error) }
+    } catch (e) { open.result.close(); no(e) }
+  }
+})
+const tokens = async () => (await vault('readonly', (kv) => kv.get('tokens'))) ?? {}
+const keep = (map) => vault('readwrite', (kv) => kv.put(map, 'tokens'))
 async function servers() {
   const s = await chrome.storage.local.get(['servers', 'server', 'token', 'user'])
-  if (s.servers) return s.servers
   // single-server settings of the first release
-  if (!s.server || !s.token) return []
-  const list = [{ server: s.server, token: s.token, user: s.user }]
-  await chrome.storage.local.set({ servers: list })
-  await chrome.storage.local.remove(['server', 'token', 'user'])
-  return list
+  const list = s.servers ?? (s.server && s.token ? [{ server: s.server, token: s.token, user: s.user }] : [])
+  // tokens kept in storage.local before 1.6.1: into the vault first, then out of storage.local
+  if (list.some((x) => x.token) || s.token) {
+    await keep({ ...(await tokens()), ...Object.fromEntries(list.filter((x) => x.token).map((x) => [x.server, x.token])) })
+    await chrome.storage.local.set({ servers: list.map(({ token, ...x }) => x) })
+    await chrome.storage.local.remove(['server', 'token', 'user'])
+  }
+  const map = await tokens()
+  return list.map(({ token, ...x }) => ({ ...x, token: map[x.server] ?? token })).filter((x) => x.token)
+}
+// the list without tokens to storage.local, the tokens of exactly those servers to the vault
+async function store(list) {
+  await keep(Object.fromEntries(list.map((x) => [x.server, x.token])))
+  await chrome.storage.local.set({ servers: list.map(({ token, ...x }) => x) })
 }
 
 // every request says it's the extension, so the server's setup checklist can tick "extension connected"
@@ -58,10 +82,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.type === 'signin') return signin()
     if (msg.type === 'remove') {
       const s = (await servers()).find((x) => x.server === msg.server)
-      if (!s) return { ok: true }
-      if (s.minted) await revoke(s)
-      await chrome.storage.local.set({ servers: (await servers()).filter((x) => x.server !== s.server) })
-      chrome.permissions.remove({ origins: [`${s.server}/*`] }).catch(() => {})
+      if (s?.minted) await revoke(s)
+      // without s too: an entry whose token is missing from the vault (servers() leaves it out) still leaves the list
+      await store((await servers()).filter((x) => x.server !== msg.server))
+      chrome.permissions.remove({ origins: [`${msg.server}/*`] }).catch(() => {})
       return { ok: true }
     }
     if (msg.type === 'clear') return chrome.action.setBadgeText({ tabId: sender.tab.id, text: '' })
@@ -110,7 +134,7 @@ async function save(entry) {
   const old = (await servers()).find((x) => x.server === entry.server)
   if (old?.minted && old.token !== entry.token) await revoke(old)
   // read again after the network call: a server removed or added meanwhile stays so
-  await chrome.storage.local.set({ servers: [...(await servers()).filter((x) => x.server !== entry.server), entry] })
+  await store([...(await servers()).filter((x) => x.server !== entry.server), entry])
   await chrome.storage.session.remove('draft')
 }
 // a server that doesn't answer doesn't hold up Remove (its token then stays on Settings)
