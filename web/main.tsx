@@ -203,7 +203,7 @@ function useSubmit(fn: () => Promise<unknown>, done?: string) {
 }
 
 type SignIn = { github: boolean; signup: boolean; demo: { repository: string; number: number } | null } // what /api/me says this server offers besides a password
-type Setup = { agent: boolean; extension: boolean; notes: boolean }
+type Setup = { extension: boolean; seen: boolean; agent: boolean; notes: boolean }
 type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; has_password: boolean; setup: Setup }
 
 const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" />diffnotes<span className="cursor">_</span></Link>
@@ -251,7 +251,7 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
         <span className="side-h">accounts</span>
         {me.accounts.map((a) => <Link key={a.id} to={`/accounts/${a.id}`} className={on(`/accounts/${a.id}`)}>{a.name}</Link>)}
         <span className="side-h">you</span>
-        {setupN < 3 && <Link to="/welcome" className={on('/welcome')}>setup <span className="chip hot">{setupN}/3</span></Link>}
+        {setupN < STEPS.length && <Link to="/welcome" className={on('/welcome')}>setup <span className="chip hot">{setupN}/{STEPS.length}</span></Link>}
         <Link to="/settings" className={on('/settings')}>settings</Link>
         {!!me.user.admin && <Link to="/admin" className={on('/admin')}>server admin</Link>}
         <button className="link" onClick={logout}>logout</button>
@@ -259,8 +259,8 @@ function AppLayout({ me, path, children }: { me: Me; path: string; children: Rea
       <div className="side-me hint">{me.user.email}</div>
     </aside>
     <div className="app-main">
-      {setupN < 3 && path !== '/welcome' && <div className="nag">
-        <span><b>finish setting up:</b> {setupN} of 3 steps done (agent, browser extension, first notes).</span>
+      {setupN < STEPS.length && path !== '/welcome' && <div className="nag">
+        <span><b>finish setting up:</b> {setupN} of {STEPS.length} steps done (browser extension, notes in a diff, agent, first notes).</span>
         <span><Link to="/welcome" className="btn primary">continue setup →</Link>{' '}
           <button type="button" className="link" onClick={() => { markSetup(me, STEPS); toast('setup hidden: the steps stay linked from settings') }}>I'm set up, hide this</button></span>
       </div>}
@@ -354,7 +354,7 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
   const intro = <div className="invite-intro">
     <p><b>{data.by ?? 'A teammate'}</b> invited you to <b>{data.account}</b>{data.role === 'admin' && ' as an admin'}.</p>
     <p className="hint">DiffNotes puts your coding agent's notes next to the changed lines of your pull requests, where your team reads them.
-      After joining, a short setup (about 5 minutes) connects your agent and your browser.</p>
+      After joining, connect your browser (about a minute) and their notes show up right inside their pull requests.</p>
   </div>
   // an open link: anyone joins, signed in already or with an email (a new user, or an existing one with its password)
   if (data.open) return <div className="narrow">
@@ -452,11 +452,11 @@ function Docs() {
     <ol className="docs-steps">
       <li><b>Add the extension.</b> <AddToChrome /> <span className="hint">Edge, Brave and Arc install it from the Chrome Web Store too;
         Firefox and Safari: <a href={`${DOCS}/extension.md`} target="_blank" rel="noreferrer">extension docs</a>.</span></li>
-      <li><b>Connect it.</b> Open its popup, press <b>Sign in and connect</b>{own && <> with <code>{origin}</code> as the server</>}, sign in
-        and press <b>allow</b>. That's all: no token to copy. (Safari: make a token on <Link to="/settings">settings</Link> and paste it.)</li>
-      <li><b>Install the agent skill</b> (Claude Code, Codex, Cursor and other agents that read skills):
-        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} /></li>
-      <li><b>Add your repository</b> to your account (dashboard → your account → repositories). Only its members see its notes.</li>
+      <li><b>Connect it.</b> It opens a tab on install (later: its popup): press <b>Sign in and connect</b>{own && <> with <code>{origin}</code> as the server</>}
+        and <b>allow</b>. No token to copy. (Safari: make a token on <Link to="/settings">settings</Link> and paste it.)</li>
+      <li><b>Set up your agent</b> (Claude Code, Codex, Cursor and other agents that read skills): on the <Link to="/welcome">setup page</Link>, press
+        <b> set up my agent</b> and run the one command it shows. It installs the skill and saves its token: nothing to add to your shell profile.</li>
+      <li><b>That's it.</b> A repository is added to your account on its first upload; invite teammates to that account and they see its notes.</li>
     </ol>
 
     <h2 id="agent">the agent</h2>
@@ -860,13 +860,18 @@ function PullPage({ id }: { id: string }) {
   </>
 }
 
-// The setup flow after joining or signing up: three steps that tick themselves as they happen (the server sees the
-// extension's first request, the agent's first upload or MCP call and the first notes), polled while the page is open.
-// Each step can be marked done by hand, in this browser: an extension from before 1.2 doesn't say it's the extension.
-const STEPS = ['agent', 'extension', 'notes'] as const
+// The setup flow after joining or signing up, the same however you came: reading notes first (the extension, then
+// notes in a real diff: the payoff, a minute in), writing them second (the agent, the first PR). Every step ticks
+// itself as it happens (the server sees the extension connect and draw notes, the agent's first upload or MCP call, the
+// first notes), polled while the page is open; a reviewer skips the writing half with one click.
+const STEPS = ['extension', 'seen', 'agent', 'notes'] as const
 type Step = typeof STEPS[number]
 const skipKey = (me: Me) => `dn:setup-done:${me.user.id}` // per user: a shared browser has more than one
-const skipped = (me: Me): Step[] => { try { return JSON.parse(localStorage.getItem(skipKey(me)) ?? '[]') } catch { return [] } }
+// all three steps from before 'seen' (setup hidden back then): 'seen' too, so a hidden setup doesn't come back as 3 of 4
+const skipped = (me: Me): Step[] => {
+  try { const s: Step[] = JSON.parse(localStorage.getItem(skipKey(me)) ?? '[]'); return (['agent', 'extension', 'notes'] as const).every((x) => s.includes(x)) ? [...s, 'seen'] : s }
+  catch { return [] }
+}
 const setupDone = (me: Me) => STEPS.filter((s) => me.setup[s] || skipped(me).includes(s))
 // dn:change: App re-renders, so the sidebar's count and the bar on top follow
 const markSetup = (me: Me, steps: readonly Step[]) => {
@@ -875,70 +880,156 @@ const markSetup = (me: Me, steps: readonly Step[]) => {
   dispatchEvent(new Event('dn:change'))
   return next
 }
+// A step shown as a short loop of mockups, each with a caption: what you'll see and press. Stops on hover or focus
+// (and for reduced motion); the dots jump to a frame.
+function Mock({ frames, label }: { frames: { view: ReactNode; caption: ReactNode }[]; label: string }) {
+  const still = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)').matches, [])
+  const [i, setI] = useState(0), [hold, setHold] = useState(false)
+  useEffect(() => {
+    if (still || hold) return
+    const t = setTimeout(() => setI((n) => (n + 1) % frames.length), 2600)
+    return () => clearTimeout(t)
+  }, [i, hold, still, frames.length])
+  return <figure className="mock" aria-label={label} onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)}
+    onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
+    <div className="mock-view" key={i}>{frames[i].view}</div>
+    <figcaption>
+      <span className="mock-dots">{frames.map((_, j) => <button key={j} type="button" className={j === i ? 'on' : ''}
+        aria-label={`frame ${j + 1} of ${frames.length}`} aria-pressed={j === i} onClick={() => setI(j)} />)}</span>
+      <span aria-live={still || hold ? 'polite' : 'off'}>{frames[i].caption}</span>
+    </figcaption>
+  </figure>
+}
+const Win = ({ url, children }: { url: string; children: ReactNode }) => <div className="mk-win">
+  <div className="mk-bar"><i /><i /><i /><span className="mk-url">{url}</span></div><div className="mk-body">{children}</div></div>
+const Press = ({ children, pri }: { children: ReactNode; pri?: boolean }) => <span className={`mk-btn${pri ? ' pri' : ''} mk-press`}>{children}</span>
+
 function Welcome({ me }: { me: Me }) {
   // the account just joined (the invitation page sends its name): one of this user's, never any text a link carries
-  const joined = me.accounts.find((a) => a.name === new URLSearchParams(location.search).get('joined'))?.name
+  const q = new URLSearchParams(location.search)
+  // remembered in this browser: the extension's connect tab (another tab) comes back to /welcome?connected without it
+  const kept = () => { try { return localStorage.getItem(`dn:joined:${me.user.id}`) } catch { return null } }
+  const joined = me.accounts.find((a) => a.name === (q.get('joined') ?? kept()))?.name
+  useEffect(() => { try { if (joined) localStorage.setItem(`dn:joined:${me.user.id}`, joined) } catch { /* private mode */ } }, [joined])
   const [marked, setMarked] = useState(() => skipped(me))
   const done = (s: Step) => me.setup[s] || marked.includes(s)
   const current = STEPS.find((s) => !done(s))
   const [open, setOpen] = useState<Step | undefined>(current)
   useEffect(() => { setOpen(current) }, [current]) // a step ticked (here or elsewhere): on to the next
+  // the extension's own connect tab sends people here; a tick later, once the Toaster (mounted after this page) listens
+  useEffect(() => { if (q.has('connected')) setTimeout(() => toast('extension connected ✓')) }, [])
   // ponytail: polls /api/me (via dn:change) every 4 s while steps are left and the tab is shown, so ticks show up without a reload
   useEffect(() => {
     if (!current) return
     const t = setInterval(() => { if (!document.hidden) dispatchEvent(new Event('dn:change')) }, 4000)
     return () => clearInterval(t)
   }, [current])
-  const mark = (s: Step) => { setMarked(markSetup(me, [s])); toast('marked as done') }
+  const mark = (s: readonly Step[], what = 'marked as done') => { setMarked(markSetup(me, s)); toast(what) }
   // one token per place it goes, made right here and shown once; one per click, not two for a double click
   const [tokens, setTokens] = useState<Partial<Record<Step, string>>>({}), [making, setMaking] = useState(false)
   const make = (s: Step, name: string) => async () => {
     setMaking(true)
-    try { const { token } = await api('/api/tokens', { name }); setTokens((t) => ({ ...t, [s]: token })); toast('token created: copy it now, it is shown only once') }
+    try { const { token } = await api('/api/tokens', { name }); setTokens((t) => ({ ...t, [s]: token })); toast(`token created: it is in the ${s === 'agent' ? 'command' : 'line'} below, shown only once`) }
     catch (e) { toast((e as Error).message, true) } finally { setMaking(false) }
   }
-  const n = STEPS.filter(done).length
+  const n = STEPS.filter(done).length, hosted = location.origin === 'https://diffnotes.dev', host = location.host
+  const demo = me.demo && prUrl(me.demo.repository, me.demo.number)
   const item = (s: Step, title: string, why: string, body: ReactNode) => <li key={s} className={`setup-step${done(s) ? ' done' : ''}${current === s ? ' current' : ''}`}>
     <button type="button" className="setup-head" onClick={() => setOpen(open === s ? undefined : s)} aria-expanded={open === s}>
       <span className="setup-check" aria-hidden="true">{done(s) ? '✓' : STEPS.indexOf(s) + 1}</span>
       <b>{title}</b>
-      {current === s && <span className="tip">start here</span>}
+      {current === s && <span className="tip">next</span>}
       {done(s) && <span className="hint">done</span>}
     </button>
     {open === s && <div className="setup-body">
       <p className="hint">{why}</p>
       {body}
       {!done(s) && <p className="hint setup-wait"><span className="pulse" aria-hidden="true" /> this ticks itself once it happens ·{' '}
-        <button type="button" className="link" onClick={() => mark(s)}>I've done this</button></p>}
+        <button type="button" className="link" onClick={() => mark([s])}>I've done this</button></p>}
     </div>}
   </li>
+  const diffRows = <div className="mk-diff">
+    <div className="mk-line">  if (cart.items.length === 0)</div>
+    <div className="mk-line add">+   return {'{'} error: 'empty cart' {'}'}</div>
+    <div className="mk-line add">+ const fee = express ? 990 : 0</div>
+  </div>
+  const note = <div className="mk-note mk-in"><span className="mk-dn">DN</span><b>Express fee</b><span className="hint">a flat $9.90, charged after payment so a failed card never pays for shipping</span></div>
+  const readDone = done('extension') && done('seen')
   return <div className="setup">
     <h1>{joined ? `welcome to ${joined}` : 'welcome'}</h1>
-    <p className="lp-lead">{joined ? "You're in. " : ''}Three short steps and your pull requests carry notes your team reads right in the diff.</p>
-    <div className="setup-progress" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={n}><span style={{ width: `${(n / 3) * 100}%` }} /></div>
-    <p className="hint">{n} of 3 done{n === 3 ? '' : ', about a minute each'}</p>
+    <p className="lp-lead">{joined
+      ? <>You're in. Connect your browser and your team's notes show up right inside their pull requests: about a minute.</>
+      : <>A minute to see notes inside a pull request, two more and your agent writes them for yours.</>}</p>
+    <div className="setup-progress" role="progressbar" aria-valuemin={0} aria-valuemax={STEPS.length} aria-valuenow={n}><span style={{ width: `${(n / STEPS.length) * 100}%` }} /></div>
+    <p className="hint">{n} of {STEPS.length} done</p>
+    <h2 className="setup-h">read notes <span className="hint">· everyone</span></h2>
     <ol className="setup-list">
-      {item('agent', 'give your coding agent the skill', 'Claude Code, Codex, Cursor or any Agent Skills tool learns to write notes and upload them here.', <>
-        <p>1. install the skill (run it in a terminal):</p>
-        <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
-        <p>2. give it a token: {!tokens.agent && <button type="button" className="primary" disabled={making} onClick={make('agent', 'agent')}>make a token for my agent</button>}</p>
-        {tokens.agent && <><p className="hint">add these two lines to your shell profile (~/.zshrc or ~/.bashrc), then open a new terminal:</p>
-          <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${tokens.agent}`} /></>}
-        <p className="hint">It ticks at your agent's first upload (or its first MCP call).</p>
+      {item('extension', 'add the browser extension', "It draws your team's notes next to the changed lines on GitHub, GitLab and Bitbucket. Nothing is posted to the PR.", <>
+        <Mock label="adding and connecting the extension" frames={[
+          { view: <Win url="chromewebstore.google.com › DiffNotes"><div className="mk-row"><span className="mk-dn big">DN</span><b>DiffNotes</b><Press pri>Add to Chrome</Press></div></Win>,
+            caption: <>add it from the Chrome Web Store</> },
+          { view: <Win url="DiffNotes · connect"><b>DiffNotes is installed ✓</b>{!hosted && <span className="mk-input">{location.origin}</span>}<Press pri>Sign in and connect</Press></Win>,
+            caption: <>a tab opens by itself{hosted ? '' : <>: type <code>{location.origin}</code></>}, press <b>Sign in and connect</b></> },
+          { view: <Win url={`${host}/connect`}><b>connect the DiffNotes extension?</b><span className="hint">{me.user.email}</span><Press pri>allow</Press></Win>,
+            caption: <>you're signed in here already: press <b>allow</b></> },
+          { view: <Win url={`${host}/welcome`}><b className="mk-ok">✓ extension connected</b><span className="hint">this step ticks itself</span></Win>,
+            caption: <>done: it brings you back here for the next step</> },
+        ]} />
+        <p><AddToChrome primary /> <span className="hint">also Edge, Brave and Arc</span></p>
+        <p className="hint">Installed already? Click its icon in the toolbar (under the puzzle piece) and press <b>Sign in and connect</b>
+          {!hosted && <> with <code>{location.origin}</code> as the server</>}.</p>
+        <details className="hint"><summary>Safari, Firefox, or no sign-in window</summary>
+          <p>Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox" target="_blank" rel="noreferrer">a developer install from the repository</a> for now.
+            Without a sign-in window (Safari): {!tokens.extension ? <button type="button" className="btn small" disabled={making} onClick={make('extension', 'browser extension')}>make a token for the extension</button>
+              : 'paste this one line into the popup\'s Server field and press Connect:'}</p>
+          {tokens.extension && <Code text={JSON.stringify({ server: location.origin, token: tokens.extension })} />}
+        </details>
       </>)}
-      {item('extension', 'add the browser extension', 'It shows the notes next to the changed lines on GitHub, GitLab and Bitbucket. Nothing is posted to the PR.', <>
-        <p>1. <AddToChrome primary /> <span className="hint">Edge, Brave and Arc too; Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox" target="_blank" rel="noreferrer">load it from the repo</a></span></p>
-        <p>2. pin it (the puzzle icon in the toolbar), open its popup and press <b>Sign in and connect</b>
-          {location.origin !== 'https://diffnotes.dev' && <> with <code>{location.origin}</code> as the server</>}, then <b>allow</b> on the page it opens.</p>
-        <p className="hint">Safari, or a browser without a sign-in window: {!tokens.extension ? <button type="button" className="btn small" disabled={making} onClick={make('extension', 'browser extension')}>make a token for the extension</button> : 'paste this one line into the popup\'s Server field and press Connect:'}</p>
-        {tokens.extension && <Code text={JSON.stringify({ server: location.origin, token: tokens.extension })} />}
-      </>)}
-      {item('notes', 'annotate your first pull request', "On a branch with an open pull request, ask your agent this. Then open the PR's “Files changed”: the notes are there.", <>
-        <Code wrap text={AGENT_PROMPT} />
-        {me.demo && <p className="hint">No PR at hand? <Link to="/demo">See the live demo</Link> first.</p>}
+      {item('seen', 'see notes in a real diff', 'The moment it clicks: a pull request whose changed lines explain themselves.', <>
+        <Mock label="notes inside a pull request diff" frames={[
+          { view: <Win url="github.com › acme/shop › pull/42 › Files changed">{diffRows}</Win>, caption: <>open a pull request's <b>Files changed</b></> },
+          { view: <Win url="github.com › acme/shop › pull/42 › Files changed">{diffRows}{note}</Win>, caption: <>each change carries its note: what it does and why</> },
+          { view: <Win url="github.com › acme/shop › pull/42 › Files changed"><div className="mk-note mk-in"><span className="mk-dn">DN</span><b>9 notes · summary</b>
+            <span className="mk-row"><span className="mk-pill hi">high</span><code>payments/charge.ts</code></span><span className="mk-row"><span className="mk-pill">migration</span><code>add_express_fee</code></span></div>{diffRows}</Win>,
+            caption: <>on top: the summary, where to look hardest, the deploy steps</> },
+        ]} />
+        {demo ? <p><a className="btn primary" href={demo} target="_blank" rel="noreferrer">open the live demo pull request ↗</a>
+          <span className="hint"> a real PR on GitHub, annotated: readable by everyone signed in here</span></p>
+          : <p>Open any pull request your team annotated: the <Link to="/dashboard">dashboard</Link> lists them.</p>}
       </>)}
     </ol>
-    {n === 3 ? <div className="card setup-all"><b>✓ all set.</b> Your team sees your notes on every PR you annotate.{' '}
+    {readDone && joined && current && <div className="card setup-all"><b>✓ you read your team's notes now.</b> Writing notes for your own pull requests is below, whenever you open one.</div>}
+    <h2 className="setup-h">write notes <span className="hint">· when you open pull requests</span>
+      {!(done('agent') && done('notes')) && <button type="button" className="link" onClick={() => mark(['agent', 'notes'], 'writing skipped: it stays here if you need it')}>I only review, skip this</button>}</h2>
+    <ol className="setup-list" start={3}>
+      {item('agent', 'set up your coding agent', 'Claude Code, Codex, Cursor or any Agent Skills tool learns to explain a pull request and upload the notes here.', <>
+        <Mock label="setting up the agent" frames={[
+          { view: <div className="mk-term"><span className="mk-dim">$</span> curl -fsSL {host}/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh<span className="mk-caret" /></div>,
+            caption: <>run one command in a terminal (yours is below)</> },
+          { view: <div className="mk-term"><span className="mk-dim">$</span> curl -fsSL {host}/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh<br />installed: ~/.claude/skills/diffnotes<br />installed: ~/.agents/skills/diffnotes<br /><span className="mk-ok">token saved: ~/.config/diffnotes/env</span></div>,
+            caption: <>the skill and your token are in place: no shell profile to edit, no restart</> },
+          { view: <div className="mk-term"><span className="mk-dim">you ›</span> annotate this PR for its reviewers with DiffNotes<span className="mk-caret" /></div>,
+            caption: <>on a branch with an open pull request, ask your agent</> },
+          { view: <div className="mk-term"><span className="mk-dim">you ›</span> annotate this PR for its reviewers with DiffNotes<br /><span className="mk-ok">✓ uploaded 9 notes, 2 screenshots</span><br /><span className="mk-dim">github.com/acme/shop/pull/42/changes</span></div>,
+            caption: <>your team sees them in the diff</> },
+        ]} />
+        {!tokens.agent
+          ? <p><button type="button" className="primary" disabled={making} onClick={make('agent', 'agent')}>{making ? 'making…' : 'set up my agent'}</button>
+            <span className="hint"> makes a token and puts it in the command</span></p>
+          : <><p>Run this in a terminal (once per computer):</p>
+            <Code prompt wrap text={`curl -fsSL ${location.origin}/install.sh | DIFFNOTES_SETUP_TOKEN=${tokens.agent} sh`} />
+            <p className="hint">It installs the skill for Claude Code, Codex and Cursor and saves the token to <code>~/.config/diffnotes/env</code>,
+              readable only by you. The token is shown once: run it now.</p></>}
+        <p className="hint">Rather use MCP (any MCP client, no skill)? <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/skill.md#mcp-instead-of-the-skill" target="_blank" rel="noreferrer">the MCP setup</a>.</p>
+      </>)}
+      {item('notes', 'annotate your first pull request', 'Your agent knows why it changed each line: it writes that down for your reviewers.', <>
+        <p>On a pushed branch with an open pull request, ask your agent:</p>
+        <Code wrap text={AGENT_PROMPT} />
+        <p className="hint">It reads the PR with <code>gh</code> (GitHub) or <code>glab</code> (GitLab), or asks you for the PR's address. Then open the PR's <b>Files changed</b>.</p>
+      </>)}
+    </ol>
+    {n === STEPS.length ? <div className="card setup-all"><b>✓ all set.</b> {me.setup.agent || me.setup.notes
+      ? 'Your team sees your notes on every PR you annotate.' : "You see your team's notes in every pull request they annotate."}{' '}
       <Link to="/dashboard">go to the dashboard →</Link></div>
       : <p className="hint">You can leave and come back: <Link to="/welcome">setup</Link> stays in the sidebar until it's done.</p>}
   </div>
@@ -964,15 +1055,18 @@ function Settings({ me }: { me: Me }) {
     <h1>settings</h1>
     <p className="hint">New here? The <Link to="/welcome">setup steps</Link> walk you through all of this.</p>
     <h2>connect your agent</h2>
-    <p>1. install the skill for Claude Code, Codex, Cursor and other Agent Skills tools:</p>
-    <Code prompt text={`curl -fsSL ${location.origin}/install.sh | sh`} />
-    <p>2. make a token below and add it to your shell profile (~/.zshrc or ~/.bashrc):</p>
-    {/* the placeholder must stay valid shell: `<token>` pasted into ~/.zshrc is a redirection and a parse error */}
-    <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${fresh || 'paste-your-token-here'}`} />
-    <p>3. in the browser extension's popup, paste this one line into the Server field (it fills both fields), then press Connect:</p>
-    <Code text={JSON.stringify({ server: location.origin, token: fresh || 'make-a-token-below' })} />
-    <p>4. on a branch with a pull request, ask your agent:</p>
-    <Code wrap text={AGENT_PROMPT} />
+    {/* the command only with a real token: a placeholder would pass install.sh's check and be saved */}
+    {fresh ? <><p>Run this once on each computer: it installs the skill (Claude Code, Codex, Cursor) and saves the token for it.</p>
+      <Code prompt wrap text={`curl -fsSL ${location.origin}/install.sh | DIFFNOTES_SETUP_TOKEN=${fresh} sh`} /></>
+      : <p>Make a token below: the one command that sets up your agent with it shows here.</p>}
+    <p className="hint">The browser extension needs no token: its popup's <b>Sign in and connect</b> does it.</p>
+    <details className="hint"><summary>Rather your shell profile, or Safari's extension</summary>
+      {/* the placeholder must stay valid shell: `<token>` pasted into ~/.zshrc is a redirection and a parse error */}
+      <p>Add to ~/.zshrc or ~/.bashrc, then open a new terminal (the skill: <code>curl -fsSL {location.origin}/install.sh | sh</code>):</p>
+      <Code text={`export DIFFNOTES_URL=${location.origin}\nexport DIFFNOTES_TOKEN=${fresh || 'paste-your-token-here'}`} />
+      <p>Safari's extension (no sign-in window): paste this one line into its popup's Server field, then press Connect:</p>
+      <Code text={JSON.stringify({ server: location.origin, token: fresh || 'make-a-token-below' })} />
+    </details>
     <h2 id="tokens">tokens</h2>
     {fresh && <div className="token"><Code text={fresh} /><span className="hint">copy it now: it is shown only once.</span></div>}
     <div className="list">

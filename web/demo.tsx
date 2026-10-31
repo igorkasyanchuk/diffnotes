@@ -200,11 +200,11 @@ export function Demo() {
       <div className="dm-end">
         <h3>Review the why, not just the diff.</h3>
         <p className="dm-slogan">Your agent knows why every line changed. Ask it to <b>“annotate this PR with diffnotes”</b>, and your team reviews faster.</p>
-        <div className="dm-end-tags"><span>free</span><span>self-hosted</span><span>any agent</span><span>nothing posted to the PR</span></div>
+        <div className="dm-end-tags"><span>free</span><span>hosted or self-hosted</span><span>any agent</span><span>nothing posted to the PR</span></div>
         <ol>
-          <li><b>docker run</b> the server</li>
-          <li><b>curl …/install.sh | sh</b> for your agent</li>
-          <li><b>load the extension</b>, paste a token</li>
+          <li><b>sign up</b> with GitHub</li>
+          <li><b>add the extension</b>, press Sign in</li>
+          <li><b>one command</b> sets up your agent</li>
         </ol>
         <a href="#install" className="btn primary">how to install ↓</a>
       </div>

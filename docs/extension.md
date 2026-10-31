@@ -14,9 +14,10 @@ Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/
 
 1. Open `chrome://extensions` and switch on **Developer mode**.
 2. **Load unpacked** → pick the `extension/` folder.
-3. Pin **DiffNotes**, open its popup and press **Sign in and connect** (the **Server** field says `https://diffnotes.dev`;
+3. A tab opens on install (or, later, pin **DiffNotes** and open its popup): press **Sign in and connect** (the **Server** field says `https://diffnotes.dev`;
    type your own server's address instead if you run one). Allow access to that server, sign in on the page that opens
-   and press **allow**: the window closes and the server is listed with your email. Nothing to copy. A copy loaded
+   and press **allow**: the window closes and the server is listed with your email (the tab then goes on to your
+   server's setup page). Nothing to copy. A copy loaded
    unpacked has an id of its own: a server signs it in only once that id is in its `EXTENSION_IDS` ([install](install.md));
    until then, use step 4.
 4. No sign-in window (Safari), or you'd rather paste: under **Use a token instead**, make a token on your server's

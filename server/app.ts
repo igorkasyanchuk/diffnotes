@@ -333,8 +333,12 @@ app.get('/auth/github/callback', async (c) => {
     if (!invited && !signupOpen()) return back('No DiffNotes user for this GitHub account: ask a teammate for an invitation')
     userId = createUser(invited ?? verified[0], '', str(profile.name) || str(profile.login))
     if (!invited) createAccount(`${str(profile.login) || 'My'} team`, userId)
-    // signed up with an account of their own: the setup steps first. An invited one joins from the dashboard (its invitations)
+    // signed up with an account of their own: the setup steps first. An invited one goes straight to its invitation
+    // (join, then the setup steps), not to a dashboard that lists it
     if (!invited && saved.next === '/dashboard') saved.next = '/welcome'
+    const inv = invited && saved.next === '/dashboard' && db.prepare(`select token from invites where expires_at > ? and (email = ? or github = ?)
+      order by created_at desc`).get(now(), invited, login || null) as { token: string } | undefined
+    if (inv) saved.next = `/invite/${inv.token}`
   }
   db.prepare('update users set github_id = ? where id = ? and github_id is null').run(ghId, userId)
   // logins can be renamed and taken by someone else: the latest sign-in holds one (invites by login look it up)
@@ -356,9 +360,9 @@ app.get('/api/me', async (c) => {
   const d = demoPull()
   const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null }
   if (!user) return c.json({ user: null, ...signIn })
-  const u = db.prepare('select password, agent_at, extension_at, notes_at from users where id = ?').get(user.id) as Record<string, string | null>
+  const u = db.prepare('select password, agent_at, extension_at, seen_at, notes_at from users where id = ?').get(user.id) as Record<string, string | null>
   // the setup checklist (/welcome): what this user has done so far (kept when their notes expire or are removed)
-  const setup = { agent: !!u.agent_at, extension: !!u.extension_at, notes: !!u.notes_at }
+  const setup = { extension: !!u.extension_at, seen: !!u.seen_at, agent: !!u.agent_at, notes: !!u.notes_at }
   return c.json({ user, accounts: accountsOf(user.id), has_password: !!u.password, setup, ...signIn })
 })
 
@@ -456,6 +460,8 @@ app.post('/api/v1/connect/token', async (c) => {
   const user = db.prepare('select email from users where id = ?').get(grant!.user) as { email: string } | undefined
   if (!user) return fail(400, 'This sign-in expired or was already used: connect again')
   if (tokenCount(grant!.user) >= 50) fail(409, 'Too many tokens: delete some on Settings first')
+  // the setup checklist: the extension is connected now (its first request may come much later)
+  db.prepare('update users set extension_at = ? where id = ? and extension_at is null').run(now(), grant!.user)
   return c.json({ token: newToken(grant!.user, grant!.name), user: { email: user.email } })
 })
 
@@ -908,7 +914,13 @@ const findPull = (user: User, repo: string, number: number) => {
 const pullOf = (user: User, a: Record<string, unknown>) => findPull(user, String(a.repo ?? ''), Number(a.number))
 
 app.get('/api/v1/me', (c) => c.json({ user: c.get('user') }))
-app.get(PULL_PATH, (c) => c.json(pullOut(pullOf(c.get('user'), c.req.param()), c.get('user'))))
+app.get(PULL_PATH, (c) => {
+  const out = pullOut(pullOf(c.get('user'), c.req.param()), c.get('user'))
+  // the setup checklist: the extension drew notes in a diff for this user (the live demo counts)
+  if (out.annotations.length && c.req.header('x-diffnotes-client') === 'extension')
+    db.prepare('update users set seen_at = ? where id = ? and seen_at is null').run(now(), c.get('user').id)
+  return c.json(out)
+})
 const pullById = (c: Context<Env>, id = c.req.param('id') ?? '') => {
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(id) as Pull | undefined
   if (!p) fail(404, 'Not found')
@@ -1456,10 +1468,23 @@ set -- "$HOME/.claude/skills" "$HOME/.agents/skills"   # quoted: a home folder c
 [ -d "$HOME/.cursor" ] && set -- "$@" "$HOME/.cursor/skills"
 for d in "$@"; do
   # rm: the same skill under its name before the rename (reviews42), which would stay installed beside it, never updated
-  mkdir -p "$d/diffnotes" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/diffnotes/SKILL.md" && echo "installed: $d/diffnotes (${SKILL_VERSION})" && rm -rf "$d/reviews42"
+  mkdir -p "$d/diffnotes" && curl -fsSL "${host(c)}/skill/SKILL.md" -o "$d/diffnotes/SKILL.md" && echo "installed: $d/diffnotes (${SKILL_VERSION})" && rm -rf "$d/reviews42" ||
+    { echo "couldn't install the skill to $d/diffnotes: run this again" >&2; failed=1; }
 done
 [ -z "$REVIEWS42_TOKEN" ] || echo "Rename REVIEWS42_URL / REVIEWS42_TOKEN to DIFFNOTES_URL / DIFFNOTES_TOKEN in your shell profile: the skill reads only the new names."
-echo "Now set DIFFNOTES_TOKEN (make one at ${host(c)}/settings) in your shell profile."
+# curl …/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh (the command /welcome shows): the token goes to a file only you can
+# read, which the skill reads when DIFFNOTES_TOKEN isn't set, so nothing to add to a shell profile and no restart. Its own
+# name: a DIFFNOTES_TOKEN exported for another server must never be saved with this one's address
+f="\${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env"
+case $DIFFNOTES_SETUP_TOKEN in
+  '') [ -n "$DIFFNOTES_TOKEN" ] || [ -r "$f" ] || echo "Now make a token at ${host(c)}/welcome and run the one command it shows (or set DIFFNOTES_TOKEN in your shell profile)." ;;
+  *[!A-Za-z0-9_-]*) echo "That DIFFNOTES_SETUP_TOKEN isn't a DiffNotes token: copy the command from ${host(c)}/welcome again." >&2; exit 1 ;;
+  *) mkdir -p "$(dirname "$f")" && rm -f "$f" && (umask 077 && printf 'export DIFFNOTES_URL=%s\nexport DIFFNOTES_TOKEN=%s\n' "${host(c)}" "$DIFFNOTES_SETUP_TOKEN" > "$f") && chmod 600 "$f" &&
+     echo "token saved: $f (only you can read it)." &&
+     { [ -z "$DIFFNOTES_TOKEN" ] || echo "But DIFFNOTES_TOKEN is set in this shell and wins over that file: remove it from your shell profile to use the saved one."; } ;;
+esac
+[ -z "$failed" ] || exit 1
+[ -z "$DIFFNOTES_SETUP_TOKEN" ] || echo "Your agent is ready: ask it to annotate a pull request."
 `))
 app.get('/healthz', (c) => c.text(db.prepare('select 1 as ok').get() ? 'ok' : 'down'))
 

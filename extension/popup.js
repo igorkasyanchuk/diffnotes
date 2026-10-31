@@ -38,7 +38,7 @@ $('server').addEventListener('input', () => {
 $('token').addEventListener('input', saveDraft)
 chrome.storage.session.get('draft').then(({ draft }) => {
   if (!draft) return
-  $('server').value = draft.server ?? ''
+  $('server').value = draft.server || 'https://diffnotes.dev' // diffnotes.dev unless something else was typed
   $('token').value = draft.token ?? ''
   if (draft.token) $('by-token').open = true
   $('error').textContent = draft.error ?? ''
@@ -53,6 +53,10 @@ $('theme').addEventListener('change', async () => {
 })
 // a connect the background finished after the permission prompt closed this popup shows up as soon as it lands
 chrome.storage.onChanged.addListener((changes) => { if (changes.servers) show() })
+
+// popup.html?welcome: opened in a tab on install (background.js); once connected it goes on to the server's setup page
+const welcome = new URLSearchParams(location.search).has('welcome')
+if (welcome) { document.body.classList.add('welcome'); document.title = 'Connect DiffNotes'; $('welcome').hidden = false }
 
 // Safari has no sign-in window (identity API): there a token is pasted
 if (!chrome.identity?.launchWebAuthFlow) { $('signin').hidden = $('signin-hint').hidden = true; $('by-token').open = true }
@@ -82,6 +86,8 @@ async function start(signin) {
     settingsLink()
     say(`Connected to ${url.host} ✓`)
     show()
+    // the next step (see notes in a real diff) is on the server's setup page, which ticks this one
+    if (welcome) { say(`Connected to ${url.host} ✓ Taking you to the next step…`); setTimeout(() => { location.href = `${server}/welcome?connected` }, 1200) }
   } catch (err) { say(''); $('error').textContent = err.message } finally { $('submit').disabled = $('signin').disabled = false }
 }
 // Enter in Server (the token fields folded away) signs in, like the big button; Connect or Enter in Token uses the token

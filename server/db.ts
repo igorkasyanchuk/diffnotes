@@ -126,6 +126,14 @@ try {
     where id in (select user_id from tokens where last_used_at is not null union select user_id from annotations)`)
   db.exec('commit')
 } catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
+// the extension drew notes in a diff for them (the checklist's "see it" step, added later): filled once, as it is added,
+// for users whose extension was connected by then, so their finished setup doesn't drop to 3 of 4
+db.exec('begin')
+try {
+  db.exec('alter table users add column seen_at text')
+  db.exec('update users set seen_at = extension_at where extension_at is not null')
+  db.exec('commit')
+} catch (e) { db.exec('rollback'); if (!/duplicate column/.test(String(e))) throw e }
 
 export const now =() => new Date().toISOString()
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')

@@ -8,13 +8,16 @@ reads is [`skill/diffnotes/SKILL.md`](../skill/diffnotes/SKILL.md), also served 
 
 ## Install
 
+The setup page (`/welcome`, **set up my agent**) makes a token and gives you one command with it:
+
 ```bash
-curl -fsSL https://reviews.example.com/install.sh | sh
+curl -fsSL https://reviews.example.com/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh
 ```
 
 It writes the skill to `~/.claude/skills/diffnotes`, `~/.agents/skills/diffnotes` and, when Cursor is installed,
-`~/.cursor/skills/diffnotes`. Then make a token on **Settings** (the app shows a bar until you have one) and add it to
-your shell profile:
+`~/.cursor/skills/diffnotes`, and saves the server and the token to `~/.config/diffnotes/env` (mode 600), which the skill
+reads whenever `DIFFNOTES_TOKEN` isn't set: no shell profile to edit, no restart. Without `DIFFNOTES_SETUP_TOKEN` it installs
+only the skill. Variables in your shell profile still work and win over the file:
 
 ```bash
 export DIFFNOTES_URL=https://reviews.example.com

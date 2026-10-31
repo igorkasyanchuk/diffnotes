@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-31
+
+### Changed
+
+- **Onboarding, the same however you came** (signed up or invited): `/welcome` is two halves. *Read notes* (everyone):
+  add the extension, then see notes in a real diff (the live demo PR); *write notes* (when you open PRs): set up your
+  agent, annotate a first PR. A reviewer skips the second half in one click. Each step plays a short mockup of what you
+  will see and press, and ticks itself: the extension on connect, "seen" when the extension draws notes in a diff.
+- **One command sets up the agent**: *set up my agent* makes a token and shows `curl …/install.sh | DIFFNOTES_SETUP_TOKEN=… sh`,
+  which installs the skill and saves the token to `~/.config/diffnotes/env` (mode 600). The skill reads it when the
+  environment has no token: no shell profile to edit, no restart.
+- **The extension opens its connect page on install**, its Server field filled in with `https://diffnotes.dev`: no
+  toolbar icon to find; once connected it goes on to the server's setup page.
+- **Invited with GitHub**: the sign-in goes straight to the invitation, then to the setup steps. The invitation page
+  says what comes next: connect the browser, about a minute.
+
 ## [1.6.1] - 2026-10-30
 
 ### Security
@@ -259,7 +275,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.4.0...v1.5.0

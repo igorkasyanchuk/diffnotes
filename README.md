@@ -60,12 +60,11 @@ docker logs <container> | grep "first admin"        # the generated password
 #    or: docker compose up -d (docker-compose.yml), or Render / Fly.io / Railway / Coolify: docs/deploy.md
 
 # 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
-curl -fsSL https://reviews.example.com/install.sh | sh
-export DIFFNOTES_URL=https://reviews.example.com DIFFNOTES_TOKEN=dn_…   # token from /settings
+#    /welcome on your server gives the one command with a token in it (saved to ~/.config/diffnotes/env):
+curl -fsSL https://reviews.example.com/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh
 
 # 3. the extension: https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd
-#    (or chrome://extensions → Developer mode → Load unpacked → extension/)
-#    then its popup: server + token → Connect
+#    it opens a tab on install: your server's address → Sign in and connect → allow
 ```
 
 Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab. No skills in your agent?

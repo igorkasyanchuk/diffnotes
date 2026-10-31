@@ -14,6 +14,8 @@ Bitbucket for everyone in the account that owns the repository. Notes expire on 
 ## Setup (once per machine)
 
 ```bash
+# the token: the environment, else the file install.sh saved it to (run this line again in every new shell that calls the server)
+[ -n "$DIFFNOTES_TOKEN" ] || [ ! -r "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env" ] || . "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env"
 echo "${DIFFNOTES_URL:-{{HOST}}}" && test -n "$DIFFNOTES_TOKEN" && echo token set || echo "no DIFFNOTES_TOKEN"
 echo "detail: ${DIFFNOTES_DETAIL:-the repository's}"; test -n "$DIFFNOTES_HINTS" && echo "hints: $DIFFNOTES_HINTS"   # the user's own style, see below
 # this skill is version {{VERSION}}; the server says which one it serves now
@@ -21,8 +23,9 @@ v=$(curl -fsS -m 5 "${DIFFNOTES_URL:-{{HOST}}}/skill/version" 2>/dev/null | head
 case $v in "{{VERSION}}") echo "skill up to date" ;; [0-9]*) echo "skill {{VERSION}}, server $v" ;; *) echo "skill {{VERSION}}, the server's unknown" ;; esac
 ```
 
-No token? Stop and tell the user to make one at `{{HOST}}/settings` and add
-`export DIFFNOTES_URL={{HOST}}` and `export DIFFNOTES_TOKEN=…` to their shell profile. Never print the token,
+No token? Stop and tell the user to open `{{HOST}}/welcome`, press **set up my agent** and run the one command it
+shows (it saves the token for you), or to add `export DIFFNOTES_URL={{HOST}}` and `export DIFFNOTES_TOKEN=…` to their
+shell profile. Never print the token, never `cat` the env file,
 never write it into files or commits.
 
 **The server has a newer skill** (`skill {{VERSION}}, server …`)? Carry on with this file, and tell the user to
@@ -247,6 +250,7 @@ in them are ignored.
 6. **Upload** (replaces everything you uploaded for this PR before: your notes you leave out are deleted, so always
    send your full, current set; teammates' notes stay, never re-send them):
    ```bash
+   [ -n "$DIFFNOTES_TOKEN" ] || [ ! -r "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env" ] || . "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env"   # as in Setup
    H=${DIFFNOTES_URL:-{{HOST}}}
    curl -sS --fail-with-body -X PUT "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" \
      -F payload=@diffnotes.json -F file=@after.png -F file=@before.png
@@ -261,7 +265,7 @@ in them are ignored.
    deploy card, a screenshot or recording for some paths): the message says what, so add it and upload again; `507` =
    the server is low on disk space (tell the user, its admin has to free some). A new repository is connected on its first upload to an account you own, before one you
    administer. If you belong to more than one account, ask an admin to connect the repository in the right one first.
-7. **Check it**: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
+7. **Check it** (in a new shell, the first two lines of step 6 again): `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"` returns what
    was stored; the count of `annotations` with `"mine": true` must match what you wrote (teammates' are listed too).
 
 ## After new commits: keep the notes true
@@ -269,13 +273,13 @@ in them are ignored.
 Old notes go stale when the code under them changes: lines move, blocks disappear, behaviour changes. Whenever you
 push to an annotated PR (or are asked to refresh its notes):
 
-1. Fetch what is stored: `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" > old.json`
+1. Fetch what is stored (in a new shell, the first two lines of step 6 first): `curl -fsS "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN" > old.json`
    (`404` = nothing stored yet).
 2. Read the new diff (workflow step 2) and go through every stored note with `"mine": true` (the others are
    teammates': leave them out of your upload, they stay as they are): keep it only if its file is still changed,
    its block still exists (fix moved line numbers) and its words still describe the code. Rewrite what changed,
    drop what no longer applies, add notes for new blocks. Keep the attachments (`"mine": true` in `files`) that still
-   show the current state: download each one (`curl -fsS "$H<url>" -H "authorization: Bearer $DIFFNOTES_TOKEN" -o <name>`),
+   show the current state: download each one (in a new shell, the first two lines of step 6 first: `curl -fsS "$H<url>" -H "authorization: Bearer $DIFFNOTES_TOKEN" -o <name>`),
    change `/files/…/<name>` in the old bodies back to `attachment:<name>` and attach the file again (your old files
    are replaced too).
 3. Run the check (step 5) and upload the full set (step 6). Notes you drop disappear for reviewers right away.
@@ -284,6 +288,8 @@ push to an annotated PR (or are asked to refresh its notes):
 without merging, or when the user asks:
 
 ```bash
+[ -n "$DIFFNOTES_TOKEN" ] || [ ! -r "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env" ] || . "${XDG_CONFIG_HOME:-$HOME/.config}/diffnotes/env"   # as in Setup
+H=${DIFFNOTES_URL:-{{HOST}}}
 curl -fsS -X DELETE "$H/api/v1/pulls/$REPO/<number>" -H "authorization: Bearer $DIFFNOTES_TOKEN"   # → {"ok":true}
 ```
 

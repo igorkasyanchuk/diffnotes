@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { client, png, webm } from './testkit.ts'
 
 // the edges app.test.ts's story doesn't walk through: limits, quotas, refusals, server errors, the static pages
@@ -266,6 +266,7 @@ describe('extension sign-in (/connect)', () => {
     const ok = await trade((await allow()).code)
     expect(ok.status).toBe(200)
     expect(ok.data.user.email).toBe('dev@example.com')
+    expect((await call('/api/me', { cookie: dev })).data.setup.extension).toBe(true) // the setup step ticks on connect, not at its first read
     expect((await call('/api/v1/me', { token: ok.data.token })).data.user.email).toBe('dev@example.com')
     // named after the browser, control characters dropped, listed on Settings
     expect((await call('/api/tokens', { cookie: dev })).data.map((t: { name: string }) => t.name)).toContain('browser extension · Chrome on macOS')
@@ -304,17 +305,46 @@ describe('setup checklist', () => {
     const r = await call(`/api/invites/${inv}/accept`, { body: { password: 'newbie-pass' } })
     const cookie = r.res.headers.get('set-cookie')!.split(';')[0]
     const setup = async () => (await call('/api/me', { cookie })).data.setup
-    expect(await setup()).toEqual({ agent: false, extension: false, notes: false })
+    expect(await setup()).toEqual({ agent: false, extension: false, seen: false, notes: false })
     const t = (await call('/api/tokens', { cookie, body: { name: 'x' } })).data.token
     await call('/api/v1/me', { token: t }) // a read without the header: an extension before 1.2, not proof of an agent
-    expect(await setup()).toEqual({ agent: false, extension: false, notes: false })
+    expect(await setup()).toEqual({ agent: false, extension: false, seen: false, notes: false })
     await call('/api/v1/me', { token: t, headers: { 'x-diffnotes-client': 'extension' } })
-    expect(await setup()).toEqual({ agent: false, extension: true, notes: false })
+    expect(await setup()).toEqual({ agent: false, extension: true, seen: false, notes: false })
     await call('/api/accounts', { cookie, body: { name: 'newbie team' } }) // an owner: the upload connects the repository
     expect((await call('/api/v1/pulls/newbie/app/1', { token: t, method: 'PUT', body: { annotations: [note] } })).status).toBe(200)
-    expect(await setup()).toEqual({ agent: true, extension: true, notes: true })
+    expect(await setup()).toEqual({ agent: true, extension: true, seen: false, notes: true })
+    await call('/api/v1/pulls/newbie/app/1', { token: t }) // the agent reading notes is not the extension drawing them
+    expect((await setup()).seen).toBe(false)
+    await call('/api/v1/pulls/newbie/app/1', { token: t, headers: { 'x-diffnotes-client': 'extension' } })
+    expect((await setup()).seen).toBe(true)
     await call('/api/v1/pulls/newbie/app/1', { token: t, method: 'DELETE' }) // notes gone (or expired): the step stays done
     expect((await setup()).notes).toBe(true)
+  })
+})
+
+describe('one-command agent setup (install.sh)', () => {
+  it('installs the skill and saves the token from the command to a file only the user reads', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const script = (await call('/install.sh')).data as string
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-home-')), bin = path.join(home, 'bin')
+    onTestFinished(() => fs.rmSync(home, { recursive: true, force: true }))
+    fs.mkdirSync(bin)
+    // curl stands in for the network: it writes a skill file wherever -o says
+    fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && echo skill > "$2"; shift; done\n', { mode: 0o755 })
+    const run = (token: string, more = {}) => execFileSync('sh', ['-c', script], { env: { HOME: home, PATH: `${bin}:${process.env.PATH}`, DIFFNOTES_SETUP_TOKEN: token, ...more }, encoding: 'utf8' })
+    expect(run('')).toContain('/welcome') // no token anywhere yet: where to make one
+    expect(run('dn_abc-DEF_1')).toContain('token saved')
+    const env = path.join(home, '.config/diffnotes/env')
+    expect(fs.readFileSync(env, 'utf8')).toBe('export DIFFNOTES_URL=https://dn.example\nexport DIFFNOTES_TOKEN=dn_abc-DEF_1\n')
+    expect(fs.statSync(env).mode & 0o777).toBe(0o600)
+    expect(fs.readFileSync(path.join(home, '.claude/skills/diffnotes/SKILL.md'), 'utf8')).toBe('skill\n')
+    expect(() => run('dn_x; rm -rf ~')).toThrow() // only a token's characters reach the file
+    expect(run('')).not.toContain('/welcome') // re-run to update the skill: the saved token is there, no new one asked for
+    // a token exported for another server is never saved with this one's address
+    run('', { DIFFNOTES_TOKEN: 'dn_other' })
+    expect(fs.readFileSync(env, 'utf8')).toContain('DIFFNOTES_TOKEN=dn_abc-DEF_1')
+    expect(run('dn_abc-DEF_1', { DIFFNOTES_TOKEN: 'dn_other' })).toContain('wins over that file') // the skill would use the exported one
   })
 })
 
@@ -625,7 +655,7 @@ describe('GitHub sign-in', () => {
       expect((await call(`/api/invites/${byLogin}/accept`, { cookie: j.cookie, body: {} })).status).toBe(403)
       expect((await call(`/api/invites/${byLogin}`)).data).toMatchObject({ github: 'hubber', exists: false, signed_in: false })
       const h = await roundTrip({ id: 12, login: 'HUBBER' }, [mail('hub@example.com')]) // sign-up is closed: the invitation lets them in
-      expect(h.to).toBe('/dashboard') // invited, not a member yet: the invitation to join is there
+      expect(h.to).toBe(`/invite/${byLogin}`) // invited, not a member yet: straight to the invitation (the dashboard lists it too)
       expect((await call('/api/dashboard', { cookie: h.cookie })).data).toMatchObject({ accounts: [], invites: [{ token: byLogin, role: 'member' }] })
       expect((await call(`/api/invites/${byLogin}`, { cookie: h.cookie })).data).toMatchObject({ exists: true, signed_in: true })
       expect((await call(`/api/invites/${byLogin}/accept`, { cookie: h.cookie, body: {} })).status).toBe(200)

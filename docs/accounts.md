@@ -65,13 +65,17 @@ since a typed email isn't proven and would let anyone holding the link claim an 
 
 ## Setup steps for new people
 
-Joining through an invitation (or signing up with GitHub) lands on **/welcome**: three steps with a "start here" mark on
-the current one — give your agent the skill, add the browser extension, annotate a first pull request. Each makes its
-own token in place and ticks itself as it happens (the server sees the extension's first request, the agent's first
-upload or MCP call, and the first uploaded notes; the extension says so with an `x-diffnotes-client: extension` header).
-Until all three are done, the sidebar shows **setup n/3** and a bar on top offers to continue or hide it; "I've done
-this" marks a step by hand in that browser (an extension older than 1.2 doesn't send the header). Existing users joining
-another account see their steps already ticked, and so do users from before the steps who had used a token.
+Joining through an invitation (or signing up with GitHub) lands on **/welcome**: four steps in two halves, the next one
+marked. *Read notes* (everyone): add the browser extension, then see notes in a real diff (the live demo PR when the
+server has one). *Write notes* (when you open pull requests): set up your coding agent (**set up my agent** makes a
+token and shows the one `install.sh` command with it), annotate a first pull request; a reviewer skips this half with
+**I only review, skip this**. Each step plays a short mockup and ticks itself as it happens: the extension when it
+connects (or at its first request), "seen" when the extension draws notes in a diff (it says so with an
+`x-diffnotes-client: extension` header), the agent at its first upload or MCP call, and the first uploaded notes.
+Until all four are done, the sidebar shows **setup n/4** and a bar on top offers to continue or hide it; "I've done
+this" marks a step by hand in that browser (an extension older than 1.2 doesn't send the header). A GitHub sign-in by
+someone invited goes straight to their invitation. Existing users joining another account see their steps already
+ticked, and so do users from before the steps who had used a token.
 
 ## Sign in with GitHub
 

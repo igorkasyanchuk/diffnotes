@@ -84,14 +84,14 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
         {!signedIn && <p>{cta}</p>}
       </li>
       <li>
-        <div className="lp-step"><span className="lp-time">~1 min</span><b>give your agent the skill</b></div>
-        <p className="hint">Installs for Claude Code, Codex, Cursor and other Agent Skills tools. Then make a token in <a href="/settings#tokens">settings</a> and export it as it shows.</p>
-        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
+        <div className="lp-step"><span className="lp-time">~1 min</span><b>add the browser extension</b></div>
+        <p className="hint">From the Chrome Web Store (Edge, Brave and Arc too). It opens a tab by itself: press <b>Sign in and connect</b>
+          {origin !== 'https://diffnotes.dev' && <> with <code>{origin}</code> as the server</>}, then <b>allow</b>. Nothing to copy.</p>
+        <p><AddToChrome /></p>
       </li>
       <li>
-        <div className="lp-step"><span className="lp-time">~1 min</span><b>connect the browser extension</b></div>
-        <p className="hint">Install it from the Chrome Web Store (Edge, Brave and Arc too; Firefox and Safari coming soon), then paste the one line settings shows next to your token into its popup.</p>
-        <p><AddToChrome /></p>
+        <div className="lp-step"><span className="lp-time">~1 min</span><b>set up your agent with one command</b></div>
+        <p className="hint">Claude Code, Codex, Cursor and other Agent Skills tools. The <a href="/welcome">setup page</a> gives you the command with your token in it: run it once, no shell profile to edit.</p>
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>ask your agent to explain a PR</b></div>

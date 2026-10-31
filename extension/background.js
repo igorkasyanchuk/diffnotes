@@ -76,8 +76,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       chrome.action.setBadgeText({ tabId: sender.tab.id, text: count ? String(count) : '' })
       return { pulls, errors }
     }
-    // connecting and removing servers: the popup only (an extension page, no tab), never a content script on a site
-    if (['connect', 'signin', 'remove'].includes(msg.type) && sender.tab) return { error: 'not from a page' }
+    // connecting and removing servers: the extension's own pages only (the popup, or popup.html in the tab opened on
+    // install), never a content script on a site (its sender.url is the site's)
+    if (['connect', 'signin', 'remove'].includes(msg.type) && !sender.url?.startsWith(chrome.runtime.getURL(''))) return { error: 'not from a page' }
     if (msg.type === 'connect') return connect()
     if (msg.type === 'signin') return signin()
     if (msg.type === 'remove') {
@@ -185,4 +186,8 @@ function browserName() {
 }
 
 // move first-release settings over as soon as the extension updates
-chrome.runtime.onInstalled.addListener(() => { servers() })
+// and, on a first install, the connect page in a tab: nobody has to find the toolbar's puzzle icon to start
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  servers()
+  if (reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?welcome') }).catch(() => {})
+})

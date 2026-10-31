@@ -18,7 +18,7 @@ session cookie. Tokens work only on `/api/v1/*`, `/files/*` and `/mcp`: they can
 | `PUT` | `/api/repositories/:id/rules` | `{risk, deploy, screenshots}`: what every upload must carry (account admins, web app session) |
 | `GET` | `/files/:pull/:name` | an uploaded file (same access as its PR) |
 | `POST` | `/mcp` | the same notes for MCP clients (see [MCP](#mcp)); `GET` answers `405` |
-| `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in |
+| `GET` | `/skill/SKILL.md`, `/install.sh` | the agent skill, with this server's URL filled in; `install.sh` run with `DIFFNOTES_SETUP_TOKEN=…` also saves it to `~/.config/diffnotes/env` |
 | `GET` | `/skill/version` | the skill's version (the release plus a hash of the skill as this server serves it), which installed copies compare with their own |
 | `GET` | `/healthz` | `ok` when the database answers (local callers only with `CLOUDFLARE_ONLY=1`) |
 
