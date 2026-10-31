@@ -254,6 +254,7 @@ button.more { margin-top: 4px; font-size: 12px; }
 .risk-row:hover { background: var(--panel-2); }
 .risk-row .risk { margin: 0; }
 .risk-row .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-row code { min-width: 0; overflow-wrap: anywhere; } /* a long path wraps instead of widening the page on a phone */
 
 /* before / after: one image with a drag handle (dnCompare in markdown.js) */
 .dn-compare { position: relative; display: inline-block; vertical-align: top; margin: 6px 8px 2px 0; line-height: 0; --x: 50%; }

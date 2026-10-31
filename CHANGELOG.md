@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-31
+
+### Fixed
+
+- `/demo` and `/privacy` no longer scroll sideways on a phone (a long path in “where to look hardest”, the demo's commit
+  line, the issues link).
+
+### Changed
+
+- `docker-compose.yml`, the Coolify guide and the deploy docs use the published image `ghcr.io/igorkasyanchuk/diffnotes`
+  (building the repository stays an option). The extension is unchanged since 1.8.0 but for its version.
+
 ## [1.8.0] - 2026-10-31
 
 ### Added
@@ -298,7 +310,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...v1.6.1

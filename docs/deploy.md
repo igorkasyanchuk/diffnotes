@@ -2,8 +2,8 @@
 
 ← [README](../README.md) · [Install & configure](install.md)
 
-DiffNotes is one container from the repository's `Dockerfile` with a persistent volume at `/data`. Anywhere that runs
-that works; below are the platforms with a ready template or a few clicks. On each one:
+DiffNotes is one container, the image `ghcr.io/igorkasyanchuk/diffnotes` (or a build of the repository's `Dockerfile`),
+with a persistent volume at `/data`. Anywhere that runs that works; below are the platforms with a ready template or a few clicks. On each one:
 
 - run **exactly one instance** and keep `/data` on the platform's volume or disk ([why](install.md#one-instance-only));
 - set `PUBLIC_URL` to the app's `https://` address and `ADMIN_EMAIL`; read the first admin password from the logs
@@ -30,9 +30,10 @@ docker compose logs | grep "first admin"
 
 ## Coolify
 
-New resource → your Git repository (this one, or your fork) → build pack **Dockerfile**, port `3000`, a
-volume at `/data`, environment `PUBLIC_URL` and `ADMIN_EMAIL`, your domain. Pushing to the branch redeploys (about a
-minute). The first admin password is in the first deployment's Runtime Logs.
+New resource → **Docker Image** `ghcr.io/igorkasyanchuk/diffnotes:latest` (or your Git repository with build pack
+**Dockerfile**, to build it yourself), port `3000`, a
+volume at `/data`, environment `PUBLIC_URL` and `ADMIN_EMAIL`, your domain. From a repository, pushing to the branch
+redeploys (about a minute); from the image, redeploy to pull a new release. The first admin password is in the first deployment's Runtime Logs.
 
 Or build pack **Docker Compose** with the repository's `docker-compose.yml`: give the `diffnotes` service your domain
 (port 3000) and set the environment in Coolify instead of the file.

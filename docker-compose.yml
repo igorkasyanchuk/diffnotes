@@ -2,8 +2,8 @@
 # Every variable is explained in docs/install.md (Environment). Run exactly one instance: see docs/install.md.
 services:
   diffnotes:
-    build: .
-    image: diffnotes
+    # the published image; to build this checkout instead: `build: .` in place of this line
+    image: ghcr.io/igorkasyanchuk/diffnotes:latest
     restart: unless-stopped
     ports:
       - "3000:3000"

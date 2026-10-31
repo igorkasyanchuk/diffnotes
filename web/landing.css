@@ -59,3 +59,5 @@
 .lp-notbot h2 { margin-top: 0; }
 .lp-hosted { margin-top: 10px; }
 .demo-pull { margin: 20px 0 32px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.demo-pull { overflow-wrap: anywhere; } /* long paths and commit hashes wrap on a phone */
+@media (max-width: 600px) { .demo-pull { padding: 12px; } }

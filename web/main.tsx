@@ -444,7 +444,7 @@ function Privacy({ retention }: { retention?: number }) {
         one anonymous page view, never on the app's pages. Errors may be reported to the operator's own error tracker with the route pattern only.</li>
     </ul>
     <h2>Contact</h2>
-    <p>Questions or requests: open an issue at <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">{SOURCE.replace('https://', '')}/issues</a>,
+    <p style={{ overflowWrap: 'anywhere' }}>Questions or requests: open an issue at <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">{SOURCE.replace('https://', '')}/issues</a>,
       or contact the operator of your DiffNotes server about the data it holds.</p>
   </div>
 }
