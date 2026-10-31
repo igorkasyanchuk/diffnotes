@@ -17,8 +17,8 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run build # first: the page tests read dist/index.html (its titles and SEO tags)
       - run: npm run coverage
-      - run: npm run build
   image:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: check
