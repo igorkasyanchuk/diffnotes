@@ -8,7 +8,7 @@ Free · hosted at diffnotes.dev or self-hosted · open source (MIT) · GitHub, G
 <p align="center"><a href="https://diffnotes.dev"><img src="https://diffnotes.dev/badge.svg" alt="Reviewed with DiffNotes"></a>
 · <a href="https://diffnotes.dev/demo">live demo</a> · <a href="https://diffnotes.dev/badge">badge for your repo</a></p>
 
-<p align="center"><img src="docs/images/github-note.png" alt="A DiffNotes note on a GitHub pull request diff" width="860"></p>
+<p align="center"><a href="https://diffnotes.dev/demo"><img src="docs/images/demo.gif" alt="DiffNotes on a GitHub pull request: summary box, deploy steps, before/after screenshots, a live demo and line notes inside the diff" width="860"></a></p>
 
 ## TL;DR
 
