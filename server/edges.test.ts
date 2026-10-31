@@ -588,7 +588,8 @@ describe('GitHub sign-in', () => {
   it('is off without an OAuth app', async () => {
     expect((await start()).status).toBe(404)
     expect((await call('/auth/github/callback?code=x&state=y')).status).toBe(404)
-    expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false, demo: null })
+    expect((await call('/api/me')).data).toEqual({ user: null, github: false, signup: false, demo: null, retention_days: 365,
+      limits: { account_mb: 0.01, pulls: 2, file_mb: 0.008, video_mb: 0.012 } }) // what the public pages tell about this server
     expect((await call(`/api/accounts/${accountId}/invites`, { cookie: admin, body: { github: 'octo' } })).data.error).toContain('GitHub sign-in is off')
   })
 
@@ -773,6 +774,7 @@ describe('live demo (DEMO_PR)', () => {
     const tok = (await call('/api/tokens', { cookie, body: {} })).data.token
 
     expect((await call('/api/v1/pulls/acme/demo/5', { token: tok })).status).toBe(404) // off
+    expect((await call('/api/demo')).status).toBe(404)
     process.env.DEMO_PR = 'https://github.com/acme/demo#5'
     try {
       const r = await call('/api/v1/pulls/acme/demo/5', { token: tok })
@@ -783,6 +785,15 @@ describe('live demo (DEMO_PR)', () => {
       expect(demoPage.res.headers.get('x-robots-tag')).toBeNull()
       expect(demoPage.data).toContain('<title>Live demo · DiffNotes</title>')
       expect((await call(r.data.files[0].url, { token: tok })).status).toBe(200)
+      // signed out too: /demo shows it to visitors, its files with it; nothing else of that account
+      const pub = await call('/api/demo')
+      expect(pub.data).toMatchObject({ number: 5, annotations: [{ body: 'why', mine: false, can_delete: false }], can_delete: false, authors: [] })
+      expect((await call(r.data.files[0].url)).status).toBe(200)
+      db.prepare(`insert into pulls (id, repository_id, number, title, user_id, created_at, updated_at, expires_at, fields_by)
+        values ('demo-other', 'demo-repo', 7, 'Private', ?, ?, ?, ?, ?)`).run(adminId, now(), now(), now(), adminId)
+      db.prepare(`insert into files (pull_id, name, type, size, user_id) values ('demo-other', 'shot.png', 'image/png', 16, ?)`).run(adminId)
+      expect((await call('/files/demo-other/shot.png')).status).toBe(404)
+      db.prepare("delete from pulls where id = 'demo-other'").run()
       expect((await call('/api/v1/pulls/acme/demo/6', { token: tok })).status).toBe(404) // only that PR
       expect((await call('/api/v1/pulls/acme/demo/5', { token: tok, method: 'DELETE' })).status).toBe(404) // read only
       expect((await call('/api/me', { cookie })).data.demo).toEqual({ repository: 'acme/demo', number: 5 })
@@ -807,6 +818,8 @@ describe('live demo (DEMO_PR)', () => {
       db.prepare(`insert into annotations (pull_id, path, body, user_id) values ('demo-pull', 'b.ts', 'private', ?)`).run(stranger)
       expect((await call('/api/me', { cookie })).data.demo).toBeNull()
       expect((await call('/api/v1/pulls/acme/demo/5', { token: tok })).status).toBe(404)
+      expect((await call('/api/demo')).status).toBe(404)
+      expect((await call(r.data.files[0].url)).status).toBe(404)
     } finally { delete process.env.DEMO_PR }
     await purge()
     expect(db.prepare("select 1 from pulls where id = 'demo-pull'").get()).toBeUndefined()

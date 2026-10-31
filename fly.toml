@@ -15,7 +15,7 @@ primary_region = "fra"
   # MAX_PULL_MB = "20"
   # MAX_BODY_KB = "1024"
   # MAX_ACCOUNT_MB = "1024"
-  # MAX_PULLS = "1000"
+  # MAX_PULLS = "10000"
   # MAX_ACCOUNTS = "10"
   # MIN_FREE_DISK_MB = "100"
   # GITHUB_CLIENT_ID = "" # sign in with GitHub (docs/accounts.md); its secret: fly secrets set GITHUB_CLIENT_SECRET=…

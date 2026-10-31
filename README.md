@@ -3,7 +3,7 @@
 <h1 align="center">diffnotes</h1>
 
 <p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
-Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
+Free · hosted at diffnotes.dev or self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
 <p align="center"><a href="https://diffnotes.dev"><img src="https://diffnotes.dev/badge.svg" alt="Reviewed with DiffNotes"></a>
 · <a href="https://diffnotes.dev/demo">live demo</a> · <a href="https://diffnotes.dev/badge">badge for your repo</a></p>
@@ -14,11 +14,12 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
 - Your agent (Claude Code, Codex, Cursor…) **annotates a PR**: a plain-language “why” for each changed block, plus
   screenshots, short screen recordings, Markdown reports, CSVs and small interactive HTML demos. Through the skill or the MCP endpoint.
-- The notes go to **your own DiffNotes server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise.
-- Reviewers with the **browser extension** (Chrome, Firefox) see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
+- The notes go to **a DiffNotes server**, never to GitHub, GitLab or Bitbucket: no bot comments, no notification noise. Use
+  the free one at [diffnotes.dev](https://diffnotes.dev), or run your own and code context never leaves your infrastructure.
+- Reviewers with the **browser extension** (Chrome, Edge, Brave, Arc) see them **inside the diff on GitHub, GitLab or Bitbucket**: a summary box on top, notes on the
   changed lines, image galleries, file previews, what changed since their last visit, one switch to hide everything.
 - Notes **expire on their own** (after a year by default). Files on disk or in any S3-compatible bucket (Backblaze B2, R2, S3, MinIO).
-- Up and running in **about 5 minutes**: one container, one `curl | sh`, one extension.
+- Up and running in **a few minutes**: a GitHub sign-in, one command for your agent, one extension (or one container of your own).
 
 <p align="center"><img src="docs/images/flow.svg" alt="agent → diffnotes server ← browser extension → github.com PR" width="860"></p>
 
@@ -52,10 +53,9 @@ Free · self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 ## Install in 5 minutes
 
 ```bash
-# 1. the server (any Docker host: a VPS, Coolify, Dokku…)
-git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
-docker build -t diffnotes . && docker run -d -p 3000:3000 -v diffnotes:/data \
-  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.example.com diffnotes
+# 1. the server (any Docker host: a VPS, Coolify, Dokku…), or skip it and use https://diffnotes.dev
+docker run -d -p 3000:3000 -v diffnotes:/data \
+  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.example.com ghcr.io/igorkasyanchuk/diffnotes
 docker logs <container> | grep "first admin"        # the generated password
 #    or: docker compose up -d (docker-compose.yml), or Render / Fly.io / Railway / Coolify: docs/deploy.md
 
@@ -77,7 +77,7 @@ Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https:/
 | [Install & configure](docs/install.md) | Docker, environment variables, first admin, password reset, upgrades, backups |
 | [Deploy](docs/deploy.md) | Docker Compose, Coolify, Render (one-click), Fly.io, Railway; one instance only |
 | [Agent skill](docs/skill.md) | Install, token, how the agent writes notes, payload format, allowed files |
-| [Browser extension](docs/extension.md) | Install (Chrome, Firefox, Safari), several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
+| [Browser extension](docs/extension.md) | Install (Chrome, Edge, Brave, Arc; Firefox and Safari as developer installs), several servers, GitHub / GitLab / Bitbucket, what you see, troubleshooting |
 | [Accounts & roles](docs/accounts.md) | Owner / admin / member, invitations, repository rules, super admin, overview pages |
 | [File storage](docs/storage.md) | Disk or S3-compatible (Backblaze B2, Cloudflare R2, AWS S3, MinIO), expiry |
 | [Security](docs/security.md) | Access model, upload checks, sandboxing, tokens, secrets; report a vulnerability: [SECURITY.md](SECURITY.md) |

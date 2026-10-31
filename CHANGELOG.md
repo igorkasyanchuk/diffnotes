@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-31
+
+### Added
+
+- **The live demo without an account**: `/demo` shows the demo pull request's notes, summary, deploy card and files to
+  anyone (`GET /api/demo`, and its files): what reviewers read, before any setup. It is only ever a PR whose fields,
+  notes and files are all a super admin's, as before.
+- **A prebuilt image**: `ghcr.io/igorkasyanchuk/diffnotes` (`:latest` and `:X.Y.Z`, amd64 and arm64), published by CI
+  for every release tag. CI (`.github/workflows/ci.yml`) runs typecheck, tests with the coverage gate and the build on
+  every push and pull request.
+- `/api/me` tells signed-out visitors the server's retention and per-account limits; the landing page and `/privacy`
+  show them.
+
+### Changed
+
+- **10,000 pull requests per account** by default (`MAX_PULLS`, was 1,000).
+- **Copy for launch**: the landing page leads with the account and the extension (the agent's command comes from
+  /welcome with its token), says how DiffNotes differs from review bots, who runs diffnotes.dev and its limits, the
+  prerequisites (`gh` / `glab`), and one answer on browsers (Chrome, Edge, Brave, Arc; Firefox and Safari as developer
+  installs). Self-hosting is one `docker run` of the image. The footer, README, install docs and the store listing text
+  match; a diffnotes.dev user who forgot a password is told what to do there.
+- **Privacy**: tokens are in the extension's own storage (not `chrome.storage.local`), who runs diffnotes.dev and where
+  its data lives, the server's actual retention, and the public demo.
+
 ## [1.7.0] - 2026-10-31
 
 ### Changed
@@ -275,7 +299,8 @@ First tagged release; until now DiffNotes was known as Reviews42.
 - The skill and the MCP tools forbid secrets and private data in notes, screenshots and recordings.
 - Removing a repository is called **delete** and says what goes with it.
 
-[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/igorkasyanchuk/diffnotes/compare/v1.5.0...v1.6.0

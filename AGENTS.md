@@ -26,7 +26,8 @@ skill/diffnotes/  the agent skill, served at /skill/SKILL.md with {{HOST}}, {{VE
 .diffnotes.yml    this repository's own annotation rules, which the skill reads from a PR's base branch
 extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on GitHub, GitLab and Bitbucket diffs:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
-Dockerfile        image; docker-entrypoint.sh gives /data to `node` and drops root. docker-compose.yml, render.yaml, fly.toml: deploy templates
+Dockerfile        image (ghcr.io/igorkasyanchuk/diffnotes, published by .github/workflows/ci.yml for each vX.Y.Z tag; CI also runs the checks below
+                  on every push); docker-entrypoint.sh gives /data to `node` and drops root. docker-compose.yml, render.yaml, fly.toml: deploy templates
 SECURITY.md       how to report a vulnerability (GitHub private advisories)
 CHANGELOG.md      one version for server, web, extension (package.json + extension/manifest.json), tagged vX.Y.Z
 ```
@@ -61,7 +62,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
   into a command: a branch can be named `x$(…)`. The skill never fetches and follows instructions on its own. A new env var:
   a row in docs/install.md's Environment table (the one reference) and a line in docker-compose.yml and the templates.
 - A PR's own fields (title, `head_sha`, summary, deploy card, preview, stack) are its latest upload's; `fields_by` says
-  whether one person wrote them all (the live demo, `DEMO_PR`, shows only a PR whose fields and notes are all a super admin's).
+  whether one person wrote them all (the live demo, `DEMO_PR`, shows only a PR whose fields and notes are all a super admin's;
+  it is public: `/api/demo` and its files answer signed-out visitors).
 - Repositories: `owner/name` = GitHub, `host/path` = GitLab (any host but bitbucket.org) or Bitbucket; `repoName()`
   (app.ts) normalizes URLs and clone addresses, the web app's `prUrl()` builds links back. Unique per account (not
   server-wide): always look names up within the caller's accounts.

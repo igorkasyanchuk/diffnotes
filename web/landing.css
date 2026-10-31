@@ -54,3 +54,8 @@
 .lp-soon b { color: var(--muted); font-weight: 600; }
 .lp-end { margin: 48px auto 8px; max-width: 620px; text-align: center; }
 .lp-end .btn { padding: 10px 20px; font-size: 14px; margin: 4px; }
+/* the difference from review bots, in one paragraph between the walkthrough and the benefits */
+.lp-notbot { max-width: 760px; margin: 40px auto 8px; padding: 18px 22px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--panel); }
+.lp-notbot h2 { margin-top: 0; }
+.lp-hosted { margin-top: 10px; }
+.demo-pull { margin: 20px 0 32px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }

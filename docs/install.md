@@ -7,13 +7,15 @@ DiffNotes is one Node 24 process with a SQLite database and an uploads folder, s
 ## Docker
 
 ```bash
-git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
-docker build -t diffnotes .
 docker run -d --name diffnotes -p 3000:3000 -v diffnotes:/data \
   -e ADMIN_EMAIL=you@company.com \
   -e PUBLIC_URL=https://reviews.example.com \
-  diffnotes
+  ghcr.io/igorkasyanchuk/diffnotes
 ```
+
+The image is `ghcr.io/igorkasyanchuk/diffnotes` for `linux/amd64` and `linux/arm64`: `:latest`, or a release such as
+`:1.7.1` to pin one. To build it yourself instead: `git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes
+&& docker build -t diffnotes .` and run `diffnotes`.
 
 Or with Docker Compose: edit `PUBLIC_URL` and `ADMIN_EMAIL` in [`docker-compose.yml`](../docker-compose.yml) (every
 other variable is listed there, commented out), then `docker compose up -d`.
@@ -89,7 +91,7 @@ This table is the one reference for configuration: everything is an environment 
 | `MAX_PULL_MB` | `20` | all files of one PR |
 | `MAX_ANNOTATIONS` | `500` | notes per PR |
 | `MAX_BODY_KB` | `1024` | JSON request bodies, and the notes JSON (`payload`) of a multipart upload or of MCP's `upload_notes` |
-| `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `1000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
+| `MAX_ACCOUNT_MB` / `MAX_PULLS` | `1024` / `10000` | per account: files of all its PRs / PRs with notes (expired ones don't count) |
 | `MAX_ACCOUNTS` | `10` | accounts one user may own (with `ALLOW_SIGNUP=1`, each one is more quota) |
 | `MIN_FREE_DISK_MB` | `100` | uploads with notes or files get `507` once the data volume (database, and files on disk storage) would have less free space (an empty one, which only removes yours, passes) |
 | **Security** | | |

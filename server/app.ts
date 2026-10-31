@@ -29,7 +29,7 @@ const MAX_BODY = limit('MAX_BODY_KB', 1024) * 1024
 const MAX_ANNOTATIONS = limit('MAX_ANNOTATIONS', 500) // per pull request
 const RISKS = ['low', 'medium', 'high'] // an annotation's optional risk: where reviewers should look hardest
 const MAX_ACCOUNT = limit('MAX_ACCOUNT_MB', 1024) * MB // files of all of an account's pull requests
-const MAX_PULLS = limit('MAX_PULLS', 1000) // live pull requests per account
+const MAX_PULLS = limit('MAX_PULLS', 10_000) // live pull requests per account
 const MAX_ACCOUNTS = limit('MAX_ACCOUNTS', 10) // accounts one user owns: with open sign-up, each one more quota
 const MIN_FREE_DISK = limit('MIN_FREE_DISK_MB', 100) * MB // uploads stop before the data volume is full
 const INVITE_DAYS = 7
@@ -358,12 +358,21 @@ const tokenCount = (userId: string) => (db.prepare('select count(*) as n from to
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
   const d = demoPull()
-  const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null }
+  // what the public pages say about this server: retention and the per-account limits (privacy, landing)
+  const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null,
+    retention_days: RETENTION_DAYS, limits: { account_mb: MAX_ACCOUNT / MB, pulls: MAX_PULLS, file_mb: MAX_FILE / MB, video_mb: MAX_VIDEO / MB } }
   if (!user) return c.json({ user: null, ...signIn })
   const u = db.prepare('select password, agent_at, extension_at, seen_at, notes_at from users where id = ?').get(user.id) as Record<string, string | null>
   // the setup checklist (/welcome): what this user has done so far (kept when their notes expire or are removed)
   const setup = { extension: !!u.extension_at, seen: !!u.seen_at, agent: !!u.agent_at, notes: !!u.notes_at }
   return c.json({ user, accounts: accountsOf(user.id), has_password: !!u.password, setup, ...signIn })
+})
+
+// The live demo (DEMO_PR), readable by anyone, signed in or not: /demo shows it without an account. It is only ever a PR
+// whose fields, notes and files are all a super admin's (demoPull), so nothing a team wrote turns public.
+app.get('/api/demo', (c) => {
+  const d = demoPull()
+  return d ? c.json(pullOut(d, { id: '', email: '', name: '', admin: 0 } as User)) : c.json({ error: 'No live demo on this server' }, 404)
 })
 
 // --- invitations: the way in besides the first admin and GitHub sign-in
@@ -1341,7 +1350,8 @@ export const DEMO_CSP = "sandbox allow-scripts; default-src 'none'; script-src '
 app.get('/files/:pull/:name', async (c) => {
   const user = await currentUser(c)
   const p = db.prepare(`${PULL_SELECT} where p.id = ?`).get(c.req.param('pull')) as Pull | undefined
-  if (!user || !p || !(isMember(p.account_id, user) || demoPull()?.id === p.id)) return c.notFound()
+  // the live demo's files are public like its notes (/api/demo); every other file takes a member
+  if (!p || !(demoPull()?.id === p.id || user && isMember(p.account_id, user))) return c.notFound()
   const f = db.prepare('select name, type, backend from files where pull_id = ? and name = ?').get(p.id, safeName(c.req.param('name'))) as
     { name: string; type: string; backend: string } | undefined
   const data = f && await store.get(f.backend, p.id, f.name)

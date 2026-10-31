@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Demo } from './demo.tsx'
 import './landing.css'
 
@@ -22,8 +23,8 @@ const BENEFITS: [string, string][] = [
   ['diagrams in the diff', 'A flow or a state change drawn right above the code that implements it, from a Mermaid flowchart the agent writes. No library, no network.'],
   ['notes that stay true', 'Before every upload the agent checks each note against the current diff; after new commits it fixes or drops stale ones, and reviewers see what changed since their last visit.'],
   ['zero noise in the PR', 'Nothing is posted to the PR. No bot comments, no notification spam; the notes live beside the diff, only for your team.'],
-  ['your server, your data', 'Run your own server and code context never leaves your infrastructure (or try it on diffnotes.dev). Notes expire on their own (after a year by default).'],
-  ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome and Firefox; connect several servers in one browser for different teams or clients.'],
+  ['your server, your data', 'Use the free server at diffnotes.dev, or run your own and code context never leaves your infrastructure. Notes expire on their own (after a year by default).'],
+  ['any agent, any team', 'Claude Code, Codex, Cursor and other Agent Skills tools, or any MCP client. Chrome, Edge, Brave and Arc; connect several servers in one browser for different teams or clients.'],
 ]
 
 // what to ask a coding agent once the skill is installed (landing and settings, with a copy button)
@@ -37,7 +38,10 @@ const ChromeLogo = () => <svg viewBox="0 0 48 48" width="18" height="18" aria-hi
 export const AddToChrome = ({ primary }: { primary?: boolean }) =>
   <a href={STORE} className={`btn chrome${primary ? ' primary' : ''}`}><ChromeLogo />add to Chrome</a>
 
-export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup: boolean; demo: boolean }) {
+// what /api/me says about this server: how long notes live and the per-account limits (the hosted server's box)
+export type ServerInfo = { retention_days: number; limits: { account_mb: number; pulls: number; file_mb: number; video_mb: number } }
+
+export function Landing({ signedIn, signup, demo, info }: { signedIn: boolean; signup: boolean; demo: boolean; info?: ServerInfo }) {
   const origin = location.origin
   // the server adds Umami to this page only when it is configured (UMAMI_SCRIPT); one page view, nothing after.
   // The script is deferred and from another host: it can still be loading when this runs, so wait for it then.
@@ -51,19 +55,23 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
     <section className="lp-hero">
       <div className="lp-tags"><span>free</span><span>hosted or self-hosted</span><span>open source · MIT</span><span>GitHub · GitLab · Bitbucket</span></div>
       <h1 className="lp-h1">Your agent explains the pull request. <em>Your team reads it in the diff.</em></h1>
-      <div className="lp-quick">
-        <Code prompt text={`curl -fsSL ${origin}/install.sh | sh`} />
-        <AddToChrome primary />
-      </div>
-      <p className="hint">One command installs the skill for Claude Code, Codex, Cursor and other Agent Skills tools.</p>
-      <p className="lp-soon">extension for Chrome, Edge, Brave and Arc · <b>Firefox and Safari coming soon</b></p>
-      {demo && <p><a href="/demo" className="lp-demo"><span className="pulse" aria-hidden="true" />see it on a live pull request, in 30 seconds →</a></p>}
+      <div className="lp-quick">{cta}<AddToChrome /></div>
+      <p className="hint">{signup && !signedIn ? 'A free account with GitHub, then' : 'Then'} one command sets up Claude Code, Codex, Cursor or any Agent Skills tool, and the extension connects in one click.</p>
+      <p className="lp-soon">extension for Chrome, Edge, Brave and Arc · <b>Firefox and Safari: developer install for now</b></p>
+      {demo && <p><a href="/demo" className="lp-demo"><span className="pulse" aria-hidden="true" />read a real annotated pull request, no sign-up →</a></p>}
     </section>
     <Demo />
     <section className="lp-after">
       <p className="lp-lead">A coding agent attaches plain-language notes, screenshots and live demos to the lines it changed. Reviewers see them
         right inside the diff on GitHub, GitLab or Bitbucket, through a small browser extension. Nothing is posted to the PR.</p>
       <p>{cta} <a href="#install" className="btn">start in 5 minutes</a></p>
+    </section>
+
+    <section className="lp-notbot">
+      <h2>not another review bot</h2>
+      <p>Review bots read your diff from the outside and post their opinions as PR comments. DiffNotes is the other side: the agent
+        that <b>wrote</b> the code explains what it changed and why, while it still knows the intent, the trade-offs and what to test.
+        Nothing is posted to the pull request, and it works next to any review bot you already use.</p>
     </section>
 
     <h2>why developers like it</h2>
@@ -75,7 +83,11 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
     <section className="lp-path" id="install">
       <div className="lp-path-head"><span className="lp-path-tag">option 1 · on {location.host}</span>
         <h2>start in 5 minutes</h2>
-        <p className="hint">Use this server: nothing to install on your side but the skill and the extension.</p></div>
+        <p className="hint">Use this server: nothing to install on your side but the skill and the extension.</p>
+        {origin === MAIN && info && <p className="hint lp-hosted">diffnotes.dev is run by Igor Kasyanchuk, who wrote DiffNotes. It is free, with
+          no paid plan. Notes and files are deleted {info.retention_days} days after a pull request's last upload; each account holds up to{' '}
+          {info.limits.pulls.toLocaleString('en-US')} pull requests and {info.limits.account_mb >= 1024 ? `${info.limits.account_mb / 1024} GB` : `${info.limits.account_mb} MB`} of files.
+          For code that must not leave your company, self-host it (option 2). <a href="/privacy">Privacy</a>.</p>}</div>
     <ol className="lp-install">
       <li>
         <div className="lp-step"><span className="lp-time">~30 s</span><b>{signedIn ? 'you are signed in' : signup ? 'create a free account' : 'sign in'}</b></div>
@@ -95,7 +107,8 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       </li>
       <li>
         <div className="lp-step"><span className="lp-time">~1 min</span><b>ask your agent to explain a PR</b></div>
-        <p className="hint">On a branch with an open pull request (GitHub, GitLab or Bitbucket). Then open the PR's “Files changed”.</p>
+        <p className="hint">On a pushed branch with an open pull request (GitHub, GitLab or Bitbucket). The agent finds it with <code>gh</code> or
+          <code> glab</code>, or asks you for its address. Then open the PR's “Files changed”.</p>
         <Code wrap text={AGENT_PROMPT} />
       </li>
     </ol>
@@ -107,7 +120,7 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
       <div className="lp-path-head"><span className="lp-path-tag">option 2 · your own server</span>
         <h2>self-host it</h2>
         <p className="hint">Keep code context on your own infrastructure. One container with a volume, free and open source (MIT), also for commercial use.</p></div>
-    <Code prompt text={'git clone https://github.com/igorkasyanchuk/diffnotes && cd diffnotes && docker build -t diffnotes . \\\n  && docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com diffnotes'} />
+    <Code prompt text={'docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com ghcr.io/igorkasyanchuk/diffnotes'} />
     <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps of option 1 with your server's address.</p>
     </section>
     {/* the closing call to action: centred, on its own, after both ways in */}
@@ -119,30 +132,29 @@ export function Landing({ signedIn, signup, demo }: { signedIn: boolean; signup:
 }
 
 // the live demo (DEMO_PR on the server): what a visitor does to see real notes on a real pull request
-export function DemoPage({ signedIn, github, demo }: { signedIn: boolean; github: boolean; demo: { url: string; label: string } | null }) {
+export function DemoPage({ signedIn, github, demo, children }: { signedIn: boolean; github: boolean; demo: { url: string; label: string } | null; children?: ReactNode }) {
   if (!demo) return <div className="narrow"><h1>live demo</h1><p className="hint">This server has no live demo.</p></div>
   return <div className="lp-page">
     <h1>live demo</h1>
-    <p className="lp-lead">A real pull request in DiffNotes' own repository, explained by Claude Code with the DiffNotes skill: plain-language
-      notes on the changed lines, risk levels, before / after screenshots and a demo you can click. Four steps, about a minute:</p>
+    <p className="lp-lead">A real pull request in DiffNotes' own repository, explained by Claude Code with the DiffNotes skill: a summary,
+      where to look hardest, the deploy steps, a note on each changed block, before / after screenshots and a demo you can click.
+      Below is what its reviewers read; with the extension it sits right next to the changed lines on GitHub.</p>
+    <p><a href={demo.url} className="btn" target="_blank" rel="noreferrer">{demo.label} on GitHub ↗</a></p>
+    {children}
+    <h2>see it inside GitHub's diff</h2>
     <ol className="lp-install">
-      <li><div className="lp-step"><b>add the browser extension</b></div>
-        <p><AddToChrome primary /> <span className="hint">or Edge, Brave, Arc; Firefox: <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/extension.md#firefox">load it from the repo</a></span></p></li>
       <li><div className="lp-step"><b>{signedIn ? 'you are signed in' : 'make a free account'}</b></div>
         {signedIn ? <p className="hint">Good, nothing to do here.</p>
-          : github ? <p><a href="/auth/github?next=/demo" className="btn">continue with GitHub</a> <span className="hint">one click, no password</span></p>
+          : github ? <p><a href="/auth/github?next=/welcome" className="btn primary">continue with GitHub</a> <span className="hint">one click, no password</span></p>
           : <p className="hint">Ask this server's admin for an invitation, then <a href="/login">sign in</a>.</p>}</li>
-      <li><div className="lp-step"><b>connect the extension</b></div>
-        <p className="hint">On <a href="/settings#tokens">settings</a> make a token. Open the extension's popup (pin it from the puzzle icon), enter this
-          server and the token, press <b>Connect</b> and allow access.</p>
-        <Code text={location.origin} /></li>
+      <li><div className="lp-step"><b>add the browser extension</b></div>
+        <p><AddToChrome primary={signedIn} /> <span className="hint">Edge, Brave and Arc too. It opens a tab by itself: press <b>Sign in and connect</b>, then <b>allow</b>.</span></p></li>
       <li><div className="lp-step"><b>open the pull request</b></div>
-        <p><a href={demo.url} className="btn primary" target="_blank" rel="noreferrer">{demo.label} →</a></p>
+        <p><a href={demo.url} className="btn" target="_blank" rel="noreferrer">{demo.label} →</a></p>
         <p className="hint">The summary box sits above the files and the notes next to the changed lines. Press <kbd>?</kbd> for the keys:
           <kbd>j</kbd> / <kbd>k</kbd> jump between notes, <kbd>n</kbd> hides them.</p></li>
     </ol>
-    <p className="hint">The demo's notes are readable by everyone signed in to this server. Your own pull requests' notes are visible only
-      to your team.</p>
+    <p className="hint">This demo is public. Your own pull requests' notes are visible only to your team.</p>
   </div>
 }
 

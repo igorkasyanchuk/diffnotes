@@ -31,11 +31,11 @@ What to paste into the Chrome Web Store developer dashboard for `extension/`. Pa
 > • keyboard: j / k between notes, n to hide them, ? for the keys
 > • authors and admins remove notes right in the diff
 >
-> Nothing is posted to the pull request: no bot comments, no notifications. Notes live on a DiffNotes server you or your
-> company runs (free, open source, MIT) and are visible only to your team.
+> Nothing is posted to the pull request: no bot comments, no notifications. Notes live on a DiffNotes server, the free
+> one at diffnotes.dev or one your company runs (free, open source, MIT), and are visible only to your team.
 >
-> Setup: install DiffNotes on your server (one Docker container), make a token on its Settings page, then open this
-> extension's popup and connect with the server address and the token. You can connect several servers.
+> Setup: sign up at diffnotes.dev (or your own server), add this extension, and press Sign in and connect in the tab it
+> opens, then allow. No token to copy. You can connect several servers.
 >
 > Source and docs: https://github.com/igorkasyanchuk/diffnotes
 

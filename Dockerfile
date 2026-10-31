@@ -7,6 +7,10 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:24.15.0-alpine
 RUN apk add --no-cache su-exec
+# ghcr.io/igorkasyanchuk/diffnotes: these link the package to its repository and say what it is
+LABEL org.opencontainers.image.source=https://github.com/igorkasyanchuk/diffnotes \
+      org.opencontainers.image.description="DiffNotes: your coding agent's notes on pull requests, read in the diff" \
+      org.opencontainers.image.licenses=MIT
 WORKDIR /app
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 COPY --from=build /app/node_modules ./node_modules

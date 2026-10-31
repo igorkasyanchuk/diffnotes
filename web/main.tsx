@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
 import { AGENT_PROMPT, AddToChrome, BadgePage, Code, DemoPage, Landing } from './landing.tsx'
+import type { ServerInfo } from './landing.tsx'
 import { version } from '../package.json'
 
 declare global {
@@ -202,7 +203,7 @@ function useSubmit(fn: () => Promise<unknown>, done?: string) {
   return { submit, error, busy }
 }
 
-type SignIn = { github: boolean; signup: boolean; demo: { repository: string; number: number } | null } // what /api/me says this server offers besides a password
+type SignIn = { github: boolean; signup: boolean; demo: { repository: string; number: number } | null } & Partial<ServerInfo> // what /api/me says this server offers besides a password
 type Setup = { extension: boolean; seen: boolean; agent: boolean; notes: boolean }
 type Me = SignIn & { user: User; accounts: { id: string; name: string; role: string }[]; has_password: boolean; setup: Setup }
 
@@ -210,7 +211,7 @@ const Brand = () => <Link to="/" className="brand"><img src="/icon.svg" alt="" /
 const SOURCE = 'https://github.com/igorkasyanchuk/diffnotes'
 const GitHubMark = ({ size = 16 }: { size?: number }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
 const Footer = () => <footer className="foot">
-  <span>diffnotes {version} · self-hosted PR annotations · MIT</span>
+  <span>diffnotes {version} · PR notes from your coding agent · MIT</span>
   <a href="/skill/SKILL.md">agent skill</a>
   <Link to="/demo">demo</Link>
   <Link to="/badge">badge</Link>
@@ -335,7 +336,9 @@ function Login({ sign }: { sign: SignIn }) {
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>{busy ? 'signing in…' : 'sign in'}</button>
       <p className="hint">{!sign.signup && <>No account? Ask a teammate for an invitation link.<br /></>}
-        Forgot your password? Your server admin runs <code>npm run reset-password</code>.</p>
+        {location.origin === 'https://diffnotes.dev'
+          ? <>Forgot your password? Signed up with GitHub: use continue with GitHub. Otherwise <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">open an issue</a>.</>
+          : <>Forgot your password? Your server admin runs <code>npm run reset-password</code>.</>}</p>
     </form>
   </div>
 }
@@ -403,14 +406,25 @@ function Invite({ token, sign }: { token: string; sign: SignIn }) {
 }
 
 // the privacy policy (also the Chrome Web Store listing's): what the extension and a DiffNotes server keep, and who sees it
-function Privacy() {
+function Privacy({ retention }: { retention?: number }) {
   return <div style={{ maxWidth: 680 }}>
     <h1>privacy</h1>
-    <p className="hint">DiffNotes browser extension and DiffNotes servers. Last updated October 2026.</p>
+    <p className="hint">DiffNotes browser extension and DiffNotes servers. Last updated 31 October 2026.</p>
+    {location.origin === 'https://diffnotes.dev' && <>
+      <h2>diffnotes.dev</h2>
+      <ul>
+        <li>diffnotes.dev is run by Igor Kasyanchuk, the author of DiffNotes, as a free service with no paid plan, ads or tracking.</li>
+        <li>It runs on a rented server (Hostinger) behind Cloudflare; uploaded files are kept in Backblaze B2. Notes and files are
+          deleted {retention ?? 365} days after a pull request's last upload, or right away when you delete them, your repository, your account or your user.</li>
+        <li>Notes can quote your code (a changed line's text, so a note follows it after a push) and show screenshots: for code that
+          must not leave your company, run your own server instead.</li>
+      </ul>
+    </>}
     <h2>The browser extension</h2>
     <ul>
-      <li>It stores, in your browser only (<code>chrome.storage.local</code>), the addresses of the DiffNotes servers you connect and the
-        access token for each (pasted, or made for it when you press Sign in and connect and allow it on the server), plus which notes you folded, whether notes are switched off, how notes look, and, for pull requests with notes you
+      <li>It stores, in your browser only, the addresses of the DiffNotes servers you connect (<code>chrome.storage.local</code>) and the
+        access token for each (made for it when you press Sign in and connect and allow it on the server, or pasted), kept in the
+        extension's own storage, which web pages and the extension's scripts on GitHub, GitLab and Bitbucket can't read. It also keeps which notes you folded, whether notes are switched off, how notes look, and, for pull requests with notes you
         opened in the last 60 days, their repository and number with hashes of the notes it showed, to mark the ones changed since. Removing a server in its popup deletes its token, and on the server too when the extension made it.</li>
       <li>It talks only to the servers you connect. On a GitHub, GitLab or Bitbucket pull request page it sends that server the
         repository and pull request number, with your token, to fetch the notes your team uploaded, and it downloads their attached files.
@@ -422,10 +436,10 @@ function Privacy() {
     <h2>A DiffNotes server</h2>
     <ul>
       <li>Each server is run by whoever installed it (your company, your team, you). It keeps user accounts (email, name, password hash, and the GitHub user id when you sign in with GitHub; the server then fetches your GitHub photo itself, to show to your teammates),
-        sessions, token hashes, and the notes and files your agents upload, which are deleted after the retention period (365 days by default).
+        sessions and tokens (as hashes only), and the notes and files your agents upload, which are deleted after the retention period ({retention ?? 365} days on this server).
         Its operator decides where it runs and who can access it.</li>
       <li>Notes and files are visible only to members of the account that owns the repository, except a live-demo pull request
-        the server's operator may set (<code>DEMO_PR</code>), readable by everyone signed in to that server.</li>
+        the server's operator may set (<code>DEMO_PR</code>), written by the operator and readable by anyone on <code>/demo</code>.</li>
       <li>The app's pages load nothing from third parties. The operator may enable Umami analytics on the landing page (<code>/</code>) only:
         one anonymous page view, never on the app's pages. Errors may be reported to the operator's own error tracker with the route pattern only.</li>
     </ul>
@@ -799,6 +813,11 @@ function AccountSettings({ id, data, user, reload }: Omit<TabProps, 'admin'> & {
 
 function PullPage({ id }: { id: string }) {
   const { data, error } = useLoad<Pull>(`/api/pulls/${id}`)
+  if (error) return <p className="error">{error}</p>
+  return data ? <PullView data={data} id={id} /> : null
+}
+// A pull request's notes as a page: yours (/pulls/:id, with its delete button), or the live demo read only (/demo, no id)
+function PullView({ data, id }: { data: Pull; id?: string }) {
   // a note's link to another note (#note:path:line, markdown.js): scroll to it and flash it
   useEffect(() => {
     if (!data) return
@@ -816,8 +835,6 @@ function PullPage({ id }: { id: string }) {
     document.addEventListener('click', click)
     return () => document.removeEventListener('click', click)
   }, [data])
-  if (error) return <p className="error">{error}</p>
-  if (!data) return null
   const byFile = Map.groupBy(data.annotations, (a) => a.path)
   const order = ['high', 'medium', 'low']
   const risky = data.annotations.filter((a) => a.risk).sort((a, b) => order.indexOf(a.risk!) - order.indexOf(b.risk!))
@@ -826,7 +843,7 @@ function PullPage({ id }: { id: string }) {
     <h1>{data.title || 'untitled pull request'}</h1>
     {!!data.authors?.length && <p className="authors">notes by {data.authors.map((a, i) => <Author key={i} name={a.name} avatar={a.avatar} />)}</p>}
     <p><a className="btn primary" href={prUrl(data.repository, data.number)} target="_blank" rel="noreferrer">open on {forge(data.repository)} ↗</a>{' '}
-      {data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
+      {id && data.can_delete && <button className="danger" onClick={() => del(`/api/pulls/${id}`, () => go('/dashboard'),
         data.can_delete_all ? 'Delete all notes and files of this pull request? Reviewers stop seeing them in the diff.'
           : 'Delete your notes and files on this pull request? Teammates\' notes stay.')}>{data.can_delete_all ? 'delete notes' : 'delete my notes'}</button>}
       {data.preview && <>{' '}<a className="btn" href={data.preview} target="_blank" rel="noopener noreferrer">preview deploy ↗</a></>}</p>
@@ -858,6 +875,13 @@ function PullPage({ id }: { id: string }) {
       <div className="files">{data.files.map((f) => <Attachment key={f.name} f={f} />)}</div>
     </>}
   </>
+}
+
+// /demo: the live demo PR's notes, read only, for anyone (signed in or not): what a reviewer gets, before any setup
+function LiveDemo() {
+  const [data, setData] = useState<Pull | null>()
+  useEffect(() => { api<Pull>('/api/demo').then(setData, () => setData(null)) }, [])
+  return data ? <div className="demo-pull"><PullView data={data} /></div> : null
 }
 
 // The setup flow after joining or signing up, the same however you came: reading notes first (the extension, then
@@ -1215,7 +1239,7 @@ function App() {
   useEffect(() => {
     let live = true
     // a failed request keeps who we knew; on the very first load it falls back to signed out instead of a blank page
-    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup, demo: r.demo }); setMe(r.user ? r as Me : null) } },
+    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup, demo: r.demo, retention_days: r.retention_days, limits: r.limits }); setMe(r.user ? r as Me : null) } },
       () => { if (live) setMe((x) => x ?? null) })
     return () => { live = false }
   }, [path, n])
@@ -1235,9 +1259,9 @@ function App() {
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || path === '/connect' || APP_PATHS.test(path))
     return <PublicLayout signedIn={!!me} signup={sign.signup} demo={!!sign.demo}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
-      : path === '/privacy' ? <Privacy /> : path === '/docs' ? <Docs /> : path === '/badge' ? <BadgePage />
-      : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }} />
-      : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} />}<Toaster /></PublicLayout>
+      : path === '/privacy' ? <Privacy retention={sign.retention_days} /> : path === '/docs' ? <Docs /> : path === '/badge' ? <BadgePage />
+      : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }}><LiveDemo /></DemoPage>
+      : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} info={sign.limits && sign.retention_days ? { retention_days: sign.retention_days, limits: sign.limits } : undefined} />}<Toaster /></PublicLayout>
   }
   let page: ReactNode
   if (m(/^\/accounts\/([\w-]+)$/)) page = <Account key={path} id={m(/^\/accounts\/([\w-]+)$/)!} user={me.user} />
