@@ -26,8 +26,8 @@ skill/diffnotes/  the agent skill, served at /skill/SKILL.md with {{HOST}}, {{VE
 .diffnotes.yml    this repository's own annotation rules, which the skill reads from a PR's base branch
 extension/        manifest, demo.html (sandbox for .html demos), background (holds the tokens, asks every connected server), content (draws on GitHub, GitLab and Bitbucket diffs:
                   box above the diff, floating dock with a notes switch once it scrolls away), popup (servers list)
-Dockerfile        image (ghcr.io/igorkasyanchuk/diffnotes, published by .github/workflows/ci.yml for each vX.Y.Z tag; CI also runs the checks below
-                  on every push); docker-entrypoint.sh gives /data to `node` and drops root. docker-compose.yml, render.yaml, fly.toml: deploy templates
+Dockerfile        image (ghcr.io/igorkasyanchuk/diffnotes, pushed from the owner's machine with `npm run image` after each release:
+                  amd64 + arm64, :X.Y.Z and :latest; no CI on GitHub, the checks below run locally); docker-entrypoint.sh gives /data to `node` and drops root. docker-compose.yml, render.yaml, fly.toml: deploy templates
 SECURITY.md       how to report a vulnerability (GitHub private advisories)
 CHANGELOG.md      one version for server, web, extension (package.json + extension/manifest.json), tagged vX.Y.Z
 ```
@@ -84,4 +84,5 @@ npm test          # vitest, server/app.test.ts is one sequential story; edges.te
 npm run coverage  # server + extension/markdown.js, fails under 95% lines/statements/functions, 90% branches
 npm run typecheck
 npm run build
+npm run image     # after a release: build and push ghcr.io/igorkasyanchuk/diffnotes:<version> and :latest (docker login ghcr.io first)
 ```

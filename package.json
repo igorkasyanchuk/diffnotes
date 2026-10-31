@@ -11,6 +11,7 @@
     "dev": "npm run dev:server & vite",
     "dev:server": "PORT=3000 node --watch --experimental-strip-types --disable-warning=ExperimentalWarning server/index.ts",
     "build": "vite build",
+    "image": "docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/igorkasyanchuk/diffnotes:$npm_package_version -t ghcr.io/igorkasyanchuk/diffnotes:latest --push .",
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

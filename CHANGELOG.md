@@ -13,9 +13,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **The live demo without an account**: `/demo` shows the demo pull request's notes, summary, deploy card and files to
   anyone (`GET /api/demo`, and its files): what reviewers read, before any setup. It is only ever a PR whose fields,
   notes and files are all a super admin's, as before.
-- **A prebuilt image**: `ghcr.io/igorkasyanchuk/diffnotes` (`:latest` and `:X.Y.Z`, amd64 and arm64), published by CI
-  for every release tag. CI (`.github/workflows/ci.yml`) runs typecheck, tests with the coverage gate and the build on
-  every push and pull request.
+- **A prebuilt image**: `ghcr.io/igorkasyanchuk/diffnotes` (`:latest` and `:X.Y.Z`, amd64 and arm64), pushed with
+  `npm run image` for every release.
 - `/api/me` tells signed-out visitors the server's retention and per-account limits; the landing page and `/privacy`
   show them.
 
