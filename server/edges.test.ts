@@ -70,7 +70,30 @@ describe('pages', () => {
     expect(dash.data).not.toContain('stats.example')
     expect(dash.res.headers.get('content-security-policy')).not.toContain('stats.example')
     expect(dash.res.headers.get('content-security-policy')).toContain("media-src 'self';") // notes' screen recordings
-    expect((await call('/index.html')).status).toBe(200)
+    expect((await call('/index.html')).status).toBe(301)
+    // an address the app doesn't have: the page (it says "not found") with a real 404, never indexed
+    const missing = await call('/pricing')
+    expect(missing.status).toBe(404)
+    expect(missing.res.headers.get('x-robots-tag')).toBe('noindex')
+    expect((await call('/accounts/x/y')).status).toBe(404)
+    expect((await call('/invite/abc')).status).toBe(200)
+    expect((await call('/terms')).data).toContain('<title>License &amp; terms · DiffNotes</title>')
+    // with a build, the public pages carry their prerendered HTML (web/ssr.tsx); the app pages don't
+    if (built && fs.existsSync(path.resolve(import.meta.dirname, '../dist-ssr/ssr.js'))) {
+      expect(home.data).toContain('not another review bot')
+      expect(home.data).toContain('dn.example</span>') // "option 1 · on <host>": the stand-in `location` is this server's
+      expect((await call('/docs')).data).toContain('repository rules')
+      expect((await call('/terms')).data).toContain('MIT license')
+      expect(dash.data).not.toContain('not another review bot')
+      // a page that can't render (PUBLIC_URL without its scheme) keeps index.html's text: never a 500
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+      process.env.PUBLIC_URL = 'dn.example'
+      const bad = await call('/badge')
+      process.env.PUBLIC_URL = 'https://dn.example/'
+      quiet.mockRestore()
+      expect(bad.status).toBe(200)
+      expect(bad.data).toContain('Your agent explains the pull request.')
+    }
     expect((await call('/missing.js')).status).toBe(404)
     expect((await call('/files/nope')).status).toBe(404)
     expect((await call('/.well-known/oauth-authorization-server')).status).toBe(404) // never the app's HTML

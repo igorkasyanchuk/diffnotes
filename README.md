@@ -5,8 +5,13 @@
 <p align="center"><b>Your coding agent explains the pull request. Your team reads it in the diff.</b><br>
 Free · hosted at diffnotes.dev or self-hosted · open source (MIT) · GitHub, GitLab, Bitbucket</p>
 
-<p align="center"><a href="https://diffnotes.dev"><img src="https://diffnotes.dev/badge.svg" alt="Reviewed with DiffNotes"></a>
-· <a href="https://diffnotes.dev/demo">live demo</a> · <a href="https://diffnotes.dev/badge">badge for your repo</a></p>
+<p align="center">
+<a href="https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd"><img src="https://img.shields.io/chrome-web-store/v/fmnbgmeahjhfakpcmhimjjjplimdiibd?label=Chrome%20extension" alt="Chrome Web Store"></a>
+<a href="https://github.com/igorkasyanchuk/diffnotes/pkgs/container/diffnotes"><img src="https://img.shields.io/badge/docker-ghcr.io-blue" alt="Docker image"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/igorkasyanchuk/diffnotes" alt="MIT license"></a>
+<a href="https://diffnotes.dev"><img src="https://diffnotes.dev/badge.svg" alt="Reviewed with DiffNotes"></a></p>
+
+<p align="center"><a href="https://diffnotes.dev"><b>diffnotes.dev</b></a> · <a href="https://diffnotes.dev/demo">live demo</a> · <a href="#quick-start">quick start</a> · <a href="#self-host">self-host</a> · <a href="https://diffnotes.dev/docs">docs</a></p>
 
 <p align="center"><a href="https://diffnotes.dev/demo"><img src="docs/images/demo.gif" alt="DiffNotes on a GitHub pull request: summary box, deploy steps, before/after screenshots, a live demo and line notes inside the diff" width="860"></a></p>
 
@@ -50,25 +55,31 @@ Free · hosted at diffnotes.dev or self-hosted · open source (MIT) · GitHub, G
 | <img src="docs/images/account-overview.png" alt="Account overview" width="420"> | **Accounts** with roles (owner, admin, member), invitations, repositories, storage per repository. |
 | <img src="docs/images/server-admin.png" alt="Server admin" width="420"> | **Super admin**: users, accounts, uploads, disk, and where files are stored. |
 
-## Install in 5 minutes
+## Quick start
+
+On the free server, about 3 minutes:
+
+1. **Sign in** at [diffnotes.dev](https://diffnotes.dev/login) with GitHub: you get a team account to invite people into.
+2. **Add the extension** from the [Chrome Web Store](https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd)
+   (Edge, Brave and Arc too). It opens a tab: **Sign in and connect** → **allow**. Nothing to copy.
+3. **Set up your agent** (Claude Code, Codex, Cursor, any Agent Skills tool): [diffnotes.dev/welcome](https://diffnotes.dev/welcome)
+   gives one command with your token in it. Run it once.
+4. On a branch with an open pull request, ask your agent: **“annotate this PR with diffnotes”**, then open the PR's *Files changed* tab.
+
+No skills in your agent? Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https://diffnotes.dev/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"` ([more](docs/skill.md#mcp-instead-of-the-skill)).
+
+## Self-host
+
+Code that must not leave your company: one container and a volume, on any Docker host.
 
 ```bash
-# 1. the server (any Docker host: a VPS, Coolify, Dokku…), or skip it and use https://diffnotes.dev
 docker run -d -p 3000:3000 -v diffnotes:/data \
-  -e ADMIN_EMAIL=you@company.com -e PUBLIC_URL=https://reviews.example.com ghcr.io/igorkasyanchuk/diffnotes
+  -e ADMIN_EMAIL=you@your-company.com -e PUBLIC_URL=https://diffnotes.your-company.com ghcr.io/igorkasyanchuk/diffnotes
 docker logs <container> | grep "first admin"        # the generated password
-#    or: docker compose up -d (docker-compose.yml), or Render / Fly.io / Railway / Coolify: docs/deploy.md
-
-# 2. the skill, on every developer machine (Claude Code, Codex, Cursor, other Agent Skills tools)
-#    /welcome on your server gives the one command with a token in it (saved to ~/.config/diffnotes/env):
-curl -fsSL https://reviews.example.com/install.sh | DIFFNOTES_SETUP_TOKEN=dn_… sh
-
-# 3. the extension: https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd
-#    it opens a tab on install: your server's address → Sign in and connect → allow
 ```
 
-Then ask your agent: **“annotate this PR with diffnotes”** and open the PR's *Files changed* tab. No skills in your agent?
-Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https://reviews.example.com/mcp --header "Authorization: Bearer $DIFFNOTES_TOKEN"` ([more](docs/skill.md#mcp-instead-of-the-skill)).
+Put it behind HTTPS, then follow the quick start with your server's address. Docker Compose, Coolify, Render, Fly.io and
+Railway: [deploy](docs/deploy.md); every setting: [install & configure](docs/install.md).
 
 ## Docs
 
@@ -84,8 +95,14 @@ Use the MCP endpoint instead: `claude mcp add --transport http diffnotes https:/
 | [API](docs/api.md) | The HTTP API the skill and the extension use |
 | [Development](AGENTS.md) | Stack, layout, commands, code rules |
 | [Changelog](CHANGELOG.md) | What changed in each version; releases are tagged `vX.Y.Z` |
-| [Privacy](https://diffnotes.dev/privacy) | What the extension and a server keep (every server also serves it at `/privacy`) |
+| [Privacy](https://diffnotes.dev/privacy) · [Terms](https://diffnotes.dev/terms) | What the extension and a server keep; the license and the hosted service's terms (every server serves both) |
+
+## Contributing
+
+Issues and pull requests are welcome: [open an issue](https://github.com/igorkasyanchuk/diffnotes/issues) for a bug or an
+idea, and see [AGENTS.md](AGENTS.md) for the stack and the checks to run. Security reports go privately: [SECURITY.md](SECURITY.md).
+If DiffNotes saves your reviewers time, a ⭐ helps other people find it.
 
 ## License
 
-[MIT](LICENSE): use it, change it, host it, sell it; keep the copyright notice.
+[MIT](LICENSE): use it, change it, host it, sell it; keep the copyright notice. Terms of the hosted service: [diffnotes.dev/terms](https://diffnotes.dev/terms).

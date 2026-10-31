@@ -2,8 +2,9 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const api = 'http://localhost:3000'
-export default defineConfig({
+export default defineConfig(({ isSsrBuild }) => ({
   plugins: [react()],
+  publicDir: isSsrBuild ? false : 'public', // dist-ssr holds only web/ssr.tsx's bundle
   server: { proxy: { '/api': api, '/files': api, '/skill': api, '/install.sh': api } },
   test: {
     include: ['server/**/*.test.ts'], environment: 'node',
@@ -14,4 +15,4 @@ export default defineConfig({
       reporter: ['text-summary', 'text'], thresholds: { lines: 95, statements: 95, functions: 95, branches: 90 },
     },
   },
-})
+}))

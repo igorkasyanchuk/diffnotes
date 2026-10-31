@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- The landing page, `/docs`, `/badge` and `/terms` are prerendered on the server: search engines and link previews read
+  the whole page, and it shows before the app's JavaScript runs.
+- `/terms`: the MIT license and, on diffnotes.dev, the free service's terms. The footer links it and a contact (GitHub issues).
+
+### Changed
+
+- An address the app doesn't have answers 404 with a “not found” page (it was the landing page with 200); `/index.html` redirects to `/`.
+- The self-host command on the landing page uses `diffnotes.your-company.com` and says which values to change.
+- README: quick start on diffnotes.dev first, then self-hosting; badges and a contributing section.
+
 ## [1.8.1] - 2026-10-31
 
 ### Fixed

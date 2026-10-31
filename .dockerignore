@@ -6,3 +6,4 @@ coverage
 .env*
 CLAUDE.local.md
 .claude
+dist-ssr

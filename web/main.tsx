@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../extension/markdown.js'
 import './styles.css'
-import { AGENT_PROMPT, AddToChrome, BadgePage, Code, DemoPage, Landing } from './landing.tsx'
+import { AGENT_PROMPT, AddToChrome, BadgePage, Code, DemoPage, Landing, MAIN } from './landing.tsx'
 import type { ServerInfo } from './landing.tsx'
 import { version } from '../package.json'
 
@@ -33,7 +33,7 @@ async function api<T = any>(url: string, body?: unknown, method = body === undef
   return data
 }
 // the landing page may carry the analytics script (app.ts page()): leave it with a full load, so it never runs in the app
-const tracked = !!document.querySelector('script[data-website-id]')
+const tracked = !!globalThis.document?.querySelector('script[data-website-id]') // undefined when web/ssr.tsx prerenders
 const go = (to: string) => {
   if (tracked) return location.assign(to)
   history.pushState(null, '', to)
@@ -217,11 +217,14 @@ const Footer = () => <footer className="foot">
   <Link to="/badge">badge</Link>
   <Link to="/docs">docs</Link>
   <Link to="/privacy">privacy</Link>
+  <Link to="/terms">terms</Link>
+  {/* a self-hosted server's users ask its operator, not this project */}
+  {location.origin === MAIN && <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">contact</a>}
   <a href={SOURCE} target="_blank" rel="noreferrer">source</a>
 </footer>
 
 // public pages: landing, sign in, invitations
-function PublicLayout({ signedIn, signup, demo, children }: { signedIn: boolean; signup: boolean; demo: boolean; children: ReactNode }) {
+export function PublicLayout({ signedIn, signup, demo, children }: { signedIn: boolean; signup: boolean; demo: boolean; children: ReactNode }) {
   return <>
     <header className="top">
       <Brand />
@@ -449,10 +452,41 @@ function Privacy({ retention }: { retention?: number }) {
   </div>
 }
 
+// the license and, on diffnotes.dev, the terms of the free service; a self-hosted server's operator sets its own
+export function Terms() {
+  return <div style={{ maxWidth: 680 }}>
+    <h1>license &amp; terms</h1>
+    <h2>The software</h2>
+    <p>DiffNotes (the server, the web app, the agent skill and the browser extension) is open source under the <a href={`${SOURCE}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT license</a>:
+      use it, change it and run it, also commercially, as is and without warranty.</p>
+    {location.origin === MAIN ? <>
+      <h2>diffnotes.dev</h2>
+      <ul>
+        <li>A free service run by Igor Kasyanchuk, the author of DiffNotes, provided as is: no warranty, no guaranteed uptime, and no
+          liability for lost notes or files. Keep anything you can't lose somewhere else.</li>
+        <li>Your notes and files stay yours; they are stored only to show them to your team, and deleted as the <Link to="/privacy">privacy</Link> page says.</li>
+        <li>Upload only what you may share with your team: no secrets, malware or unlawful content. Accounts that abuse the service may be removed.</li>
+        <li>Limits and these terms may change, and the service may end; a change that matters is announced here first. You can always
+          run your own server instead.</li>
+      </ul>
+    </> : <p>This server is run by its operator, whose terms apply to the notes and files on it.</p>}
+    <h2>Contact</h2>
+    <p style={{ overflowWrap: 'anywhere' }}>Open an issue at <a href={`${SOURCE}/issues`} target="_blank" rel="noreferrer">{SOURCE.replace('https://', '')}/issues</a>;
+      security reports privately, as <a href={`${SOURCE}/security/policy`} target="_blank" rel="noreferrer">SECURITY.md</a> says.</p>
+  </div>
+}
+
+// any other address: the server answers 404 with the page (app.ts PAGES), this says so
+const NotFound = () => <div className="narrow">
+  <h1>not found</h1>
+  <p className="hint">There is no page at <code>{location.pathname}</code>.</p>
+  <p><Link to="/" className="btn">home</Link> <Link to="/docs" className="btn">docs</Link></p>
+</div>
+
 // /docs: the short guide (setup, the agent, the diff, tips, when notes don't show); the full docs stay on GitHub
 const DOCS = `${SOURCE}/blob/main/docs`
 const KEYS: [string, string][] = [['j / k', 'next / previous note'], ['n', 'notes on / off'], ['o', 'open the current note’s attachment'], ['?', 'all the keys'], ['Esc', 'close a window']]
-function Docs() {
+export function Docs() {
   const origin = location.origin, own = origin !== 'https://diffnotes.dev'
   return <div className="docs">
     <h1>docs</h1>
@@ -1225,9 +1259,14 @@ function StorageSettings() {
 
 const APP_PATHS = /^\/(dashboard|welcome|settings|admin|accounts\/[\w-]+|pulls\/[\w-]+)$/
 
-function App() {
-  const [path, setPath] = useState(location.pathname), [me, setMe] = useState<Me | null>(), [n, setN] = useState(0)
-  const [sign, setSign] = useState<SignIn>({ github: false, signup: false, demo: null })
+type MeResponse = Me | (SignIn & { user: null })
+const signOf = (r: MeResponse): SignIn => ({ github: r.github, signup: r.signup, demo: r.demo, retention_days: r.retention_days, limits: r.limits })
+
+function App({ first }: { first: MeResponse | null }) {
+  const [path, setPath] = useState(location.pathname), [n, setN] = useState(0)
+  const [me, setMe] = useState<Me | null>(first?.user ? first as Me : null)
+  const [sign, setSign] = useState<SignIn>(first ? signOf(first) : { github: false, signup: false, demo: null })
+  const fetched = useRef(!!first) // the first /api/me came before the first render (below): no second request for it
   useEffect(() => {
     const on = () => setPath(location.pathname), change = () => setN((x) => x + 1)
     addEventListener('popstate', on)
@@ -1237,20 +1276,19 @@ function App() {
   // ponytail: refetched on every navigation and after every change (one small request), so the sidebar and token bar
   // also pick up what other people changed; `live` drops a response that a newer request already superseded
   useEffect(() => {
+    if (fetched.current) { fetched.current = false; return }
     let live = true
-    // a failed request keeps who we knew; on the very first load it falls back to signed out instead of a blank page
-    api<Me | (SignIn & { user: null })>('/api/me').then((r) => { if (live) { setSign({ github: r.github, signup: r.signup, demo: r.demo, retention_days: r.retention_days, limits: r.limits }); setMe(r.user ? r as Me : null) } },
-      () => { if (live) setMe((x) => x ?? null) })
+    // a failed request keeps who we knew (signed out when the very first one failed too)
+    api<MeResponse>('/api/me').then((r) => { if (live) { setSign(signOf(r)); setMe(r.user ? r as Me : null) } }, () => {})
     return () => { live = false }
   }, [path, n])
   // the tab's title; the server writes the public pages' own into the HTML too (app.ts PUBLIC_PAGES), for crawlers
   useEffect(() => {
     const t = ({ '/dashboard': 'dashboard', '/welcome': 'setup', '/settings': 'settings', '/admin': 'server admin', '/login': 'sign in',
-      '/demo': 'Live demo', '/connect': 'connect the extension', '/docs': 'Docs', '/badge': 'Badge', '/privacy': 'Privacy' } as Record<string, string>)[path] // the public ones as app.ts writes them
+      '/demo': 'Live demo', '/connect': 'connect the extension', '/docs': 'Docs', '/badge': 'Badge', '/privacy': 'Privacy', '/terms': 'License & terms' } as Record<string, string>)[path] // the public ones as app.ts writes them
       ?? (path.startsWith('/accounts/') ? 'account' : path.startsWith('/pulls/') ? 'pull request' : path.startsWith('/invite/') ? 'invitation' : '')
     document.title = t ? `${t} · DiffNotes` : 'DiffNotes · AI pull request notes, right in the diff'
   }, [path])
-  if (me === undefined) return null
   const m = (re: RegExp) => path.match(re)?.[1]
   // the extension's sign-in window: no sidebar, it is small
   if (me && path === '/connect') return <PublicLayout signedIn signup={sign.signup} demo={false}><Connect me={me} /><Toaster /></PublicLayout>
@@ -1259,8 +1297,9 @@ function App() {
     // signed out on an app page: sign in right there, so links from the skill, the extension and install.sh survive
     const login = !me && (path === '/login' || path === '/connect' || APP_PATHS.test(path))
     return <PublicLayout signedIn={!!me} signup={sign.signup} demo={!!sign.demo}>{invite ? <Invite token={invite} sign={sign} /> : login ? <Login sign={sign} />
-      : path === '/privacy' ? <Privacy retention={sign.retention_days} /> : path === '/docs' ? <Docs /> : path === '/badge' ? <BadgePage />
+      : path === '/privacy' ? <Privacy retention={sign.retention_days} /> : path === '/terms' ? <Terms /> : path === '/docs' ? <Docs /> : path === '/badge' ? <BadgePage />
       : path === '/demo' ? <DemoPage signedIn={!!me} github={sign.github} demo={sign.demo && { url: prUrl(sign.demo.repository, sign.demo.number), label: `${sign.demo.repository} #${sign.demo.number}` }}><LiveDemo /></DemoPage>
+      : path !== '/' ? <NotFound />
       : <Landing signedIn={!!me} signup={sign.signup} demo={!!sign.demo} info={sign.limits && sign.retention_days ? { retention_days: sign.retention_days, limits: sign.limits } : undefined} />}<Toaster /></PublicLayout>
   }
   let page: ReactNode
@@ -1273,4 +1312,7 @@ function App() {
   return <AppLayout me={me} path={path}>{page}<Gallery /><Toaster /></AppLayout>
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
+// /api/me before the first render: the server's prerendered page (web/ssr.tsx) stays until the app draws the same one,
+// instead of a blank frame in between. Not in Node, where web/ssr.tsx imports this file to prerender.
+if (globalThis.document) api<MeResponse>('/api/me').catch(() => null)
+  .then((first) => createRoot(document.getElementById('root')!).render(<StrictMode><App first={first} /></StrictMode>))

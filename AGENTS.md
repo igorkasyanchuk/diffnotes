@@ -21,6 +21,8 @@ docs/             user docs linked from README (install, deploy, skill, extensio
                   docs/store/ the Chrome Web Store listing and its images
 web/main.tsx      routing, public + app (sidebar) layouts, login, invite, privacy, dashboard, account, pull preview, settings
 web/landing.tsx   landing page (GitHub walkthrough, install), plus the Code/Copy block; its CSS is web/landing.css
+web/ssr.tsx       prerenders the public pages (/, /docs, /badge, /terms) for crawlers: `npm run build` bundles it to dist-ssr/,
+                  page() (app.ts) puts the HTML in #root; react is a runtime dependency for this
 skill/diffnotes/  the agent skill, served at /skill/SKILL.md with {{HOST}}, {{VERSION}} and the limits filled in; /skill/version
                   is the release plus a hash of that skill, which an installed copy compares with its own (it then asks the user to re-run install.sh)
 .diffnotes.yml    this repository's own annotation rules, which the skill reads from a PR's base branch
@@ -72,6 +74,8 @@ CHANGELOG.md      one version for server, web, extension (package.json + extensi
 - Bearer tokens authenticate only `/api/v1/*`, `/files/*` and `/mcp` (which takes nothing else, never the cookie); cookie writes need `Sec-Fetch-Site: same-origin`
   (or this site's `Origin`); only a Bearer header skips that check (a Basic auth proxy's doesn't). Invitations by email are listed only to a user whose email GitHub proved.
 - The web app's page gets `PAGE_CSP` and its `__ORIGIN__` filled (app.ts `page()`); keep index.html's SEO tags there.
+  A new web app address goes in both `App` (main.tsx) and `PAGES` (app.ts): any other path is a 404 that shows "not found".
+  Prerendered pages (web/ssr.tsx) render with no browser globals but `location`: guard `document`/`window` at module level.
 - Diff DOM, one adapter per host in `SITES` (`extension/content.js`); if notes stop appearing, re-check these first:
   GitHub React view (`h3[class*=file-name]`, `td[data-diff-side][data-line-number]`) and classic (`.file-header[data-path]`,
   `td.blob-num`); GitLab rapid diffs (`diff-file`, `rd-diff-file-copy-clipboard`, `td.rd-line-number[data-position] a[data-line-number]`);

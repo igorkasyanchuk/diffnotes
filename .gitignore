@@ -6,3 +6,4 @@ coverage
 *.zip
 CLAUDE.local.md
 .env*
+dist-ssr

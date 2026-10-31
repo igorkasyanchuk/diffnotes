@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { BlockList, isIP } from 'node:net'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -354,13 +355,14 @@ const accountsOf = (userId: string) => db.prepare(`select a.id, a.name, m.role f
   where m.user_id = ? order by a.created_at`).all(userId)
 const tokenCount = (userId: string) => (db.prepare('select count(*) as n from tokens where user_id = ?').get(userId) as { n: number }).n
 
+const serverInfo = () => ({ retention_days: RETENTION_DAYS,
+  limits: { account_mb: MAX_ACCOUNT / MB, pulls: MAX_PULLS, file_mb: MAX_FILE / MB, video_mb: MAX_VIDEO / MB } })
 // who is signed in, plus what the app layout shows around every page: their accounts and how far the setup steps are
 app.get('/api/me', async (c) => {
   const user = await currentUser(c)
   const d = demoPull()
   // what the public pages say about this server: retention and the per-account limits (privacy, landing)
-  const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null,
-    retention_days: RETENTION_DAYS, limits: { account_mb: MAX_ACCOUNT / MB, pulls: MAX_PULLS, file_mb: MAX_FILE / MB, video_mb: MAX_VIDEO / MB } }
+  const signIn = { github: !!github(), signup: signupOpen(), demo: d ? { repository: d.full_name, number: d.number } : null, ...serverInfo() }
   if (!user) return c.json({ user: null, ...signIn })
   const u = db.prepare('select password, agent_at, extension_at, seen_at, notes_at from users where id = ?').get(user.id) as Record<string, string | null>
   // the setup checklist (/welcome): what this user has done so far (kept when their notes expire or are removed)
@@ -1519,6 +1521,7 @@ const PUBLIC_PAGES: Record<string, { title: string; description: string }> = {
   '/demo': { title: 'Live demo · DiffNotes', description: 'See DiffNotes on a real pull request: plain-language notes, risk levels, before / after screenshots and a clickable demo, right inside the GitHub diff. About a minute.' },
   '/badge': { title: 'Badge · DiffNotes', description: 'A “Reviewed with DiffNotes” badge for your README and pull request template: tell contributors your pull requests come with notes in the diff.' },
   '/docs': { title: 'Docs · DiffNotes', description: 'Get started with DiffNotes in four steps, ask your agent for notes, read them in the diff, set repository rules, and fix notes that don’t show.' },
+  '/terms': { title: 'License &amp; terms · DiffNotes', description: 'DiffNotes is open source under the MIT license; the terms of the free hosted service at diffnotes.dev, and how to reach its author.' },
   '/privacy': { title: 'Privacy · DiffNotes', description: 'What the DiffNotes browser extension and a DiffNotes server keep, who sees it, and what is never sent anywhere.' },
 }
 const indexed = (p: string) => p === '/' || (p in PUBLIC_PAGES && (p !== '/demo' || !!demoName()))
@@ -1539,22 +1542,45 @@ const analytics = umami?.protocol === 'https:' && /^[\w-]+$/.test(UMAMI_ID)
       tag: `<script defer src="${umami.href.replace(/"/g, '%22')}" data-website-id="${UMAMI_ID}" data-auto-track="false"></script>` }
   : undefined
 let indexHtml: string | undefined
+// the web app's addresses (web/main.tsx App); any other gets the page with a 404, which it shows as "not found"
+const PAGES = /^\/(|login|connect|privacy|terms|docs|badge|demo|dashboard|welcome|settings|admin|(accounts|pulls|invite)\/[\w-]+)$/
+// the public pages prerendered for crawlers and link previews (web/ssr.tsx, built to dist-ssr/ by `npm run build`; without
+// it the page keeps index.html's short text). Cached per server state and origin (the request's, without PUBLIC_URL:
+// cleared past 100 entries, so made-up Host headers can't grow it).
+type Ssr = { pages: string[]; render: (path: string, s: { origin: string; signup: boolean; demo: boolean; info: ReturnType<typeof serverInfo> }) => string }
+// not built is fine; a bundle that fails to load (a module-level `document` in web/) is said, not silently dropped
+const ssr = await import(pathToFileURL(path.join(ROOT, 'dist-ssr/ssr.js')).href).then((m: Ssr) => m, (e) => {
+  if (e?.code !== 'ERR_MODULE_NOT_FOUND') console.error('prerendering off:', e)
+})
+const prerendered = new Map<string, string>()
+const prerender = (c: Context, p: string) => {
+  if (!ssr?.pages.includes(p)) return ''
+  const s = { origin: host(c), signup: signupOpen(), demo: !!demoPull(), info: serverInfo() }, key = JSON.stringify([p, s.origin, s.signup, s.demo])
+  if (prerendered.size > 100) prerendered.clear()
+  // a page that fails to render (a PUBLIC_URL without https://) keeps index.html's short text instead of a 500
+  if (!prerendered.has(key)) {
+    try { prerendered.set(key, ssr.render(p, s)) } catch (e) { console.error(`prerender ${p}:`, e); return '' }
+  }
+  return prerendered.get(key)!
+}
 const page = (c: Context) => {
   indexHtml ??= fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
-  const landing = c.req.path === '/' && analytics
+  const p = c.req.path, pre = prerender(c, p)
+  const landing = p === '/' && analytics
   c.header('content-security-policy', landing ? analytics.csp : PAGE_CSP)
   c.header('cache-control', 'no-cache')
-  const p = c.req.path, own = indexed(p) && PUBLIC_PAGES[p]
+  const own = indexed(p) && PUBLIC_PAGES[p]
   if (!indexed(p)) c.header('x-robots-tag', 'noindex')
   // an indexed page (sitemap.xml) other than / names itself: canonical, og:url, title and description
   const html = (own ? indexHtml.replace(/(rel="canonical" href|property="og:url" content)="__ORIGIN__\/"/g, `$1="__ORIGIN__${p}"`)
     .replace(/<title>[^<]*<\/title>/, `<title>${own.title}</title>`).replace(/(property="og:title" content=)"[^"]*"/, `$1"${own.title}"`)
     .replace(/(name="description" content=|property="og:description" content=)"[^"]*"/g, `$1"${own.description}"`) : indexHtml)
     .replaceAll('__ORIGIN__', host(c))
-  return c.html(landing ? html.replace('</head>', `${analytics.tag}\n</head>`) : html)
+    .replace(/(<div id="root">)[\s\S]*?<\/main><\/div>/, (all, root) => (pre ? `${root}${pre}</div>` : all))
+  return c.html(landing ? html.replace('</head>', `${analytics.tag}\n</head>`) : html, PAGES.test(p) ? 200 : 404)
 }
 app.get('/', page)
-app.get('/index.html', page)
+app.get('/index.html', (c) => c.redirect('/', 301))
 app.use('/assets/*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=31536000, immutable') }))
 app.use('*', serveStatic({ root: DIST, onFound: (_p, c) => c.header('cache-control', 'public, max-age=86400') }))
 // app routes get the page; a missing file or API route is a real 404, and so is /.well-known/ (an MCP client turned away

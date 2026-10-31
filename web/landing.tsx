@@ -31,7 +31,7 @@ const BENEFITS: [string, string][] = [
 export const AGENT_PROMPT = 'Use the diffnotes skill to annotate this pull request for its reviewers: explain each changed file and the non-obvious lines in plain language, flag the risky parts (auth, money, migrations), add before / after screenshots of UI changes, then upload the notes to DiffNotes.'
 
 export const STORE = 'https://chromewebstore.google.com/detail/fmnbgmeahjhfakpcmhimjjjplimdiibd'
-const MAIN = 'https://diffnotes.dev' // where the README badge links, from every server
+export const MAIN = 'https://diffnotes.dev' // where the README badge links, from every server
 const ChromeLogo = () => <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
   <path fill="#ea4335" d="M24 24 6.68 14A20 20 0 0 1 41.32 14z" /><path fill="#fbbc04" d="M24 24 41.32 14A20 20 0 0 1 24 44z" />
   <path fill="#34a853" d="M24 24 24 44A20 20 0 0 1 6.68 14z" /><circle cx="24" cy="24" r="9.5" fill="#fff" /><circle cx="24" cy="24" r="7.5" fill="#4285f4" /></svg>
@@ -120,8 +120,8 @@ export function Landing({ signedIn, signup, demo, info }: { signedIn: boolean; s
       <div className="lp-path-head"><span className="lp-path-tag">option 2 · your own server</span>
         <h2>self-host it</h2>
         <p className="hint">Keep code context on your own infrastructure. One container with a volume, free and open source (MIT), also for commercial use.</p></div>
-    <Code prompt text={'docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@company.com \\\n  -e PUBLIC_URL=https://reviews.example.com ghcr.io/igorkasyanchuk/diffnotes'} />
-    <p className="hint">Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps of option 1 with your server's address.</p>
+    <Code prompt text={'docker run -d -p 3000:3000 -v diffnotes:/data -e ADMIN_EMAIL=you@your-company.com \\\n  -e PUBLIC_URL=https://diffnotes.your-company.com ghcr.io/igorkasyanchuk/diffnotes'} />
+    <p className="hint">Change <code>ADMIN_EMAIL</code> to yours and <code>PUBLIC_URL</code> to the address it will have. Put it behind HTTPS (Caddy, Coolify, Cloudflare…): the extension connects only to https servers (and localhost). Or <code>docker compose up</code>, Coolify, Render, Fly.io, Railway or any Docker host: see the <a href="https://github.com/igorkasyanchuk/diffnotes/blob/main/docs/deploy.md">deploy guides</a>. The first admin password is printed in the logs. Then follow the steps of option 1 with your server's address.</p>
     </section>
     {/* the closing call to action: centred, on its own, after both ways in */}
     <div className="lp-end">
